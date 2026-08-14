@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+runtime/
+env-offline/
+
+# 运行态数据(面板更新/安装时不覆盖)
+data/
+*.db
+
+# 密钥与凭据
+.term_secret
+.term_token
+
+# 前端
+web/node_modules/
+web/dist/
+
+# 插件(由插件市场安装,不进主体仓库)
+plugins/*/
+!plugins/__init__.py
+!plugins/base.py
+!plugins/converter.py
+!plugins/llm_common.py
+!plugins/sd_common.py
+!plugins/yulotool_common.py
+
+# 临时
+*.tmp
+.DS_Store

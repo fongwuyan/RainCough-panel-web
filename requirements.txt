@@ -1,0 +1,6 @@
+flask>=3.0
+flask-cors>=4.0
+curl_cffi>=0.15
+psutil>=5.9
+cryptography>=42.0
+apscheduler>=3.10
