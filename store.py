@@ -171,6 +171,18 @@ def _repo(cfg, key):
     }
 
 
+def _ver_cmp(a, b):
+    """比较版本号 a,b, 返回 1/0/-1。支持 0.1.0 / v1.2.3 等。"""
+    def parts(v):
+        nums = [int(x) for x in re.split(r'[^0-9]+', (v or '').strip()) if x.isdigit()]
+        return nums or [0]
+    pa, pb = parts(a), parts(b)
+    n = max(len(pa), len(pb))
+    pa += [0] * (n - len(pa))
+    pb += [0] * (n - len(pb))
+    return (pa > pb) - (pa < pb)
+
+
 # ---------------------------------------------------------------------------
 # 环境自检
 # ---------------------------------------------------------------------------
@@ -201,6 +213,20 @@ def _port_available(port):
         return False
     finally:
         s.close()
+
+
+def _port_busy_by_self(port):
+    """端口已被本面板进程占用则返回 True。"""
+    try:
+        import psutil
+        me = os.getpid()
+        for conn in psutil.net_connections(kind='inet'):
+            if (conn.status == psutil.CONN_LISTEN and conn.laddr
+                    and conn.laddr.port == int(port) and conn.pid == me):
+                return True
+    except Exception:
+        return False
+    return False
 
 
 def _reachable(cfg, timeout=8):
@@ -244,8 +270,13 @@ def check_env(include_net=True):
                   'ok': writable, 'detail': _BASE_DIR if writable else '目录只读'})
     port = int(cfg.get('port') or 3000)
     pa = _port_available(port)
+    if not pa and _port_busy_by_self(port):
+        detail = '面板自身占用'
+        pa = True
+    else:
+        detail = '可用' if pa else '已被占用'
     items.append({'name': 'port', 'label': '端口 %d' % port,
-                  'ok': pa, 'detail': '可用' if pa else '已被占用'})
+                  'ok': pa, 'detail': detail})
     if include_net:
         net = _reachable(cfg)
         items.append({'name': 'network', 'label': 'GitHub 连通性',
@@ -602,6 +633,54 @@ def store_project_status():
         remote = None
     return jsonify({'status': True, 'local': local_ver, 'remote': remote,
                     'runtime_python': _current_runtime_python()})
+
+
+@store.route('/project/update-info', methods=['GET'])
+def store_project_update_info():
+    """对比本地/远程版本, 并返回最新 Release 的更新日志。"""
+    cfg = load_config()
+    local_ver = '0.0.0'
+    vfile = os.path.join(_BASE_DIR, 'VERSION')
+    if os.path.isfile(vfile):
+        with open(vfile, encoding='utf-8') as f:
+            local_ver = f.read().strip() or '0.0.0'
+    remote = None
+    changelog = ''
+    latest_tag = None
+    release_name = None
+    release_url = None
+    published_at = None
+    error = None
+    try:
+        repo = _repo(cfg, 'panel_repo')
+        data = _gh_get(cfg, '/repos/%s/%s/contents/VERSION?ref=%s'
+                       % (repo['owner'], repo['repo'], repo['branch']))
+        remote = base64.b64decode(data.get('content', '')).decode('utf-8').strip()
+        try:
+            rel = _gh_get(cfg, '/repos/%s/%s/releases/latest'
+                          % (repo['owner'], repo['repo']))
+            latest_tag = rel.get('tag_name')
+            release_name = rel.get('name') or latest_tag
+            release_url = rel.get('html_url')
+            published_at = rel.get('published_at')
+            changelog = (rel.get('body') or '').strip()
+        except Exception:
+            changelog = ''
+    except Exception as e:
+        error = str(e)
+    update_available = bool(remote and local_ver and _ver_cmp(remote, local_ver) > 0)
+    return jsonify({
+        'status': True,
+        'local': local_ver,
+        'remote': remote,
+        'update_available': update_available,
+        'changelog': changelog,
+        'latest_tag': latest_tag,
+        'release_name': release_name,
+        'release_url': release_url,
+        'published_at': published_at,
+        'error': error,
+    })
 
 
 @store.route('/project/check', methods=['POST'])

@@ -9,7 +9,7 @@ from datetime import datetime
 os.environ.setdefault('HF_HUB_OFFLINE', '1')
 os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
 
-DEFAULT_MODEL_DIR = '/opt/touchgal/models/aigen'
+DEFAULT_MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'aigen', 'models')
 VAE_FILE = 'vae-ft-mse-840000-ema-pruned.safetensors'
 EASY_FILE = 'EasyNegative.safetensors'
 SD15_CONFIG_DIR = os.path.join(DEFAULT_MODEL_DIR, 'sd15-config')

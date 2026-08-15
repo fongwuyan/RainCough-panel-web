@@ -384,6 +384,7 @@ export const api = {
   storePluginUpdate: (name) => req('POST', '/api/store/plugin/update', { name }),
   storePluginRemove: (name) => req('POST', '/api/store/plugin/remove', { name }),
   storeProjectStatus: () => req('GET', '/api/store/project/status'),
+  storeProjectUpdateInfo: () => req('GET', '/api/store/project/update-info'),
   storeProjectCheck: (net) => req('POST', '/api/store/project/check', { net }),
   storeProjectInstall: (dryRun) => req('POST', '/api/store/project/install', { dry_run: !!dryRun }),
 
@@ -496,4 +497,68 @@ export const api = {
   mcskinTextRegenerate: (jid) => req('POST', '/api/plugins/mcskin/text2skin/regenerate/' + jid, {}),
   mcskinTextHistory: () => req('GET', '/api/plugins/mcskin/text2skin/history'),
   mcskinTextFeedback: (jid, like) => req('POST', '/api/plugins/mcskin/text2skin/feedback/' + jid, { like }),
+
+  // RainCough VPN (vpn 插件)
+  vpnSettings: () => req('GET', '/api/plugins/vpn/settings'),
+  vpnSaveSettings: (data) => req('POST', '/api/plugins/vpn/settings', data),
+  vpnOverview: () => req('GET', '/api/plugins/vpn/overview'),
+  vpnLive: () => req('GET', '/api/plugins/vpn/overview/live'),
+  vpnEnv: () => req('GET', '/api/plugins/vpn/env'),
+  vpnInstall: (packages) => req('POST', '/api/plugins/vpn/install', { packages }),
+  vpnStopAll: () => req('POST', '/api/plugins/vpn/stop-all'),
+  vpnLogs: (tech) => req('GET', `/api/plugins/vpn/logs?tech=${tech}`),
+
+  // WireGuard
+  wgEnv: () => req('GET', '/api/plugins/vpn/wg/env'),
+  wgStatus: () => req('GET', '/api/plugins/vpn/wg/status'),
+  wgImport: (name, content) => req('POST', '/api/plugins/vpn/wg/import', { name, content }),
+  wgAction: (name, action) => req('POST', '/api/plugins/vpn/wg/action', { name, action }),
+  wgConfig: (name) => req('GET', `/api/plugins/vpn/wg/config?name=${encodeURIComponent(name)}`),
+  wgServer: () => req('GET', '/api/plugins/vpn/wg/server'),
+  wgServerSave: (data) => req('POST', '/api/plugins/vpn/wg/server/save', data),
+  wgServerUp: () => req('POST', '/api/plugins/vpn/wg/server/up'),
+  wgServerDown: () => req('POST', '/api/plugins/vpn/wg/server/down'),
+  wgPeerAdd: (name) => req('POST', '/api/plugins/vpn/wg/peers/add', { name }),
+  wgPeerDelete: (name) => req('POST', '/api/plugins/vpn/wg/peers/delete', { name }),
+  wgExport: (name) => req('POST', '/api/plugins/vpn/wg/export', { name }),
+
+  // OpenVPN
+  ovpnEnv: () => req('GET', '/api/plugins/vpn/ovpn/env'),
+  ovpnImport: (name, content) => req('POST', '/api/plugins/vpn/ovpn/import', { name, content }),
+  ovpnAction: (name, action) => req('POST', '/api/plugins/vpn/ovpn/action', { name, action }),
+  ovpnConfig: (name) => req('GET', `/api/plugins/vpn/ovpn/config?name=${encodeURIComponent(name)}`),
+  ovpnLog: () => req('GET', '/api/plugins/vpn/ovpn/log'),
+  ovpnServer: () => req('GET', '/api/plugins/vpn/ovpn/server'),
+  ovpnServerSave: (data) => req('POST', '/api/plugins/vpn/ovpn/server/save', data),
+  ovpnInitPki: () => req('POST', '/api/plugins/vpn/ovpn/server/init-pki'),
+  ovpnBuild: () => req('POST', '/api/plugins/vpn/ovpn/server/build'),
+  ovpnServerUp: () => req('POST', '/api/plugins/vpn/ovpn/server/up'),
+  ovpnServerDown: () => req('POST', '/api/plugins/vpn/ovpn/server/down'),
+  ovpnServerLog: () => req('GET', '/api/plugins/vpn/ovpn/server/log'),
+
+  // v2ray
+  v2Env: () => req('GET', '/api/plugins/vpn/v2/env'),
+  v2Load: (name) => req('GET', `/api/plugins/vpn/v2/load?name=${encodeURIComponent(name)}`),
+  v2Save: (name, config, port) => req('POST', '/api/plugins/vpn/v2/save', { name, config, port }),
+  v2Action: (name, action) => req('POST', '/api/plugins/vpn/v2/action', { name, action }),
+  v2Test: (name) => req('POST', '/api/plugins/vpn/v2/test', { name }),
+  v2Log: () => req('GET', '/api/plugins/vpn/v2/log'),
+  v2Wizard: (data) => req('POST', '/api/plugins/vpn/v2/wizard', data),
+  v2Subs: () => req('GET', '/api/plugins/vpn/v2/subs'),
+  v2SubAdd: (url, name) => req('POST', '/api/plugins/vpn/v2/subs', { url, name }),
+  v2SubDel: (url) => req('DELETE', '/api/plugins/vpn/v2/subs', { url }),
+  v2SubRefresh: (url) => req('POST', '/api/plugins/vpn/v2/subs/refresh', { url }),
+  v2Nodes: (q, group) => {
+    const p = []
+    if (q) p.push(`q=${encodeURIComponent(q)}`)
+    if (group && group !== 'all') p.push(`group=${encodeURIComponent(group)}`)
+    return req('GET', `/api/plugins/vpn/v2/nodes${p.length ? `?${p.join('&')}` : ''}`)
+  },
+  v2NodesGroups: () => req('GET', '/api/plugins/vpn/v2/nodes/groups'),
+  v2NodesDelete: (ids) => req('POST', '/api/plugins/vpn/v2/nodes/delete', { ids }),
+  v2NodesTest: (ids) => req('POST', '/api/plugins/vpn/v2/nodes/test', { ids }),
+  v2NodeSpeedTest: (id) => req('POST', '/api/plugins/vpn/v2/nodes/speedtest', { id }),
+  v2NodesSelect: (id, name, port) => req('POST', '/api/plugins/vpn/v2/nodes/select', { id, name, port }),
+  v2ModeGet: () => req('GET', '/api/plugins/vpn/v2/mode'),
+  v2ModeSet: (mode) => req('POST', '/api/plugins/vpn/v2/mode', { mode }),
 }

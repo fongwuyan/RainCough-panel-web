@@ -2,6 +2,29 @@ from functools import wraps
 from abc import ABC, abstractmethod
 
 
+def path_stats(paths):
+    """为存储路径列表生成 {path, exists, total, used, free, percent} 统计。"""
+    import os
+    try:
+        import psutil
+    except Exception:
+        psutil = None
+    out = []
+    for p in (paths or []):
+        item = {'path': p, 'exists': False, 'total': 0, 'used': 0, 'free': 0, 'percent': 0}
+        try:
+            if os.path.isdir(p):
+                item['exists'] = True
+                if psutil:
+                    u = psutil.disk_usage(p)
+                    item.update({'total': u.total, 'used': u.used,
+                                 'free': u.free, 'percent': u.percent})
+        except Exception:
+            pass
+        out.append(item)
+    return out
+
+
 class Plugin(ABC):
     name = ''
     label = ''
