@@ -561,4 +561,30 @@ export const api = {
   v2NodesSelect: (id, name, port) => req('POST', '/api/plugins/vpn/v2/nodes/select', { id, name, port }),
   v2ModeGet: () => req('GET', '/api/plugins/vpn/v2/mode'),
   v2ModeSet: (mode) => req('POST', '/api/plugins/vpn/v2/mode', { mode }),
+
+  // AI 编程助手 (raincode / 精简 opencode)
+  rcEnv: () => req('GET', '/api/plugins/raincode/env'),
+  rcConfig: () => req('GET', '/api/plugins/raincode/config'),
+  rcSaveConfig: (data) => req('POST', '/api/plugins/raincode/config', data),
+  rcModels: () => req('GET', '/api/plugins/raincode/models'),
+  rcStart: () => req('POST', '/api/plugins/raincode/start', {}),
+  rcStop: () => req('POST', '/api/plugins/raincode/stop', {}),
+  rcSessions: () => req('GET', '/api/plugins/raincode/sessions'),
+  rcSessionGet: (id) => req('GET', `/api/plugins/raincode/sessions/${id}`),
+  rcSessionDelete: (id) => req('DELETE', `/api/plugins/raincode/sessions/${id}`),
+  rcSkills: () => req('GET', '/api/plugins/raincode/skills'),
+  rcSkillSave: (s) => req('POST', '/api/plugins/raincode/skills', s),
+  rcSkillToggle: (name, enabled) => req('POST', '/api/plugins/raincode/skills/toggle', { name, enabled }),
+  rcSkillDelete: (name) => req('DELETE', `/api/plugins/raincode/skills/${name}`),
+  rcChat: (body) => fetch('/api/plugins/raincode/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  rcApprove: (body) => fetch('/api/plugins/raincode/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  rcCancel: (sessionId) => req('POST', '/api/plugins/raincode/cancel', { session_id: sessionId }),
 }
