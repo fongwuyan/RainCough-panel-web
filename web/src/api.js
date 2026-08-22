@@ -188,11 +188,57 @@ export const api = {
 
   // 文件管理 (系统级模块)
   fmList: (path) => req('GET', `/api/fm/list?path=${encodeURIComponent(path || '/')}`),
-  fmUpload: (path, files) => {
-    const fd = new FormData()
-    fd.append('path', path || '/')
-    for (const f of files) fd.append('files', f)
-    return reqForm('/api/fm/upload', fd)
+  fmUpload: (path, files, conflict = 'rename', onProgress) => {
+    const CHUNK = 8 * 1024 * 1024
+    const fileBase = Math.random().toString(36).slice(2) + Date.now().toString(36)
+    return (async () => {
+      const saved = []
+      const errors = []
+      const list = [...files]
+      for (let fi = 0; fi < list.length; fi++) {
+        const file = list[fi]
+        const total = Math.max(1, Math.ceil(file.size / CHUNK))
+        try {
+          for (let i = 0; i < total; i++) {
+            const chunk = file.slice(i * CHUNK, Math.min((i + 1) * CHUNK, file.size))
+            await new Promise((resolve, reject) => {
+              const fd = new FormData()
+              fd.append('path', path || '/')
+              fd.append('filename', file.name)
+              fd.append('file_id', fileBase + '_' + fi)
+              fd.append('chunk_index', String(i))
+              fd.append('total_chunks', String(total))
+              fd.append('conflict', conflict)
+              fd.append('chunk', chunk)
+              const xhr = new XMLHttpRequest()
+              xhr.open('POST', '/api/fm/upload/chunk')
+              xhr.upload.onprogress = (ev) => {
+                if (onProgress && ev.lengthComputable) {
+                  onProgress({ file: fi + 1, of: list.length, name: file.name,
+                    done: false, totalBytes: file.size, loadedBytes: i * CHUNK + ev.loaded })
+                }
+              }
+              xhr.onload = () => {
+                try {
+                  const data = JSON.parse(xhr.responseText)
+                  if (xhr.status >= 200 && xhr.status < 300 && data.ok) resolve(data)
+                  else reject(new Error(data.error || ('HTTP ' + xhr.status)))
+                } catch (e) { reject(new Error('响应解析失败')) }
+              }
+              xhr.onerror = () => reject(new Error('网络错误'))
+              xhr.send(fd)
+            })
+          }
+          saved.push(file.name)
+          if (onProgress) onProgress({ file: fi + 1, of: list.length, name: file.name,
+            done: true, totalBytes: file.size, loadedBytes: file.size })
+        } catch (e) {
+          errors.push(file.name + ': ' + (e.message || e))
+          if (onProgress) onProgress({ file: fi + 1, of: list.length, name: file.name, done: true, error: true })
+        }
+      }
+      return { saved, errors }
+    })()
   },
   fmDownload: (path, mode) => {
     const m = mode || 'direct'
@@ -205,6 +251,15 @@ export const api = {
   fmDelete: (paths) => req('POST', '/api/fm/delete', { paths }),
   fmHash: (path, algo) => req('GET', `/api/fm/hash?path=${encodeURIComponent(path)}&algo=${algo}`),
   fmUnzip: (archive, dest, password) => req('POST', '/api/fm/unzip', { archive, dest, password }),
+  fmRead: (path, limit, offset) => req('GET', `/api/fm/read?path=${encodeURIComponent(path)}&limit=${limit || 5242880}&offset=${offset || 0}`),
+  fmSave: (path, content, encoding) => req('POST', '/api/fm/save', { path, content, encoding: encoding || 'utf-8' }),
+  fmSize: (paths) => req('POST', '/api/fm/size', { paths }),
+  fmOpsStart: (op, paths, opts = {}) => req('POST', '/api/fm/ops', { op, paths, ...opts }),
+  fmOpsList: () => req('GET', '/api/fm/ops'),
+  fmOpsGet: (id) => req('GET', `/api/fm/ops/${id}`),
+  fmOpsCancel: (id) => req('POST', `/api/fm/ops/${id}/cancel`),
+  fmOpsRemove: (id) => req('DELETE', `/api/fm/ops/${id}`),
+  fmOpsDownload: (id) => `/api/fm/ops/${id}/download`,
   fmArchive: (paths, format, name) => {
     const qs = new URLSearchParams({ format: format || 'zip', name: name || 'archive' })
     for (const p of paths) qs.append('paths', p)
@@ -213,7 +268,7 @@ export const api = {
   fmPreview: (path) => req('GET', `/api/fm/preview?path=${encodeURIComponent(path)}`),
   fmSearch: (params) => {
     const qs = new URLSearchParams()
-    for (const k of ['path', 'q', 'kind', 'min_size', 'max_size', 'mtime_days']) {
+    for (const k of ['path', 'q', 'kind', 'min_size', 'max_size', 'mtime_days', 'offset']) {
       if (params[k] !== undefined && params[k] !== null && params[k] !== '') qs.append(k, params[k])
     }
     return req('GET', `/api/fm/search?${qs.toString()}`)
