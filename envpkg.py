@@ -10,12 +10,13 @@ from flask import Blueprint, request, jsonify
 
 envpkg = Blueprint('envpkg', __name__, url_prefix='/api/envpkg')
 
-DATA_DIR = '/opt/touchgal/data'
+# 路径允许通过环境变量覆盖(默认宿主部署路径); 便于本机开发与其他挂载布局
+DATA_DIR = os.environ.get('TOUCHGAL_DATA_DIR', '/opt/touchgal/data')
 REG_FILE = os.path.join(DATA_DIR, 'envs.json')
 TASKS_FILE = os.path.join(DATA_DIR, 'tasks.json')
-ENV_ROOT = '/opt/envs'
-RUN_ROOT = '/run/envs'
-TMP_ROOT = '/opt/envs/.tmp'
+ENV_ROOT = os.environ.get('TOUCHGAL_ENV_ROOT', '/opt/envs')
+RUN_ROOT = os.environ.get('TOUCHGAL_RUN_ROOT', '/run/envs')
+TMP_ROOT = os.environ.get('TOUCHGAL_TMP_ROOT', os.path.join(ENV_ROOT, '.tmp'))
 
 _LOCK = threading.Lock()
 _TASKS = {}
@@ -38,8 +39,11 @@ RETAIN_FINISHED = 60  # 保留最近 N 条已结束任务，其余清理；活�
 def _save_tasks():
     os.makedirs(DATA_DIR, exist_ok=True)
     _prune_tasks()
+    # 内部字段(以下划线开头, 如进度节流标记)不落盘
+    payload = {tid: {k: v for k, v in t.items() if not k.startswith('_')}
+               for tid, t in _TASKS.items()}
     with open(TASKS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(_TASKS, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 def _prune_tasks():
@@ -70,8 +74,40 @@ def _recover_stale_tasks():
 
 _recover_stale_tasks()
 
-SUDO = ['sudo', '-S']
-SUDO_PW = '1'
+
+def _clean_tmp(max_age=86400):
+    """清理 /opt/envs/.tmp 下载/编译残留。有进行中任务时只清超龄项, 否则全清。"""
+    if not os.path.isdir(TMP_ROOT):
+        return 0
+    with _LOCK:
+        active = bool(_running)
+    now = time.time()
+    cutoff = now - max_age if active else 0
+    removed = 0
+    for entry in os.listdir(TMP_ROOT):
+        full = os.path.join(TMP_ROOT, entry)
+        try:
+            st = os.lstat(full)
+            if active and st.st_mtime > cutoff:
+                continue
+            if os.path.isdir(full) and not os.path.islink(full):
+                shutil.rmtree(full, ignore_errors=True)
+            else:
+                os.remove(full)
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+# 启动时清一次下载/编译残留(重启即中断了所有任务)
+_clean_tmp()
+
+
+# sudo 密码不再硬编码: 由 systemd EnvironmentFile(TOUCHGAL_SUDO_PW) 注入;
+# 未设置时改用 sudo -n(免密), 适合已配置 NOPASSWD 的主机
+SUDO_PW = os.environ.get('TOUCHGAL_SUDO_PW', '')
+SUDO = ['sudo', '-S'] if SUDO_PW else ['sudo', '-n']
 
 # ---------------- 版本目录（官方/镜像源） ----------------
 _UA = 'TouchGal/1.0'
@@ -345,7 +381,7 @@ PHP_BUILD_DEPS = [
 
 def _sudo(args, timeout=600, input_pw=True):
     cmd = SUDO + args
-    pw = (SUDO_PW + '\n').encode() if input_pw else None
+    pw = (SUDO_PW + '\n').encode() if (input_pw and SUDO_PW) else None
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=timeout, input=pw)
         return {'ok': p.returncode == 0, 'rc': p.returncode,
@@ -454,10 +490,21 @@ def _run_task(pkg_name, recipe, task_id):
 
 
 def _install(pkg_name, recipe, task_id):
+    _persist = {'ts': 0.0, 'progress': -1}
+
     def upd(**kw):
         with _LOCK:
-            if task_id in _TASKS:
-                _TASKS[task_id].update(kw)
+            t = _TASKS.get(task_id)
+            if not t:
+                return
+            t.update(kw)
+            now = time.time()
+            status = t.get('status')
+            # 状态变更或进度跨 2% / 距上次落盘超 3s 才写盘, 避免下载中高频 IO
+            force = status in ('installed', 'error', 'interrupted') or                 kw.get('status') is not None or                 (now - _persist['ts'] >= 3) or                 (t.get('progress', 0) - _persist['progress'] >= 2)
+            if force:
+                _persist['ts'] = now
+                _persist['progress'] = t.get('progress', 0)
                 _save_tasks()
 
     upd(status='downloading', progress=0, message='开始下载')
@@ -812,11 +859,16 @@ def uninstall_pkg():
     reg = _load_reg()
     if name not in reg:
         return jsonify({'error': '环境包不存在'}), 404
-    root = reg[name].get('root')
+    meta = reg[name]
+    root = meta.get('root')
+    # 先停掉该包的 php-fpm(systemd-run 单元), 避免残留进程/套接字
+    if meta.get('php_fpm') or meta.get('php_fpm_sock'):
+        _stop_pkg_fpm(name, meta)
     if root and os.path.isdir(root):
         shutil.rmtree(root, ignore_errors=True)
     reg.pop(name, None)
     _save_reg(reg)
+    _clean_tmp()
     return jsonify({'ok': True, 'message': f'已卸载 {name}'})
 
 

@@ -9,8 +9,10 @@ from flask import Blueprint, request, jsonify
 
 scheduler_api = Blueprint('scheduler', __name__, url_prefix='/api/scheduler')
 
-DATA_DIR = '/opt/touchgal/data'
+# 允许通过环境变量覆盖(默认宿主部署路径)
+DATA_DIR = os.environ.get('TOUCHGAL_DATA_DIR', '/opt/touchgal/data')
 JOBS_FILE = os.path.join(DATA_DIR, 'scheduler.json')
+PLUGINS_DIR = os.environ.get('TOUCHGAL_PLUGINS_DIR', '/opt/touchgal/plugins')
 LOCK = threading.Lock()
 
 _manager = None
@@ -93,7 +95,7 @@ def _action_rebuild_library(params):
 
 
 def _action_clean_tmp(params):
-    target = params.get('dir', '/opt/touchgal/plugins')
+    target = params.get('dir', PLUGINS_DIR)
     try:
         days = int(params.get('days', 3))
     except (TypeError, ValueError):

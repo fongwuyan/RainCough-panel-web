@@ -21,7 +21,8 @@ from store import store as store_bp, init_store
 from tasks import _make_blueprint as tasks_blueprint, register_all as tasks_register_all
 
 app = Flask(__name__, static_folder='public')
-app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
+# 上传体积上限: 100GB (前端分块上传 8MB/片; 提升以支持超大文件, 旧接口单请求也放行)
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024 * 1024
 
 app.register_blueprint(fm)
 app.register_blueprint(tm)
@@ -276,11 +277,23 @@ def term_hosts_update():
     if found is None:
         return jsonify({'error': '服务器不存在'}), 404
     found['host'] = host
-    found['port'] = str(b.get('port') or '22')
-    found['username'] = (b.get('username') or '').strip()
-    found['ps'] = (b.get('ps') or '').strip()
+    # 仅更新请求中出现的字段, 缺失字段保持原值(避免部分更新误清数据)
+    if 'port' in b:
+        found['port'] = str(b.get('port') or '22')
+    if 'username' in b:
+        found['username'] = (b.get('username') or '').strip()
+    if 'ps' in b:
+        found['ps'] = (b.get('ps') or '').strip()
     for fld in _SECRET_FIELDS:
-        found[fld] = _enc(b.get(fld, ''))
+        if fld in b:
+            v = b[fld]
+            if v is None:
+                # 显式 null => 清空该密钥字段
+                found[fld] = _enc('')
+            elif v:
+                # 非空 => 更新(重新加密)
+                found[fld] = _enc(str(v))
+            # 空串 => 保留原加密值; 如需清空请传 null
     _save_json(_term_hosts, hosts)
     return jsonify({'status': True, 'hosts': _hosts_out(hosts)})
 
@@ -571,6 +584,14 @@ def disks_info():
     return jsonify({'disks': _lsblk_disks()})
 
 
+def _sudo_cmd(args):
+    """按 TOUCHGAL_SUDO_PW(EnvironmentFile 注入) 构造 sudo 命令; 未配置时尝试免密 sudo -n。"""
+    pw = os.environ.get('TOUCHGAL_SUDO_PW', '') or ''
+    if pw:
+        return ['sudo', '-S'] + args, (pw + '\n').encode()
+    return ['sudo', '-n'] + args, None
+
+
 @app.route('/api/disks/unmount', methods=['POST'])
 def disk_unmount():
     data = request.json or {}
@@ -580,19 +601,15 @@ def disk_unmount():
         return jsonify({'error': '无效的设备路径'}), 400
     try:
         import subprocess
-        rc = subprocess.run(
-            ['sudo', '-n', 'udisksctl', 'unmount', '-b', dev],
-            capture_output=True, timeout=30,
-        )
+        cmd, inp = _sudo_cmd(['udisksctl', 'unmount', '-b', dev])
+        rc = subprocess.run(cmd, capture_output=True, timeout=30, input=inp)
         if rc.returncode == 0:
             return jsonify({'message': f'已卸载 {dev}'})
         err = (rc.stderr or b'').decode('utf-8', 'replace').strip()
         # fallback to plain umount for system-managed mounts
         if 'Not authorized' in err or 'busy' not in err:
-            rc2 = subprocess.run(
-                ['sudo', '-n', 'umount', dev],
-                capture_output=True, timeout=30,
-            )
+            cmd2, inp2 = _sudo_cmd(['umount', dev])
+            rc2 = subprocess.run(cmd2, capture_output=True, timeout=30, input=inp2)
             if rc2.returncode == 0:
                 return jsonify({'message': f'已卸载 {dev}'})
         return jsonify({'error': f'卸载失败: {err or "未知错误"}'}), 500
@@ -648,6 +665,11 @@ def install_plugin():
                 file.save(zip_path)
                 try:
                     with zipfile.ZipFile(zip_path, 'r') as zf:
+                        for m in zf.namelist():
+                            norm = m.replace('\\', '/')
+                            if norm.startswith('/') or '..' in norm.split('/'):
+                                finish(tid, False, error='ZIP 包含非法路径, 已拒绝安装')
+                                return
                         zf.extractall(tmp)
                 except zipfile.BadZipFile:
                     finish(tid, False, error='无效的 ZIP 文件')

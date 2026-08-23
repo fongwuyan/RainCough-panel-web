@@ -15,7 +15,7 @@ except ImportError:
 
 media = Blueprint('media', __name__, url_prefix='/api/media')
 
-DATA_DIR = '/opt/touchgal/data'
+DATA_DIR = os.environ.get('TOUCHGAL_DATA_DIR', '/opt/touchgal/data')
 CONF_FILE = os.path.join(DATA_DIR, 'media.json')
 THUMBS_DIR = os.path.join(DATA_DIR, 'thumbs')
 
@@ -28,10 +28,10 @@ DEFAULT_ROOTS = {
     'laizhangsetu': {'label': '涩图缓存', 'path': '/opt/touchgal/plugins/laizhangsetu/cache'},
 }
 
-_thumb_lock = threading.Lock()
-
+_thumb_lock = threading.RLock()          # 保护缩略图生成标记
+_thumb_sem = threading.BoundedSemaphore(3)   # 并发生成上限, 避免大图库排队卡死
 TAGS_FILE = os.path.join(DATA_DIR, 'tags.json')
-WD_MODEL_DIR = '/opt/touchgal/models/wd14-convnextv2'
+WD_MODEL_DIR = os.environ.get('TOUCHGAL_WD_MODEL_DIR', '/opt/touchgal/models/wd14-convnextv2')
 WD_MODEL = os.path.join(WD_MODEL_DIR, 'model.onnx')
 WD_CSV = os.path.join(WD_MODEL_DIR, 'selected_tags.csv')
 TAG_GENERAL_TH = 0.35
@@ -238,10 +238,24 @@ def thumb():
     out = os.path.join(THUMBS_DIR, key + '.jpg')
     if not os.path.isfile(out):
         os.makedirs(THUMBS_DIR, exist_ok=True)
+        marker = out + '.tmp'
+        if os.path.isfile(marker):
+            return jsonify({'error': '缩略图生成中, 请稍后刷新'}), 202
         with _thumb_lock:
-            if not os.path.isfile(out):
-                if not _gen_thumb(p, out):
-                    return jsonify({'error': '无法生成缩略图'}), 500
+            if not os.path.isfile(out) and not os.path.isfile(marker):
+                try:
+                    open(marker, 'w').close()
+                except OSError:
+                    pass
+        if os.path.isfile(marker) and not os.path.isfile(out):
+            with _thumb_sem:
+                ok = _gen_thumb(p, out)
+            try:
+                os.remove(marker)
+            except OSError:
+                pass
+            if not ok:
+                return jsonify({'error': '无法生成缩略图'}), 500
     return send_file(out, mimetype='image/jpeg', max_age=3600)
 
 

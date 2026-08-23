@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify
 
 sys = Blueprint('system', __name__, url_prefix='/api/sys')
 
-LOG_FILE = '/var/log/touchgal.log'
+LOG_FILE = os.environ.get('TOUCHGAL_LOG_FILE', '/var/log/touchgal.log')
 TAIL_LIMIT = 2000
 
 
@@ -99,10 +99,16 @@ def kill_process():
         pid = int(pid)
     except (TypeError, ValueError):
         return jsonify({'error': '无效的 PID'}), 400
-    try:
-        sig = getattr(signal, str(sig).upper(), signal.SIGTERM)
-    except Exception:
-        sig = signal.SIGTERM
+    # 信号白名单: 防止误发 SIGHUP 以外的危险信号组合
+    ALLOWED = {
+        'SIGTERM': signal.SIGTERM, 'SIGKILL': signal.SIGKILL,
+        'SIGINT': signal.SIGINT, 'SIGHUP': signal.SIGHUP,
+        'SIGSTOP': signal.SIGSTOP, 'SIGCONT': signal.SIGCONT,
+    }
+    key = str(sig).upper()
+    if key not in ALLOWED:
+        return jsonify({'error': '不支持的信号(允许: %s)' % ' / '.join(ALLOWED)}), 400
+    sig = ALLOWED[key]
     try:
         p = psutil.Process(pid)
         p.send_signal(sig)

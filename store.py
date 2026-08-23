@@ -316,6 +316,12 @@ def _download_asset(cfg, asset, dest):
         raise RuntimeError('下载离线环境包失败 HTTP %d' % r.status_code)
     with open(dest, 'wb') as f:
         f.write(r.content)
+    # 完整性校验: 与 Release 资产声明大小对比, 防止半包/损坏
+    if asset.get('size'):
+        real = os.path.getsize(dest)
+        if real != int(asset['size']):
+            os.remove(dest)
+            raise RuntimeError('下载数据不完整(期望 %d B, 实际 %d B)' % (asset['size'], real))
 
 
 def _install_offline_env(cfg, update=None, tid=None):
@@ -369,7 +375,13 @@ def _install_offline_env(cfg, update=None, tid=None):
 # ---------------------------------------------------------------------------
 # 插件市场
 # ---------------------------------------------------------------------------
+_REG_CACHE = {'ts': 0, 'data': None}
+REG_TTL = 120  # 秒; 插件市场快速刷新时避免反复打 GitHub
+
 def fetch_registry(cfg):
+    now = time.time()
+    if _REG_CACHE['data'] is not None and now - _REG_CACHE['ts'] < REG_TTL:
+        return _REG_CACHE['data']
     repo = _repo(cfg, 'plugin_repo')
     if not repo['owner'] or not repo['repo']:
         raise RuntimeError('请先在设置页填写插件仓库')
@@ -377,6 +389,7 @@ def fetch_registry(cfg):
                     % (repo['owner'], repo['repo'], repo['branch']))
     raw = base64.b64decode(data.get('content', '')).decode('utf-8')
     reg = json.loads(raw)
+    _REG_CACHE.update(ts=now, data=reg)
     return reg
 
 
@@ -635,51 +648,59 @@ def store_project_status():
                     'runtime_python': _current_runtime_python()})
 
 
+_UPD_CACHE = {'ts': 0, 'data': None}
+
+
+def _remote_update_info(cfg):
+    """带 TTL 缓存的远程版本/发布信息, 避免面板设置页频繁打 GitHub。"""
+    now = time.time()
+    if _UPD_CACHE['data'] is not None and now - _UPD_CACHE['ts'] < REG_TTL:
+        return dict(_UPD_CACHE['data'])
+    info = {'remote': None, 'latest_tag': None, 'release_name': None,
+            'release_url': None, 'published_at': None, 'changelog': '', 'error': None}
+    try:
+        repo = _repo(cfg, 'panel_repo')
+        data = _gh_get(cfg, '/repos/%s/%s/contents/VERSION?ref=%s'
+                       % (repo['owner'], repo['repo'], repo['branch']))
+        info['remote'] = base64.b64decode(data.get('content', '')).decode('utf-8').strip()
+        try:
+            rel = _gh_get(cfg, '/repos/%s/%s/releases/latest'
+                          % (repo['owner'], repo['repo']))
+            info['latest_tag'] = rel.get('tag_name')
+            info['release_name'] = rel.get('name') or info['latest_tag']
+            info['release_url'] = rel.get('html_url')
+            info['published_at'] = rel.get('published_at')
+            info['changelog'] = (rel.get('body') or '').strip()
+        except Exception:
+            info['changelog'] = ''
+    except Exception as e:
+        info['error'] = str(e)
+    _UPD_CACHE.update(ts=now, data=info)
+    return dict(info)
+
+
 @store.route('/project/update-info', methods=['GET'])
 def store_project_update_info():
-    """对比本地/远程版本, 并返回最新 Release 的更新日志。"""
+    """对比本地/远程版本, 并返回最新 Release 的更新日志(远程部分走缓存)。"""
     cfg = load_config()
     local_ver = '0.0.0'
     vfile = os.path.join(_BASE_DIR, 'VERSION')
     if os.path.isfile(vfile):
         with open(vfile, encoding='utf-8') as f:
             local_ver = f.read().strip() or '0.0.0'
-    remote = None
-    changelog = ''
-    latest_tag = None
-    release_name = None
-    release_url = None
-    published_at = None
-    error = None
-    try:
-        repo = _repo(cfg, 'panel_repo')
-        data = _gh_get(cfg, '/repos/%s/%s/contents/VERSION?ref=%s'
-                       % (repo['owner'], repo['repo'], repo['branch']))
-        remote = base64.b64decode(data.get('content', '')).decode('utf-8').strip()
-        try:
-            rel = _gh_get(cfg, '/repos/%s/%s/releases/latest'
-                          % (repo['owner'], repo['repo']))
-            latest_tag = rel.get('tag_name')
-            release_name = rel.get('name') or latest_tag
-            release_url = rel.get('html_url')
-            published_at = rel.get('published_at')
-            changelog = (rel.get('body') or '').strip()
-        except Exception:
-            changelog = ''
-    except Exception as e:
-        error = str(e)
-    update_available = bool(remote and local_ver and _ver_cmp(remote, local_ver) > 0)
+    info = _remote_update_info(cfg)
+    update_available = bool(info['remote'] and local_ver and _ver_cmp(info['remote'], local_ver) > 0)
     return jsonify({
         'status': True,
         'local': local_ver,
-        'remote': remote,
+        'remote': info['remote'],
         'update_available': update_available,
-        'changelog': changelog,
-        'latest_tag': latest_tag,
-        'release_name': release_name,
-        'release_url': release_url,
-        'published_at': published_at,
-        'error': error,
+        'changelog': info['changelog'],
+        'latest_tag': info['latest_tag'],
+        'release_name': info['release_name'],
+        'release_url': info['release_url'],
+        'published_at': info['published_at'],
+        'error': info['error'],
     })
 
 
@@ -783,13 +804,23 @@ def _request_restart():
     if os.name == 'nt':
         return False
     import subprocess
-    for cmd in (
-        ['sudo', '-n', 'systemctl', 'restart', 'touchgal.service'],
-        ['systemctl', 'restart', 'touchgal.service'],
-        ['sudo', '-n', 'supervisorctl', 'restart', 'touchgal'],
-    ):
+    # 与 envpkg 一致: 密码经 TOUCHGAL_SUDO_PW(EnvironmentFile) 注入; 未配置则 sudo -n
+    pw = os.environ.get('TOUCHGAL_SUDO_PW', '') or ''
+
+    def candidates():
+        if pw:
+            yield ['sudo', '-S', 'systemctl', 'restart', 'touchgal.service'], (pw + '\n').encode()
+        else:
+            yield ['sudo', '-n', 'systemctl', 'restart', 'touchgal.service'], None
+        yield ['systemctl', 'restart', 'touchgal.service'], None
+        if pw:
+            yield ['sudo', '-S', 'supervisorctl', 'restart', 'touchgal'], (pw + '\n').encode()
+        else:
+            yield ['sudo', '-n', 'supervisorctl', 'restart', 'touchgal'], None
+
+    for cmd, inp in candidates():
         try:
-            r = subprocess.run(cmd, capture_output=True, timeout=15)
+            r = subprocess.run(cmd, capture_output=True, timeout=15, input=inp)
             if r.returncode == 0:
                 return True
         except Exception:

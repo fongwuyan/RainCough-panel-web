@@ -4,3 +4,7 @@ curl_cffi>=0.15
 psutil>=5.9
 cryptography>=42.0
 apscheduler>=3.10
+# 媒体中心(缩略图/打标/查重)依赖
+Pillow>=9.5
+numpy>=1.24
+onnxruntime>=1.15
