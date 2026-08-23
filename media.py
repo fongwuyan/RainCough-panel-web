@@ -421,7 +421,7 @@ def _dhash(path, size=16):
 
 
 def _hamming(a, b):
-    return bin(a ^ b).count('1')
+    return (a ^ b).bit_count()  # 内置 C 实现, 快于 bin().count('1')
 
 
 @media.route('/dedup', methods=['POST'])
@@ -441,13 +441,21 @@ def dedup():
                 files.append(os.path.join(root, name))
     buckets = {}
     scanned = 0
-    for p in files:
+    # 哈希阶段并行化(PIL 解码 IO 密集, 4 线程分摊)
+    import concurrent.futures as _cf
+
+    def _hash_one(p):
         try:
-            h = _dhash(p)
+            return _dhash(p)
+        except Exception:
+            return None
+
+    with _cf.ThreadPoolExecutor(max_workers=4) as _ex:
+        for p, h in zip(files, _ex.map(_hash_one, files)):
+            if h is None:
+                continue
             buckets.setdefault(h & 0xFFFFFF, []).append((h, p))
             scanned += 1
-        except Exception:
-            pass
     groups = []
     for bucket in buckets.values():
         if len(bucket) < 2:

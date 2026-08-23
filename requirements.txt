@@ -10,3 +10,5 @@ numpy>=1.24
 onnxruntime>=1.15
 # 插件顶层依赖: aigen/laizhangsetu/mcskin 用 Pillow+numpy; uptime/laizhangsetu 用 requests
 requests>=2.31
+# 生产部署(替代 Flask 自带 dev server; Windows 本机开发可另装 waitress)
+gunicorn>=21.2

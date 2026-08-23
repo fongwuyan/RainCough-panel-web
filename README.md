@@ -142,6 +142,20 @@ sudo systemctl enable --now raincough-panel
 
 ---
 
+## 多语言插件(非 Python)
+
+插件不限于 Python: 在插件目录提供 `plugin.json` + 任意语言入口即可由面板拉起并代理请求。
+
+```json
+{ "name": "hello", "label": "示例", "lang": "node",
+  "cmd": ["node", "server.js"], "env": "node-22", "timeout": 15 }
+```
+
+- 子进程监听环境变量 `RAINCOUGH_PORT` 指定的 127.0.0.1 端口
+- `GET /__health` 返回 200 表示就绪; 其余路径与 `/api/plugins/<name>/*` 一一对应
+- `env` 可指向面板环境包(envpkg)以注入 PATH, 如 `node-22` / `go-1.26.5`
+- 面板删除插件时会自动终止子进程; 进程随面板退出自动清场(atexit)
+
 ## License
 
 [MIT](./LICENSE)

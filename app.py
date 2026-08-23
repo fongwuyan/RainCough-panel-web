@@ -41,6 +41,8 @@ init_store(manager, PLUGINS_DIR)
 
 _net_last = {'ts': 0.0, 'sent': 0, 'recv': 0}
 _net_iface_last = {}
+# /api/system 结果缓存 1.5s(psutil 全量采集较贵, 前端高频轮询时显著降载)
+_sys_cache = {'ts': 0.0, 'data': None}
 
 
 def discover_plugins():
@@ -67,6 +69,24 @@ def discover_plugins():
                             print(f'[plugin] loaded: {instance.label}')
             except Exception as e:
                 print(f'[plugin] failed to load {entry}: {e}')
+        else:
+            # 多语言插件: 目录内提供 plugin.json(无 plugin.py)时, 走桥接加载
+            manifest_file = os.path.join(plugin_dir, 'plugin.json')
+            if os.path.isfile(manifest_file) and entry != '__pycache__':
+                try:
+                    from plugins.bridge import BridgePlugin
+                    with open(manifest_file, encoding='utf-8') as f:
+                        manifest = json.load(f)
+                    if not isinstance(manifest, dict) or not manifest.get('name'):
+                        print(f'[plugin] invalid manifest {entry}')
+                        continue
+                    if manifest['name'] and not manager.get_plugin(manifest['name']):
+                        instance = BridgePlugin(manifest, plugin_dir)
+                        manager.register(instance)
+                        print(f'[plugin] loaded(bridge): {instance.label} lang={manifest.get("lang","")} '
+                              f'alive={instance.alive()}')
+                except Exception as e:
+                    print(f'[plugin] failed to load bridge {entry}: {e}')
 
 
 discover_plugins()
@@ -370,6 +390,10 @@ def term_cmds_delete():
 
 @app.route('/api/system')
 def system_info():
+    import time  # 必须在缓存检查前引入, 避免 UnboundLocalError
+    _now = time.time()
+    if _sys_cache['data'] is not None and _now - _sys_cache['ts'] < 1.5:
+        return jsonify(_sys_cache['data'])
     import platform
     import socket
     import psutil
@@ -491,7 +515,7 @@ def system_info():
     except Exception:
         platform_name = platform.platform()
 
-    return jsonify({
+    payload = {
         'cpu_percent': psutil.cpu_percent(interval=None),
         'cpu_count': os.cpu_count() or 1,
         'cpu_per_core': per_cpu,
@@ -522,7 +546,9 @@ def system_info():
         'boot_time': boot_time,
         'uptime': uptime,
         'current_time': int(time.time()),
-    })
+    }
+    _sys_cache.update(ts=time.time(), data=payload)
+    return jsonify(payload)
 
 
 def _lsblk_disks():
@@ -779,6 +805,12 @@ def remove_plugin(name):
     plugin_dir = os.path.join(PLUGINS_DIR, name)
     if not os.path.isdir(plugin_dir):
         return jsonify({'error': '插件不存在'}), 404
+    plugin = manager.get_plugin(name)
+    if plugin and hasattr(plugin, 'stop'):
+        try:
+            plugin.stop()
+        except Exception:
+            pass
     shutil.rmtree(plugin_dir)
     manager.remove(name)
     return jsonify({'message': f'已移除插件: {name}'})
