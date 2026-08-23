@@ -607,15 +607,30 @@ def upload_chunk():
         return jsonify({'error': f'分片写入失败: {e}'}), 500
     if idx < total - 1:
         return jsonify({'ok': True, 'received': idx, 'complete': False})
-    # 最后一片: 按序合并
+    # 最后一片: 先核对分片齐全与磁盘余量, 再按序合并
+    parts = [os.path.join(part_dir, f'part_{i:06d}') for i in range(total)]
+    try:
+        for i, part in enumerate(parts):
+            if not os.path.isfile(part):
+                raise RuntimeError(f'缺少分片 part_{i}')
+        total_bytes = 0
+        for part in parts:
+            try:
+                total_bytes += os.path.getsize(part)
+            except OSError:
+                pass
+        du = shutil.disk_usage(p)
+        if total_bytes > du.free:
+            shutil.rmtree(part_dir, ignore_errors=True)
+            return jsonify({'error': '磁盘空间不足, 已中止合并'}), 507
+    except Exception as e:
+        shutil.rmtree(part_dir, ignore_errors=True)
+        return jsonify({'error': f'校验失败: {e}'}), 500
     dest_name = _unique_name(p, filename) if request.form.get('conflict', 'rename') == 'rename' and os.path.exists(os.path.join(p, filename)) else filename
     dest = os.path.join(p, dest_name)
     try:
         with open(dest, 'wb') as out:
-            for i in range(total):
-                part = os.path.join(part_dir, f'part_{i:06d}')
-                if not os.path.isfile(part):
-                    raise RuntimeError(f'缺少分片 part_{i}')
+            for part in parts:
                 with open(part, 'rb') as pf:
                     shutil.copyfileobj(pf, out)
         shutil.rmtree(part_dir, ignore_errors=True)

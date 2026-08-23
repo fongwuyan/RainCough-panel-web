@@ -85,9 +85,11 @@ const dirSizeMap = ref({})
 
 /* ---- 拖拽上传 ---- */
 const dragOver = ref(false)
+const showNewRow = ref(false)
 
 const displayPath = computed(() => cwd.value || '/')
 const selectedList = computed(() => items.value.filter((i) => selected.value.has(i.path)))
+const selectedSize = computed(() => selectedList.value.reduce((s, i) => s + (i.is_dir ? 0 : (i.size || 0)), 0))
 const isRoot = computed(() => !cwd.value || cwd.value === '/')
 const runningOps = computed(() => opsTasks.value.filter((t) => t.status === 'running').length)
 
@@ -715,171 +717,182 @@ watch([loading, hasMore], async () => {
 })
 watch(paged, () => setupObserver())
 </script>
-
 <template>
-  <div>
+  <div class="fm-page">
     <h1>文件管理</h1>
-    <div class="subtitle">浏览服务器文件系统, 上传下载、在线编辑、压缩解压与异步任务</div>
+    <div class="subtitle">浏览服务器文件系统 · 上传下载、在线编辑、压缩解压与异步任务</div>
 
-    <div class="fm-layout" :class="{ drop: dragOver }"
+    <div class="fm-shell" :class="{ drop: dragOver }"
          @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="onDrop">
-      <aside v-if="sidebarOpen" class="fm-sidebar">
-        <div class="fm-sidebar-head">
+      <!-- 侧栏 -->
+      <aside v-if="sidebarOpen" class="fm-side">
+        <div class="fm-side-head">
           <span>快捷导航</span>
-          <button class="btn btn-sm btn-ghost" style="padding:0 4px;font-size:11px;" @click="sidebarOpen = false">收起</button>
+          <button class="btn btn-sm btn-ghost fm-mini-btn" @click="sidebarOpen = false">收起</button>
         </div>
-
-        <div class="fm-sidebar-section">
-          <div class="fm-sidebar-label">
+        <div class="fm-side-section">
+          <div class="fm-side-label">
             <span>收藏目录</span>
-            <button class="btn btn-sm btn-ghost" style="padding:0 4px;font-size:11px;" @click="addFav">＋当前</button>
+            <button class="btn btn-sm btn-ghost fm-mini-btn" @click="addFav">＋当前</button>
           </div>
           <button v-for="p in favs" :key="'f' + p" class="fm-nav-btn"
                   :class="{ active: cwd === p }" @click="go(p)">
-            <span class="fm-nav-text">{{ p }}</span>
+            <span class="fm-nav-text fm-mono">{{ p }}</span>
             <span class="fm-nav-x" title="移除收藏" @click.stop="removeFav(p)">×</span>
           </button>
         </div>
-
-        <div v-if="mountedDisks().length" class="fm-sidebar-section">
-          <div class="fm-sidebar-label">磁盘挂载</div>
+        <div v-if="mountedDisks().length" class="fm-side-section">
+          <div class="fm-side-label">磁盘挂载</div>
           <button v-for="m in mountedDisks()" :key="'m' + m.path" class="fm-nav-btn"
                   :class="{ active: cwd === m.path }" @click="go(m.path)">
-            <span class="fm-nav-text">{{ m.path }}</span>
+            <span class="fm-nav-text fm-mono">{{ m.path }}</span>
           </button>
         </div>
       </aside>
 
-      <div class="fm-main">
-        <div class="section">
-          <div class="btn-row">
-            <button v-if="!sidebarOpen" class="btn btn-sm" @click="sidebarOpen = true">侧边栏</button>
-            <button class="btn btn-sm" @click="go('/')">根目录</button>
-            <button class="btn btn-sm" @click="load(cwd)">刷新</button>
-            <button class="btn btn-sm btn-primary" @click="fileInput && fileInput.click()">上传</button>
-            <input ref="fileInput" type="file" multiple style="display:none;" @change="onPickFiles" />
-            <select v-model="conflict" class="input" style="width:auto;">
-              <option value="rename">重名自动改名</option>
-              <option value="overwrite">重名覆盖</option>
-            </select>
-            <input v-model="newName" class="input" style="width:150px;" placeholder="新建文件夹名"
-                   @keydown.enter="doMkdir" />
-            <button class="btn btn-sm" :disabled="!!action" @click="doMkdir">新建</button>
-            <span style="flex:1"></span>
-            <button class="btn btn-sm" :class="{ active: showDirs }" @click="toggleDirs">目录大小</button>
-            <button class="btn btn-sm" :class="{ active: tasksOpen }" @click="tasksOpen = !tasksOpen">
-              任务<template v-if="runningOps"> ({{ runningOps }})</template>
+      <div class="fm-body">
+        <!-- 顶栏 -->
+        <header class="fm-topbar">
+          <div class="fm-topbar-left">
+            <button v-if="!sidebarOpen" class="fm-top-btn" title="显示侧栏" @click="sidebarOpen = true">☰</button>
+            <div v-if="showAddr" class="fm-addr-wrap">
+              <input v-model="addrVal" class="input fm-addr-input" placeholder="输入绝对路径，回车跳转"
+                     @keydown.enter="goAddr" @keydown.esc="showAddr = false" />
+            </div>
+            <nav v-else class="fm-crumbs" title="双击编辑路径 (Ctrl+L)" @dblclick="toggleAddr">
+              <button class="fm-crumb fm-mono" @click="go('/')">/</button>
+              <template v-for="(c, i) in crumbs" :key="c.path">
+                <span v-if="i > 0" class="fm-crumb-sep">›</span>
+                <button class="fm-crumb fm-mono" @click="go(c.path)">{{ c.label }}</button>
+              </template>
+            </nav>
+          </div>
+          <div class="fm-topbar-right">
+            <button class="fm-top-btn" :class="{ on: showDirs }" title="显示/隐藏目录大小" @click="toggleDirs">Σ</button>
+            <button class="fm-top-btn" :class="{ on: tasksOpen }" title="任务面板" @click="tasksOpen = !tasksOpen">
+              ≡<b v-if="runningOps" class="fm-badge">{{ runningOps }}</b>
             </button>
-            <span v-if="selectedList.length" class="status-line">{{ selectedList.length }} 项已选</span>
+            <button class="fm-top-btn" title="刷新" @click="load(cwd)">↻</button>
+            <button class="btn btn-sm btn-primary" title="上传文件到当前目录" @click="fileInput && fileInput.click()">⬆ 上传</button>
+            <input ref="fileInput" type="file" multiple class="fm-hidden-file" @change="onPickFiles" />
+            <button class="fm-top-btn" :class="{ on: showNewRow }" title="新建文件夹" @click="showNewRow = !showNewRow">＋</button>
           </div>
+        </header>
 
-          <div class="btn-row" v-if="showAddr">
-            <input v-model="addrVal" class="input fm-addr-input" style="flex:1;font-family:var(--font-mono);"
-                   placeholder="输入绝对路径后回车跳转" @keydown.enter="goAddr" />
-            <button class="btn btn-sm btn-primary" @click="goAddr">跳转</button>
-            <button class="btn btn-sm" @click="showAddr = false">取消</button>
-          </div>
+        <!-- 新建行 -->
+        <div v-if="showNewRow" class="fm-strip">
+          <input v-model="newName" class="input fm-grow" placeholder="新建文件夹名"
+                 @keydown.enter="doMkdir" @keydown.esc="showNewRow = false" />
+          <button class="btn btn-sm btn-primary" :disabled="!!action" @click="doMkdir">创建</button>
+          <button class="btn btn-sm" @click="showNewRow = false">取消</button>
+        </div>
 
-          <div class="btn-row">
-            <input v-model="searchQ" class="input fm-search-input" style="flex:1;min-width:150px;"
-                   placeholder="在当前目录及子目录搜索文件名…" @keydown.enter="doSearch()" />
-            <select v-model="searchKind" class="input" style="width:auto;">
-              <option value="">全部类型</option>
-              <option value="image">图片</option>
-              <option value="video">视频</option>
-              <option value="audio">音频</option>
-              <option value="archive">压缩包</option>
-              <option value="text">文本</option>
-              <option value="dir">目录</option>
-              <option value="file">其他</option>
-            </select>
-            <input v-model="searchMinMB" class="input" style="width:88px;" placeholder="≥M" />
-            <input v-model="searchMaxMB" class="input" style="width:88px;" placeholder="≤M" />
-            <input v-model="searchDays" class="input" style="width:88px;" placeholder="≤N天" />
-            <button class="btn btn-sm btn-primary" @click="doSearch(true)">搜索</button>
-            <button v-if="searching" class="btn btn-sm" @click="exitSearch">返回目录</button>
-            <button class="btn btn-sm" title="Ctrl+L" @click="toggleAddr">地址栏</button>
-          </div>
-
-          <div v-if="error" class="error" style="margin-top:10px;">{{ error }}</div>
-          <div v-if="action" class="loading" style="margin-top:10px;"><div class="spinner"></div> {{ action === 'hash' ? '计算中...' : '处理中...' }}</div>
-
-          <div class="btn-row">
-            <button class="btn btn-sm" :disabled="!selectedList.length || !!action" @click="selectedList.length === 1 ? openRename(selectedList[0]) : null">重命名</button>
-            <button class="btn btn-sm" :disabled="!selectedList.length || !!action" @click="startMoveCopy('move')">移动</button>
-            <button class="btn btn-sm" :disabled="!selectedList.length || !!action" @click="startMoveCopy('copy')">复制</button>
-            <button class="btn btn-sm btn-danger" :disabled="!selectedList.length || !!action" @click="askDelete(selectedList.map(i => i.name), selectedList.map(i => i.path))">删除</button>
-            <button class="btn btn-sm" :disabled="selectedList.length !== 1 || !!action" @click="doHash">哈希</button>
-            <button class="btn btn-sm" :disabled="selectedList.length !== 1 || !!action" @click="doUnzip">解压</button>
-            <select v-model="archiveFmt" class="input" style="width:auto;">
-              <option value="zip">ZIP</option>
-              <option value="7z">7z</option>
-            </select>
-            <input v-model="archiveName" class="input" style="width:110px;" placeholder="包名" />
-            <button class="btn btn-sm" :disabled="!selectedList.length || !!action" @click="startArchive">打包</button>
-          </div>
-
-          <div class="btn-row">
-            <input v-model="targetDir" class="input" style="flex:1;min-width:150px;" placeholder="移动/复制目标目录（绝对路径）" />
-            <button class="btn btn-sm" @click="openPicker">浏览…</button>
-            <input v-model="unzipPwd" class="input" style="width:140px;" type="password" placeholder="解压密码（可选）" />
-            <select v-model="hashAlgo" class="input" style="width:auto;">
-              <option value="md5">MD5</option>
-              <option value="sha1">SHA1</option>
-              <option value="sha256">SHA256</option>
-              <option value="sha512">SHA512</option>
-            </select>
-            <select v-model="dlMode" class="input" style="width:auto;">
-              <option value="direct">目录直传</option>
-              <option value="compress">7z 极限压缩</option>
-            </select>
-          </div>
-
-          <div v-if="hashResult" style="margin-top:10px;font-size:12px;" class="mono-block">
-            <b>{{ hashResult.algo.toUpperCase() }}</b> {{ hashResult.hash }}
+        <!-- 搜索行 -->
+        <div class="fm-strip fm-search">
+          <input v-model="searchQ" class="input fm-search-input fm-grow"
+                 placeholder="搜索当前目录及子目录（文件名）…" @keydown.enter="doSearch()" />
+          <button class="btn btn-sm btn-primary" @click="doSearch(true)">搜索</button>
+          <button v-if="searching" class="btn btn-sm" @click="exitSearch">退出搜索</button>
+          <div v-if="searching" class="fm-search-opts">
+            <label class="fm-lbl">类型
+              <select v-model="searchKind" class="input">
+                <option value="">全部</option>
+                <option value="image">图片</option>
+                <option value="video">视频</option>
+                <option value="audio">音频</option>
+                <option value="archive">压缩包</option>
+                <option value="text">文本</option>
+                <option value="dir">目录</option>
+                <option value="file">其他</option>
+              </select>
+            </label>
+            <label class="fm-lbl">≥ <input v-model="searchMinMB" class="input fm-num" placeholder="MB" /></label>
+            <label class="fm-lbl">≤ <input v-model="searchMaxMB" class="input fm-num" placeholder="MB" /></label>
+            <label class="fm-lbl">N天内 <input v-model="searchDays" class="input fm-num" placeholder="天" /></label>
+            <span class="fm-search-count">{{ items.length }} 条结果<span v-if="searchHasMore"> · 可加载更多</span></span>
+            <button v-if="searchHasMore" class="btn btn-sm" :disabled="loading" @click="searchMore">加载更多</button>
           </div>
         </div>
 
-        <!-- 上传进度 -->
-        <div v-if="uploadState.items.length" class="section">
-          <div class="section-title">上传进度
-            <span class="status-line" style="margin-left:8px;">{{ uploadState.active ? '上传中…' : '完成' }}</span>
+        <!-- 选择操作条 -->
+        <div v-if="selectedList.length" class="fm-selbar">
+          <span class="fm-sel-info">{{ selectedList.length }} 项已选 · {{ fmtBytes(selectedSize) }}</span>
+          <span class="fm-sel-sep"></span>
+          <button class="btn btn-sm" :disabled="!!action"
+                  @click="selectedList.length === 1 ? openRename(selectedList[0]) : null">重命名</button>
+          <button class="btn btn-sm" :disabled="!!action" @click="startMoveCopy('move')">移动</button>
+          <button class="btn btn-sm" :disabled="!!action" @click="startMoveCopy('copy')">复制</button>
+          <button class="btn btn-sm btn-danger" :disabled="!!action"
+                  @click="askDelete(selectedList.map(i => i.name), selectedList.map(i => i.path))">删除</button>
+          <button class="btn btn-sm" :disabled="selectedList.length !== 1 || !!action" @click="doHash">哈希</button>
+          <button class="btn btn-sm" :disabled="selectedList.length !== 1 || !!action" @click="doUnzip">解压</button>
+          <button class="btn btn-sm" :disabled="!!action" @click="startArchive">打包</button>
+          <span class="fm-grow"></span>
+          <button class="btn btn-sm btn-ghost" @click="selected = new Set()">清除选择</button>
+        </div>
+
+        <!-- 操作参数 -->
+        <details class="fm-params" open>
+          <summary>操作参数 ⚙</summary>
+          <div class="fm-params-row">
+            <label class="fm-lbl fm-grow">移动/复制目标
+              <input v-model="targetDir" class="input fm-target" placeholder="绝对路径" @keydown.enter="openPicker" />
+            </label>
+            <button class="btn btn-sm" @click="openPicker">浏览…</button>
+            <label class="fm-lbl">解压密码
+              <input v-model="unzipPwd" class="input fm-inp-sm" type="password" placeholder="可选" />
+            </label>
+            <label class="fm-lbl">哈希
+              <select v-model="hashAlgo" class="input">
+                <option value="md5">MD5</option>
+                <option value="sha1">SHA1</option>
+                <option value="sha256">SHA256</option>
+                <option value="sha512">SHA512</option>
+              </select>
+            </label>
+            <label class="fm-lbl">打包
+              <select v-model="archiveFmt" class="input">
+                <option value="zip">ZIP</option>
+                <option value="7z">7z</option>
+              </select>
+              <input v-model="archiveName" class="input fm-inp-sm" placeholder="包名" />
+            </label>
+            <label class="fm-lbl">目录下载
+              <select v-model="dlMode" class="input">
+                <option value="direct">直传 zip</option>
+                <option value="compress">7z 极限压缩</option>
+              </select>
+            </label>
+            <label class="fm-lbl">重名
+              <select v-model="conflict" class="input">
+                <option value="rename">自动改名</option>
+                <option value="overwrite">覆盖</option>
+              </select>
+            </label>
           </div>
-          <div v-for="(u, i) in uploadState.items" :key="i" class="fm-up-item">
-            <span class="fm-up-name">{{ u.name }}</span>
-            <div class="fm-up-bar"><div class="fm-up-fill" :class="u.status" :style="{ width: (u.pct || 0) + '%' }"></div></div>
-            <span class="fm-up-pct">{{ u.status === 'error' ? '失败' : (u.status === 'done' ? '完成' : (u.pct || 0) + '%') }}</span>
-          </div>
+        </details>
+
+        <div v-if="error" class="fm-alert">⚠ {{ error }}</div>
+        <div v-if="action" class="fm-processing"><span class="spinner"></span> {{ action === 'hash' ? '计算中...' : '处理中...' }}</div>
+        <div v-if="hashResult" class="mono-block fm-hash">
+          <b>{{ hashResult.algo.toUpperCase() }}</b> {{ hashResult.hash }}
         </div>
 
         <!-- 文本查看 -->
-        <div v-if="textPreview" class="section">
+        <div v-if="textPreview" class="section fm-preview">
           <div class="section-title">文本预览
             <button class="btn btn-sm btn-ghost" style="float:right;" @click="textPreview = null">关闭</button>
           </div>
-          <pre class="mono-block" style="max-height:400px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-all;">{{ textPreview.text }}</pre>
-          <div v-if="textPreview.truncated" class="status-line" style="margin-top:6px;">已截断（仅显示前 512KB）, 如需完整内容请使用「编辑」</div>
-        </div>
-
-        <!-- 面包屑 / 搜索横幅 -->
-        <div class="section fm-crumb">
-          <div v-if="searching" class="crumb-row">
-            <span class="status-line">搜索「{{ searchQ || '全部' }}」{{ searchKind ? '· ' + kindName(searchKind) : '' }}：{{ items.length }} 条结果</span>
-            <span v-if="searchHasMore" class="status-line" style="color:var(--warning, #d0b27a);">（还有更多, 可加载）</span>
-            <button class="btn btn-sm btn-ghost" style="margin-left:auto;" @click="exitSearch">返回目录</button>
-          </div>
-          <div v-else class="crumb-row">
-            <template v-for="(c, i) in crumbs" :key="c.path">
-              <span v-if="i > 0" class="crumb-sep">/</span>
-              <button class="btn btn-ghost btn-sm" style="padding:0 4px;" @click="go(c.path)">{{ c.label }}</button>
-            </template>
-            <span v-if="loading" class="spinner" style="margin-left:10px;"></span>
-          </div>
+          <pre class="mono-block fm-preview-body">{{ textPreview.text }}</pre>
+          <div v-if="textPreview.truncated" class="status-line" style="margin-top:6px;">已截断（仅显示前 512KB），如需完整内容请使用「编辑」</div>
         </div>
 
         <!-- 文件列表 -->
-        <div class="section fm-table-wrap">
-          <div v-if="!loading && !items.length" class="empty" style="padding:30px;">{{ searching ? '无搜索结果' : '空目录' }}</div>
+        <div class="fm-table-card">
+          <div v-if="loading && !items.length" class="fm-empty">
+            <div class="spinner"></div> 加载中...
+          </div>
+          <div v-else-if="!items.length" class="fm-empty">{{ searching ? '无搜索结果' : '空目录' }}</div>
           <table v-else class="fm-table">
             <thead>
               <tr>
@@ -898,27 +911,28 @@ watch(paged, () => setupObserver())
                 <td class="fm-col-check" @click.stop>
                   <input type="checkbox" :checked="selected.has(item.path)" @change="toggleSel(item)" />
                 </td>
-                <td class="fm-col-name" @click="openItem(item)" @dblclick="item.kind === 'text' && showPreview(item)"
+                <td class="fm-col-name" @click="openItem(item)"
+                    @dblclick="item.kind === 'text' && showPreview(item)"
                     :title="item.link_target ? ('链接 → ' + item.link_target) : item.path">
                   <span class="fm-ico">{{ kindIcon(item.kind) }}</span>
                   <span :class="{ 'text-faint': item.hidden }">{{ item.name }}</span>
-                  <span v-if="item.is_link" style="color:var(--accent);font-size:11px;margin-left:4px;">→链接</span>
+                  <span v-if="item.is_link" class="fm-link">→</span>
                 </td>
-                <td class="fm-col-size">{{ fmtSize(item) }}</td>
+                <td class="fm-col-size fm-mono">{{ fmtSize(item) }}</td>
                 <td class="fm-col-type">{{ kindName(item.kind) }}</td>
-                <td class="fm-col-time">{{ fmtTime(item.mtime) }}</td>
+                <td class="fm-col-time fm-mono">{{ fmtTime(item.mtime) }}</td>
                 <td class="fm-col-ops">
-                  <button class="btn btn-sm btn-ghost" @click.stop="downloadItem(item, dlMode)">下载</button>
-                  <button v-if="item.kind === 'text'" class="btn btn-sm btn-ghost" @click.stop="showPreview(item)">查看</button>
-                  <button v-if="item.kind === 'text'" class="btn btn-sm btn-ghost" @click.stop="openEditor(item)">编辑</button>
+                  <button class="btn btn-sm btn-ghost fm-op" @click.stop="downloadItem(item, dlMode)">下载</button>
+                  <button v-if="item.kind === 'text'" class="btn btn-sm btn-ghost fm-op" @click.stop="showPreview(item)">查看</button>
+                  <button v-if="item.kind === 'text'" class="btn btn-sm btn-ghost fm-op" @click.stop="openEditor(item)">编辑</button>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div v-if="hasMore" ref="sentinel" style="padding:10px;text-align:center;">
-            <button class="btn btn-sm" @click="showMore">加载更多（当前显示 {{ paged.length }} / {{ sortedAll.length }}）</button>
+          <div v-if="hasMore" ref="sentinel" class="fm-more">
+            <button class="btn btn-sm" @click="showMore">加载更多（{{ paged.length }} / {{ sortedAll.length }}）</button>
           </div>
-          <div v-if="searching && searchHasMore" style="padding:10px;text-align:center;">
+          <div v-if="searching && searchHasMore" class="fm-more">
             <button class="btn btn-sm" :disabled="loading" @click="searchMore">加载更多搜索结果</button>
           </div>
         </div>
@@ -926,28 +940,23 @@ watch(paged, () => setupObserver())
     </div>
 
     <!-- 目录选择器 -->
-    <div v-if="showPicker" class="fm-modal-mask" @click.self="showPicker = false">
-      <div class="fm-modal">
-        <div class="fm-modal-head">
-          <span>选择目标目录</span>
-          <button class="btn btn-sm btn-ghost" @click="showPicker = false">取消</button>
-        </div>
-        <div class="fm-modal-crumb">
+    <div v-if="showPicker" class="fm-mask" @click.self="showPicker = false">
+      <div class="fm-dialog fm-dialog-picker">
+        <div class="fm-dialog-head"><span>选择目标目录</span><button class="btn btn-sm btn-ghost" @click="showPicker = false">取消</button></div>
+        <div class="fm-dialog-crumb fm-mono">
           <template v-for="(c, i) in pickerCrumbs" :key="c.path">
-            <span v-if="i > 0" class="crumb-sep">/</span>
+            <span v-if="i > 0">›</span>
             <button class="btn btn-ghost btn-sm" style="padding:0 4px;" @click="pickerGo(c.path)">{{ c.label }}</button>
           </template>
         </div>
-        <div class="fm-modal-list">
-          <div v-if="pickerLoading" class="loading"><div class="spinner"></div> 加载中...</div>
-          <div v-else-if="!pickerItems.length" class="empty" style="padding:20px;">无子目录</div>
-          <button v-for="d in pickerItems" :key="d.path" class="fm-dir-item" @click="pickerEnter(d)">
-            <span>📁</span> {{ d.name }}
-          </button>
+        <div class="fm-dialog-list">
+          <div v-if="pickerLoading" class="fm-empty"><div class="spinner"></div> 加载中...</div>
+          <div v-else-if="!pickerItems.length" class="fm-empty">无子目录</div>
+          <button v-for="d in pickerItems" :key="d.path" class="fm-dir-item" @click="pickerEnter(d)">📁 {{ d.name }}</button>
         </div>
-        <div class="fm-modal-foot">
-          <span class="status-line" style="font-family:var(--font-mono);">{{ pickerCwd }}</span>
-          <span style="flex:1"></span>
+        <div class="fm-dialog-foot">
+          <span class="status-line fm-mono">{{ pickerCwd }}</span>
+          <span class="fm-grow"></span>
           <button class="btn btn-sm" @click="showPicker = false">取消</button>
           <button class="btn btn-sm btn-primary" @click="usePickerDir">使用此目录</button>
         </div>
@@ -955,19 +964,16 @@ watch(paged, () => setupObserver())
     </div>
 
     <!-- 重命名 -->
-    <div v-if="renameState.show" class="fm-modal-mask" @click.self="closeRename">
-      <div class="fm-modal">
-        <div class="fm-modal-head">
-          <span>重命名</span>
-          <button class="btn btn-sm btn-ghost" @click="closeRename">取消</button>
-        </div>
-        <div class="fm-modal-body">
-          <input v-model="renameState.value" class="input" style="width:100%;font-family:var(--font-mono);"
+    <div v-if="renameState.show" class="fm-mask" @click.self="closeRename">
+      <div class="fm-dialog">
+        <div class="fm-dialog-head"><span>重命名</span><button class="btn btn-sm btn-ghost" @click="closeRename">取消</button></div>
+        <div class="fm-dialog-body">
+          <input v-model="renameState.value" class="input fm-mono" style="width:100%;"
                  @keydown.enter="submitRename" @keydown.esc="closeRename" />
         </div>
-        <div class="fm-modal-foot">
-          <span class="status-line" style="font-family:var(--font-mono);">{{ renameState.target && renameState.target.path }}</span>
-          <span style="flex:1"></span>
+        <div class="fm-dialog-foot">
+          <span class="status-line fm-mono">{{ renameState.target && renameState.target.path }}</span>
+          <span class="fm-grow"></span>
           <button class="btn btn-sm" @click="closeRename">取消</button>
           <button class="btn btn-sm btn-primary" :disabled="!!action" @click="submitRename">确定</button>
         </div>
@@ -975,54 +981,95 @@ watch(paged, () => setupObserver())
     </div>
 
     <!-- 通用确认 -->
-    <div v-if="confirmState.show" class="fm-modal-mask" @click.self="confirmState = { show:false,title:'',msg:'',okText:'确定',danger:false,onOk:null }">
-      <div class="fm-modal">
-        <div class="fm-modal-head"><span>{{ confirmState.title }}</span></div>
-        <div class="fm-modal-body" style="white-space:pre-wrap;word-break:break-all;">{{ confirmState.msg }}</div>
-        <div class="fm-modal-foot">
-          <span style="flex:1"></span>
-          <button class="btn btn-sm" @click="confirmState = { show:false,title:'',msg:'',okText:'确定',danger:false,onOk:null }">取消</button>
+    <div v-if="confirmState.show" class="fm-mask"
+         @click.self="confirmState = { show:false,title:'',msg:'',okText:'确定',danger:false,onOk:null }">
+      <div class="fm-dialog">
+        <div class="fm-dialog-head">{{ confirmState.title }}</div>
+        <div class="fm-dialog-body fm-confirm-msg">{{ confirmState.msg }}</div>
+        <div class="fm-dialog-foot">
+          <span class="fm-grow"></span>
+          <button class="btn btn-sm"
+                  @click="confirmState = { show:false,title:'',msg:'',okText:'确定',danger:false,onOk:null }">取消</button>
           <button class="btn btn-sm" :class="confirmState.danger ? 'btn-danger' : 'btn-primary'" @click="confirmOk">{{ confirmState.okText }}</button>
         </div>
       </div>
     </div>
 
     <!-- 编辑器 -->
-    <div v-if="editorOpen" class="fm-modal-mask editor-mask" @click.self="closeEditor">
-      <div class="fm-modal fm-editor-modal">
-        <div class="fm-modal-head">
-          <span class="fm-edit-title">编辑 — {{ editorItem && editorItem.path }}</span>
+    <div v-if="editorOpen" class="fm-mask fm-edit-mask" @click.self="closeEditor">
+      <div class="fm-dialog fm-edit-dialog">
+        <div class="fm-dialog-head">
+          <span class="fm-edit-title fm-mono">{{ editorItem && editorItem.path }}</span>
           <span class="status-line">{{ editorSize }} B · {{ editorEncoding }}</span>
           <button class="btn btn-sm btn-ghost" @click="closeEditor">关闭</button>
         </div>
-        <div class="fm-editor-toolbar">
-          <select v-model="editorEncoding" class="input" style="width:auto;">
+        <div class="fm-edit-toolbar">
+          <select v-model="editorEncoding" class="input">
             <option value="utf-8">UTF-8</option>
             <option value="gb18030">GB18030</option>
             <option value="gbk">GBK</option>
             <option value="ascii">ASCII</option>
             <option value="latin-1">latin-1</option>
           </select>
-          <span class="status-line" style="margin-left:10px;">Ctrl+S 保存</span>
-          <span v-if="editorMsg" class="status-line" style="margin-left:10px;color:var(--warning, #d0b27a);">{{ editorMsg }}</span>
-          <span style="flex:1"></span>
-          <span v-if="editorDirty" class="status-line" style="color:var(--warning, #d0b27a);">未保存</span>
+          <span class="status-line">Ctrl+S 保存</span>
+          <span v-if="editorMsg" class="status-line fm-warn-text">{{ editorMsg }}</span>
+          <span class="fm-grow"></span>
+          <span v-if="editorDirty" class="status-line fm-warn-text">未保存</span>
           <button class="btn btn-sm btn-primary" :disabled="editorSaving" @click="saveEditor">{{ editorSaving ? '保存中…' : '保存' }}</button>
         </div>
-        <div class="fm-editor-wrap">
-          <div class="fm-editor-gutter" ref="gutterEl">
-            <div v-for="n in editorLineCount" :key="n" class="fm-editor-ln">{{ n }}</div>
+        <div class="fm-edit-wrap">
+          <div class="fm-edit-gutter fm-mono" ref="gutterEl">
+            <div v-for="n in editorLineCount" :key="n" class="fm-edit-ln">{{ n }}</div>
           </div>
-          <textarea ref="editorEl" v-model="editorText" class="fm-editor-area" spellcheck="false"
+          <textarea ref="editorEl" v-model="editorText" class="fm-edit-area" spellcheck="false"
                     @scroll="syncEditorScroll" @input="editorDirty = true"
                     @keydown.ctrl.s.prevent="saveEditor" @keydown.meta.s.prevent="saveEditor"></textarea>
         </div>
       </div>
     </div>
 
+    <!-- 上传进度 -->
+    <div v-if="uploadState.items.length" class="fm-upcard">
+      <div class="fm-upcard-head">
+        <span>上传进度</span>
+        <button class="btn btn-sm btn-ghost fm-mini-btn" @click="uploadState = { active: false, items: [] }">×</button>
+      </div>
+      <div v-for="(u, i) in uploadState.items" :key="i" class="fm-upitem">
+        <span class="fm-upname fm-mono" :title="u.name">{{ u.name }}</span>
+        <div class="fm-upbar"><div class="fm-upfill" :class="u.status" :style="{ width: (u.pct || 0) + '%' }"></div></div>
+        <span class="fm-uppct fm-mono">{{ u.status === 'error' ? '失败' : (u.status === 'done' ? '完成' : (u.pct || 0) + '%') }}</span>
+      </div>
+    </div>
+
+    <!-- 任务面板 -->
+    <div v-if="tasksOpen" class="fm-tasks">
+      <div class="fm-tasks-head"><span>任务（{{ opsTasks.length }}）</span><button class="btn btn-sm btn-ghost fm-mini-btn" @click="tasksOpen = false">收起</button></div>
+      <div class="fm-tasks-body">
+        <div v-if="!opsTasks.length" class="fm-empty">暂无任务</div>
+        <div v-for="t in opsTasks" :key="t.id" class="fm-task">
+          <div class="fm-task-line">
+            <span class="fm-task-op">{{ OP_LABEL[t.op] || t.op }}</span>
+            <span class="status-line fm-mono">#{{ t.id }}</span>
+            <span class="fm-grow"></span>
+            <span :class="'fm-task-state ' + t.status">{{ OP_STATE[t.status] || t.status }}</span>
+          </div>
+          <div class="fm-taskbar"><div class="fm-taskfill" :style="{ width: (t.total ? Math.round((t.done / t.total) * 100) : 0) + '%' }"></div></div>
+          <div class="fm-taskfoot">
+            <span class="status-line">{{ t.done }}/{{ t.total }}<template v-if="t.failed && t.failed.length"> · {{ t.failed.length }} 项失败</template></span>
+            <span class="fm-grow"></span>
+            <button v-if="t.status === 'running'" class="btn btn-sm btn-ghost" @click="cancelTask(t)">取消</button>
+            <button v-else-if="t.op === 'archive' && t.status === 'done'" class="btn btn-sm" @click="downloadArchived(t)">下载包</button>
+            <button v-if="t.status !== 'running'" class="btn btn-sm btn-ghost" @click="removeTask(t)">删除</button>
+          </div>
+          <div v-if="t.error" class="fm-task-err">{{ t.error }}</div>
+          <div v-if="t.failed && t.failed.length" class="fm-task-err">{{ t.failed.join('; ') }}</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 右键菜单 -->
     <div v-if="ctx.show" class="fm-ctx" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
-      <div class="fm-ctx-item mono">{{ ctx.item && ctx.item.name }}</div>
+      <div class="fm-ctx-title fm-mono">{{ ctx.item && ctx.item.name }}</div>
       <div class="fm-ctx-sep"></div>
       <button class="fm-ctx-item" @click="downloadItem(ctx.item, dlMode)">下载</button>
       <button v-if="ctx.item && ctx.item.kind === 'text'" class="fm-ctx-item" @click="ctxAction((i) => showPreview(i))">查看</button>
@@ -1035,37 +1082,6 @@ watch(paged, () => setupObserver())
       <button class="fm-ctx-item danger" @click="ctxAction((i) => askDeleteOne(i))">删除</button>
     </div>
 
-    <!-- 任务面板 -->
-    <div v-if="tasksOpen" class="fm-tasks">
-      <div class="fm-tasks-head">
-        <span>任务 ({{ opsTasks.length }})</span>
-        <button class="btn btn-sm btn-ghost" style="padding:0 6px;font-size:11px;" @click="tasksOpen = false">收起</button>
-      </div>
-      <div class="fm-tasks-body">
-        <div v-if="!opsTasks.length" class="empty" style="padding:14px;">暂无任务</div>
-        <div v-for="t in opsTasks" :key="t.id" class="fm-task">
-          <div class="fm-task-line">
-            <span class="fm-task-op">{{ OP_LABEL[t.op] || t.op }}</span>
-            <span class="status-line">#{{ t.id }}</span>
-            <span style="flex:1"></span>
-            <span :class="'fm-task-state ' + t.status">{{ OP_STATE[t.status] || t.status }}</span>
-          </div>
-          <div class="fm-task-bar">
-            <div class="fm-task-fill" :style="{ width: (t.total ? Math.round((t.done / t.total) * 100) : 0) + '%' }"></div>
-          </div>
-          <div class="fm-task-foot">
-            <span class="status-line">{{ t.done }}/{{ t.total }}<template v-if="t.failed && t.failed.length"> · {{ t.failed.length }} 项失败</template></span>
-            <span style="flex:1"></span>
-            <button v-if="t.status === 'running'" class="btn btn-sm btn-ghost" @click="cancelTask(t)">取消</button>
-            <button v-else-if="t.op === 'archive' && t.status === 'done'" class="btn btn-sm" @click="downloadArchived(t)">下载包</button>
-            <button v-if="t.status !== 'running'" class="btn btn-sm btn-ghost" @click="removeTask(t)">删除</button>
-          </div>
-          <div v-if="t.error" class="error" style="font-size:12px;">{{ t.error }}</div>
-          <div v-if="t.failed && t.failed.length" class="error" style="font-size:12px;">{{ t.failed.join('; ') }}</div>
-        </div>
-      </div>
-    </div>
-
     <!-- toast -->
     <transition name="toast">
       <div v-if="toastMsg" class="fm-toast" :class="toastKind">{{ toastMsg }}</div>
@@ -1074,191 +1090,167 @@ watch(paged, () => setupObserver())
 </template>
 
 <style scoped>
-.fm-layout {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-  min-height: 200px;
-}
-.fm-layout.drop {
-  outline: 2px dashed var(--accent);
-  outline-offset: 4px;
-  border-radius: 10px;
-}
-.fm-sidebar {
-  width: 210px;
-  flex-shrink: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--surface-2);
-}
-.fm-sidebar-head {
-  padding: 10px 12px;
-  font-size: 12px;
-  color: var(--text-faint);
-  font-weight: 700;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.fm-sidebar-section { padding: 6px 0; }
-.fm-sidebar-section + .fm-sidebar-section { border-top: 1px solid var(--border); }
-.fm-sidebar-label {
-  padding: 4px 12px;
-  font-size: 11px;
-  color: var(--text-faint);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.fm-nav-btn {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  text-align: left;
-  padding: 6px 12px;
-  border-radius: 0;
-  font-family: var(--font-mono);
-  background: transparent;
-  border: none;
-  color: var(--text);
-  cursor: pointer;
-}
-.fm-nav-btn:hover { background: var(--surface-3); }
-.fm-nav-btn.active { background: var(--surface-3); }
-.fm-nav-x { color: var(--text-faint); font-size: 13px; padding: 0 2px; line-height: 1; }
-.fm-nav-x:hover { color: #ff6a63; }
-.fm-main { flex: 1; min-width: 0; }
-.btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.btn-row + .btn-row { margin-top: 10px; }
-.crumb-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 13px; font-family: var(--font-mono); }
-.crumb-sep { color: var(--text-faint); }
-.fm-crumb { padding: 10px 14px; }
+.fm-page {}
+.fm-shell { display: flex; gap: 14px; align-items: flex-start; min-height: 200px; }
+.fm-shell.drop { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 10px; }
 
-.fm-table-wrap { padding: 0; }
+/* 侧栏 */
+.fm-side { width: 216px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface-2); }
+.fm-side-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; font-size: 12px; color: var(--text-faint); font-weight: 700; border-bottom: 1px solid var(--border); }
+.fm-mini-btn { padding: 0 6px; font-size: 11px; }
+.fm-side-section { padding: 6px 0; }
+.fm-side-section + .fm-side-section { border-top: 1px solid var(--border); }
+.fm-side-label { display: flex; justify-content: space-between; align-items: center; padding: 4px 12px; font-size: 11px; color: var(--text-faint); }
+.fm-nav-btn { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; padding: 6px 12px; border-radius: 0; background: transparent; border: none; color: var(--text); cursor: pointer; font-size: 12.5px; }
+.fm-nav-btn:hover { background: var(--surface-3); }
+.fm-nav-btn.active { background: var(--accent-soft); color: var(--accent-hover); }
+.fm-nav-x { color: var(--text-faint); padding: 0 2px; line-height: 1; }
+.fm-nav-x:hover { color: var(--danger); }
+.fm-nav-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 主区 */
+.fm-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.fm-grow { flex: 1; min-width: 0; }
+.fm-mono { font-family: var(--font-mono); }
+.fm-hidden-file { display: none; }
+
+/* 顶栏 */
+.fm-topbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.fm-topbar-left { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.fm-topbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+.fm-top-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 30px; height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--text-muted); font-size: 13px; cursor: pointer; transition: var(--transition); }
+.fm-top-btn:hover { background: var(--surface-3); color: var(--text); }
+.fm-top-btn.on { background: var(--accent-soft); color: var(--accent-hover); border-color: var(--accent); }
+.fm-badge { margin-left: 2px; background: var(--accent); color: #fff; border-radius: 8px; font-size: 10px; padding: 0 5px; line-height: 14px; }
+.fm-addr-wrap { flex: 1; min-width: 160px; }
+.fm-addr-input { width: 100%; font-family: var(--font-mono); }
+.fm-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; max-width: 680px; overflow: hidden; flex-wrap: nowrap; white-space: nowrap; font-size: 13px; cursor: default; }
+.fm-crumb { border: none; background: transparent; color: var(--text-muted); padding: 2px 4px; border-radius: 5px; cursor: pointer; font-size: 12.5px; }
+.fm-crumb:hover { background: var(--surface-3); color: var(--text); }
+.fm-crumb-sep { color: var(--text-faint); margin: 0 1px; }
+
+/* 工具条 */
+.fm-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.fm-search-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.fm-search-count { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+.fm-lbl { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.fm-lbl .input { font-size: 12px; padding: 4px 7px; }
+.fm-num { width: 62px; }
+.fm-inp-sm { width: 96px; }
+.fm-target { width: 200px; }
+
+/* 选择操作条 */
+.fm-selbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
+.fm-sel-info { font-weight: 700; color: var(--accent-hover); }
+.fm-sel-sep { width: 1px; height: 16px; background: var(--border-strong); }
+
+/* 参数卡 */
+.fm-params { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 4px 14px 10px; }
+.fm-params summary { cursor: pointer; font-size: 12px; color: var(--text-muted); user-select: none; padding: 6px 0; }
+.fm-params summary:hover { color: var(--text); }
+.fm-params-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+
+/* 状态条 */
+.fm-alert { padding: 8px 12px; border-radius: 8px; background: var(--danger-soft); color: var(--danger); font-size: 13px; }
+.fm-processing { display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: var(--text-muted); font-size: 13px; }
+.fm-hash { margin-top: 2px; font-size: 12px; }
+.fm-preview { }
+.fm-preview-body { max-height: 400px; overflow: auto; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.fm-warn-text { color: var(--warning); }
+
+/* 表格 */
+.fm-table-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
 .fm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.fm-table thead th {
-  padding: 8px 10px;
-  color: var(--text-faint);
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  background: var(--surface-2);
-  z-index: 1;
-}
+.fm-table thead th { padding: 8px 10px; color: var(--text-faint); text-align: left; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface-2); z-index: 2; font-weight: 600; }
 .fm-th-sort { cursor: pointer; }
 .fm-th-sort:hover { color: var(--text); }
-.fm-col-check { width: 30px; }
+.fm-col-check { width: 32px; }
 .fm-col-size { width: 100px; text-align: right; }
-.fm-col-type { width: 70px; }
+.fm-col-type { width: 72px; }
 .fm-col-time { width: 150px; }
-.fm-col-ops { width: 170px; }
-.fm-row { border-bottom: 1px solid var(--border); }
+.fm-col-ops { width: 172px; }
+.fm-row { border-bottom: 1px solid var(--border); transition: background var(--transition); }
+.fm-row:last-child { border-bottom: none; }
 .fm-row:hover { background: var(--surface-2); }
-.fm-row.sel { background: var(--surface-3); }
-.fm-row td { padding: 6px 6px; }
-.fm-row td.fm-col-name { padding: 6px 10px; cursor: pointer; }
-.fm-col-size { font-family: var(--font-mono); text-align: right; }
-.fm-col-time { color: var(--text-faint); font-family: var(--font-mono); font-size: 12px; }
-.fm-col-type { color: var(--text-muted); }
-.fm-ico { margin-right: 5px; }
+.fm-row.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.fm-row td { padding: 6px; }
+.fm-col-name { padding: 6px 10px !important; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fm-ico { margin-right: 6px; }
+.fm-link { color: var(--accent); font-size: 11px; margin-left: 4px; }
+.fm-op { padding: 2px 7px; font-size: 12px; opacity: 0.85; }
+.fm-col-ops { white-space: nowrap; }
+.fm-more { padding: 10px; text-align: center; }
+.fm-empty { padding: 34px; text-align: center; color: var(--text-faint); display: flex; align-items: center; justify-content: center; gap: 8px; }
 
-/* 上传进度 */
-.fm-up-item { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
-.fm-up-name { width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fm-up-bar { flex: 1; height: 8px; background: var(--surface-3); border-radius: 4px; overflow: hidden; }
-.fm-up-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width .15s; }
-.fm-up-fill.done { background: #7bd88f; }
-.fm-up-fill.error { background: #ff6a63; }
-.fm-up-pct { width: 48px; text-align: right; color: var(--text-muted); font-family: var(--font-mono); }
+/* 弹窗 */
+.fm-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(2px); }
+.fm-dialog { width: 440px; max-width: 92vw; max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+.fm-dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700; }
+.fm-dialog-body { padding: 14px 16px; overflow: auto; }
+.fm-dialog-crumb { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.fm-dialog-list { overflow: auto; padding: 6px; flex: 1; }
+.fm-dir-item { display: block; width: 100%; text-align: left; padding: 7px 12px; border-radius: 7px; font-size: 13px; color: var(--text); background: transparent; border: none; cursor: pointer; }
+.fm-dir-item:hover { background: var(--surface-3); }
+.fm-dialog-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.fm-confirm-msg { white-space: pre-wrap; word-break: break-all; }
 
 /* 编辑器 */
-.editor-mask { z-index: 1100; }
-.fm-editor-modal { width: min(920px, 94vw); height: 76vh; }
-.fm-editor-toolbar { display: flex; align-items: center; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
-.fm-edit-title { font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
-.fm-editor-wrap { flex: 1; display: flex; overflow: hidden; min-height: 0; }
-.fm-editor-gutter {
-  width: 52px; overflow: hidden; text-align: right; padding: 10px 8px 10px 0;
-  color: var(--text-faint); font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
-  background: var(--surface-3); user-select: none; flex-shrink: 0;
-}
-.fm-editor-ln { height: 18.6px; }
-.fm-editor-area {
-  flex: 1; min-width: 0; resize: none; border: none; outline: none;
-  background: var(--surface-2); color: var(--text);
-  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55;
-  padding: 10px 12px; white-space: pre; overflow: auto;
-}
+.fm-edit-mask { z-index: 1100; }
+.fm-edit-dialog { width: min(940px, 94vw); height: 78vh; }
+.fm-edit-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.fm-edit-title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44%; }
+.fm-edit-wrap { flex: 1; display: flex; overflow: hidden; min-height: 0; background: var(--surface); }
+.fm-edit-gutter { width: 52px; overflow: hidden; text-align: right; padding: 10px 8px 10px 0; color: var(--text-faint); font-size: 12px; line-height: 1.55; background: var(--surface-2); user-select: none; flex-shrink: 0; }
+.fm-edit-ln { height: 18.6px; }
+.fm-edit-area { flex: 1; min-width: 0; resize: none; border: none; outline: none; background: var(--surface); color: var(--text); font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; padding: 10px 12px; white-space: pre; overflow: auto; }
 
-/* 通用 modal */
-.fm-modal-mask {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
-  display: flex; align-items: center; justify-content: center; z-index: 1000;
-}
-.fm-modal {
-  width: 440px; max-width: 92vw; max-height: 82vh;
-  display: flex; flex-direction: column;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
-}
-.fm-modal-head {
-  display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 700;
-}
-.fm-modal-body { padding: 14px; overflow: auto; }
-.fm-modal-crumb { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px; border-bottom: 1px solid var(--border); }
-.fm-modal-list { overflow: auto; padding: 6px; flex: 1; }
-.fm-dir-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 10px; border-radius: 6px; font-size: 13px; color: var(--text); background: transparent; border: none; cursor: pointer; }
-.fm-dir-item:hover { background: var(--surface-3); }
-.fm-modal-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
-
-/* 右键菜单 */
-.fm-ctx {
-  position: fixed; z-index: 1500; min-width: 160px;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
-  padding: 4px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); font-size: 13px;
-}
-.fm-ctx-item {
-  display: block; width: 100%; text-align: left; padding: 6px 10px;
-  border: none; background: transparent; color: var(--text); border-radius: 6px; cursor: pointer;
-  font-family: var(--font-mono); font-size: 12px;
-}
-.fm-ctx-item:hover { background: var(--surface-3); }
-.fm-ctx-item.danger:hover { background: rgba(255, 106, 99, 0.15); color: #ff6a63; }
-.fm-ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+/* 上传卡片 */
+.fm-upcard { position: fixed; left: 16px; bottom: 16px; z-index: 1250; width: 320px; max-width: 82vw; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow); padding: 10px 12px; font-size: 12px; }
+.fm-upcard-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 6px; }
+.fm-upitem { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+.fm-upname { width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fm-upbar { flex: 1; height: 8px; background: var(--surface-3); border-radius: 4px; overflow: hidden; }
+.fm-upfill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.15s; }
+.fm-upfill.done { background: var(--success); }
+.fm-upfill.error { background: var(--danger); }
+.fm-uppct { width: 46px; text-align: right; color: var(--text-muted); }
 
 /* 任务面板 */
-.fm-tasks {
-  position: fixed; right: 16px; bottom: 16px; z-index: 1300; width: 360px; max-width: 92vw;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4); overflow: hidden;
-}
-.fm-tasks-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700; }
-.fm-tasks-body { max-height: 46vh; overflow: auto; padding: 6px 10px; }
-.fm-task { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.fm-tasks { position: fixed; right: 16px; bottom: 16px; z-index: 1300; width: 360px; max-width: 92vw; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+.fm-tasks-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700; }
+.fm-tasks-body { max-height: 46vh; overflow: auto; padding: 4px 12px; }
+.fm-task { padding: 10px 0; border-bottom: 1px solid var(--border); }
 .fm-task:last-child { border-bottom: none; }
 .fm-task-line { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .fm-task-op { font-weight: 700; }
 .fm-task-state { font-size: 12px; }
-.fm-task-state.done { color: #7bd88f; }
-.fm-task-state.error { color: #ff6a63; }
+.fm-task-state.done { color: var(--success); }
+.fm-task-state.error { color: var(--danger); }
 .fm-task-state.cancelled { color: var(--text-faint); }
-.fm-task-bar { height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
-.fm-task-fill { height: 100%; background: var(--accent); transition: width .3s; }
-.fm-task-foot { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.fm-taskbar { height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
+.fm-taskfill { height: 100%; background: var(--accent); transition: width 0.3s; }
+.fm-taskfoot { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.fm-task-err { color: var(--danger); font-size: 12px; margin-top: 4px; }
+
+/* 右键菜单 */
+.fm-ctx { position: fixed; z-index: 1500; min-width: 168px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px; padding: 4px; box-shadow: var(--shadow); font-size: 13px; }
+.fm-ctx-title { padding: 5px 10px; color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.fm-ctx-item { display: block; width: 100%; text-align: left; padding: 6px 10px; border: none; background: transparent; color: var(--text); border-radius: 6px; cursor: pointer; font-size: 12px; }
+.fm-ctx-item:hover { background: var(--surface-3); }
+.fm-ctx-item.danger:hover { background: var(--danger-soft); color: var(--danger); }
+.fm-ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 
 /* toast */
-.fm-toast {
-  position: fixed; top: 16px; right: 16px; z-index: 1200;
-  padding: 10px 16px; border-radius: 8px; font-size: 13px;
-  background: var(--surface-3); border: 1px solid var(--border); border-left: 3px solid #7bd88f;
-  color: var(--text); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
-}
-.fm-toast.err { border-left-color: #ff6a63; }
+.fm-toast { position: fixed; top: 16px; right: 16px; z-index: 2000; padding: 10px 16px; border-radius: 10px; font-size: 13px; background: var(--surface-3); border: 1px solid var(--border-strong); border-left: 3px solid var(--success); color: var(--text); box-shadow: var(--shadow); }
+.fm-toast.err { border-left-color: var(--danger); }
 .toast-enter-active, .toast-leave-active { transition: opacity 0.25s, transform 0.25s; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-8px); }
+
+/* 响应式 */
+@media (max-width: 960px) {
+  .fm-side { display: none; }
+  .fm-crumbs { max-width: 240px; }
+  .fm-col-ops { width: auto; }
+  .fm-col-time { display: none; }
+}
 </style>
