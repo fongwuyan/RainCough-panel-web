@@ -130,7 +130,11 @@ def plugin_dispatch(name, subpath):
     plugin = manager.get_plugin(name)
     if not plugin:
         return jsonify({'error': 'plugin not found'}), 404
-    return plugin.dispatch(subpath, request.method)
+    res = plugin.dispatch(subpath, request.method)
+    # 兜底: 插件未注册 /info 路由时, 返回通用插件信息(与 /api/plugins/<name> 一致)
+    if subpath == 'info' and isinstance(res, tuple) and len(res) == 2 and res[1] == 404:
+        return jsonify(plugin.get_info())
+    return res
 
 
 @app.route('/api/plugins/<name>', methods=['GET'])

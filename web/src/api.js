@@ -274,6 +274,16 @@ export const api = {
     return req('GET', `/api/fm/search?${qs.toString()}`)
   },
 
+  // 系统备份 (backup)
+  bkpList: () => req('GET', '/api/plugins/backup/jobs'),
+  bkpCreate: (data) => req('POST', '/api/plugins/backup/jobs', data),
+  bkpUpdate: (name, data) => req('POST', '/api/plugins/backup/jobs/update', { ...data, old_name: name }),
+  bkpDelete: (name) => req('POST', '/api/plugins/backup/jobs/delete', { name }),
+  bkpRun: (name) => req('POST', '/api/plugins/backup/jobs/run', { name }),
+  bkpRuns: () => req('GET', '/api/plugins/backup/runs'),
+  bkpDeleteRun: (file) => req('POST', '/api/plugins/backup/runs/delete', { file }),
+  bkpStatus: () => req('GET', '/api/plugins/backup/status'),
+
   // 系统 (日志 / 进程)
   sysLogs: (lines, grep) => req('GET', `/api/sys/logs?lines=${lines || 200}&grep=${encodeURIComponent(grep || '')}`),
   sysProcesses: (sort) => req('GET', `/api/sys/processes?sort=${sort || 'cpu'}`),

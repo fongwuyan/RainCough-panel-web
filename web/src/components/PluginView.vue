@@ -15,6 +15,7 @@ import McServerMain from './mcserver/McServerMain.vue'
 import McSkinMain from './mcskin/McSkinMain.vue'
 import KvmMain from './kvm/KvmMain.vue'
 import VpnMain from './vpn/VpnMain.vue'
+import BackupMain from './backup/BackupMain.vue'
 
 const MAP = {
   jmcomic: JmMain,
@@ -30,6 +31,7 @@ const MAP = {
   mcskin: McSkinMain,
   kvm: KvmMain,
   vpn: VpnMain,
+  backup: BackupMain,
 }
 
 const route = useRoute()
