@@ -29,6 +29,11 @@ app.register_blueprint(fm)
 app.register_blueprint(tm)
 app.register_blueprint(sys_api)
 app.register_blueprint(sysfunc, url_prefix='/api/sysfunc')
+
+# 接口监控: 全请求实时记录(见 sysfunc.after_request_handler)
+import sysfunc as _sysfunc_mod
+app.before_request(_sysfunc_mod.before_request_handler)
+app.after_request(_sysfunc_mod.after_request_handler)
 app.register_blueprint(media)
 app.register_blueprint(scheduler_api)
 app.register_blueprint(envpkg)

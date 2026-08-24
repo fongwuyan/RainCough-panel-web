@@ -3,12 +3,15 @@
 全部只读优先; 有副作用的操作(服务启停/更新/写cron/写密钥)显式经 POST 且 sudo 统一包装。
 """
 import json
+import collections
 import os
 import re
 import shutil
 import subprocess
+import sys
+import time
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g, current_app
 
 sysfunc = Blueprint('sysfunc', __name__)
 
@@ -747,3 +750,133 @@ def logrotate_save():
 # 事件埋点: 注入到既有写操作
 def _patch_events():
     pass
+
+
+# ================= 第四批: 启动/关机历史 =================
+@sysfunc.route('/boot/history', methods=['GET'])
+def boot_history():
+    r = _sudo(['last', '-x', '-n', '40'], timeout=30)
+    rows = []
+    for line in r['out'].splitlines():
+        line = line.strip()
+        if not line or 'wtmp begins' in line:
+            continue
+        if any(k in line for k in ('reboot', 'shutdown')):
+            parts = line.split()
+            if len(parts) >= 2:
+                rows.append({'action': parts[0], 'when': ' '.join(parts[1:])[:80]})
+    if not rows:
+        return jsonify({'ok': True, 'rows': [], 'note': (r['out'] or r['err'] or '')[:200]})
+    ups = []
+    r2 = _sudo(['uptime', '-s'], timeout=20)
+    return jsonify({'ok': True, 'rows': rows[:30], 'boot_started': r2['out'].strip()})
+
+
+# ================= 第五批: 接口监控(文件存储, 兼容 gunicorn 多 worker) =================
+_CALL_FILE = '/opt/touchgal/data/api_calls.jsonl'
+_CALL_FILE_MAX = 3000
+
+
+def before_request_handler():
+    try:
+        g._rc_start = time.time()
+    except Exception:
+        pass
+    return None
+
+
+def after_request_handler(resp):
+    try:
+        path = request.path or ''
+        if path.startswith('/assets') or path.startswith('/static/'):
+            return resp
+        start = getattr(g, '_rc_start', None)
+        ms = int((time.time() - (start or time.time())) * 1000)
+        rec = {'t': int(time.time()),
+               'ts': time.strftime('%H:%M:%S', time.localtime()),
+               'method': request.method or '',
+               'path': path[:160],
+               'code': resp.status_code,
+               'ms': ms,
+               'ip': (request.headers.get('X-Forwarded-For') or request.remote_addr or '').split(',')[0].strip()}
+        _append_call(rec)
+    except Exception as _e:
+        import traceback; traceback.print_exc()
+    return resp
+
+
+def _append_call(rec):
+    try:
+        line = json.dumps(rec, ensure_ascii=False)
+        with open(_CALL_FILE, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+        # 超限截断: 保留最近半
+        if os.path.getsize(_CALL_FILE) > 3000000:
+            head = _read_calls(0, 2000000)
+            with open(_CALL_FILE, 'w', encoding='utf-8') as f:
+                for r in head[-1500:]:
+                    f.write(json.dumps(r, ensure_ascii=False) + '\n')
+    except Exception as _e:
+        import traceback; traceback.print_exc()
+
+
+def _read_calls(limit=900):
+    out = []
+    try:
+        with open(_CALL_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return out[-limit:]
+
+
+@sysfunc.route('/api-monitor/stats', methods=['GET'])
+def api_monitor_stats():
+    rules = []
+    try:
+        rules = list(current_app.url_map.iter_rules())
+    except Exception:
+        pass
+    paths = set()
+    methods = {}
+    for r in rules:
+        if r.rule.startswith('/static'):
+            continue
+        paths.add(r.rule)
+        for m in (r.methods or ()):
+            if m not in ('HEAD', 'OPTIONS'):
+                methods[m] = methods.get(m, 0) + 1
+    calls = _read_calls(3000)
+    total = len(calls)
+    ok = sum(1 for x in calls if x.get('code', 0) < 400)
+    e4 = sum(1 for x in calls if 400 <= x.get('code', 0) < 500)
+    e5 = sum(1 for x in calls if x.get('code', 0) >= 500)
+    return jsonify({'routes_total': len(paths),
+                    'methods': methods,
+                    'calls_total': total, 'calls_ok': ok,
+                    'calls_4xx': e4, 'calls_5xx': e5,
+                    'recent': len(_read_calls(900)), 'sample': sorted(paths)[:40]})
+
+
+@sysfunc.route('/api-monitor/calls', methods=['GET'])
+def api_monitor_calls():
+    limit = max(10, min(int(request.args.get('limit', 300) or 300), 900))
+    items = _read_calls(limit)[::-1]
+    return jsonify({'calls': items, 'left': len(items)})
+
+
+@sysfunc.route('/api-monitor/clear', methods=['POST'])
+def api_monitor_clear():
+    try:
+        with open(_CALL_FILE, 'w', encoding='utf-8') as f:
+            f.write('')
+    except Exception:
+        pass
+    return jsonify({'ok': True})

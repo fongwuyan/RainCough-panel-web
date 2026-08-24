@@ -580,3 +580,8 @@ h3 { font-size: 14px; font-weight: 700; }
 .faint { color: var(--text-faint); }
 .mono { font-family: var(--font-mono); }
 .text-center { text-align: center; }
+
+/* 侧栏搜索 */
+.search-pop { position: absolute; left: 10px; right: 10px; z-index: 60; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow); margin-top: 4px; }
+.search-item { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.search-item:hover { background: var(--surface-2); }

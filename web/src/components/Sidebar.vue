@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
 import { useUi } from '../stores/ui'
@@ -10,6 +10,42 @@ const { plugins, load } = usePlugins()
 const { installOpen } = useUi()
 
 onMounted(load)
+
+const PAGES = [
+  { key: 'ws', label: '工作台', path: '/', desc: '概览与状态' },
+  { key: 'fm', label: '文件管理', path: '/plugin/filemanager', desc: '文件系统' },
+  { key: 'term', label: '终端', path: '/terminal', desc: 'Shell' },
+  { key: 'sysf', label: '系统中心', path: '/sysfunc', desc: '系统功能' },
+  { key: 'media', label: '媒体中心', path: '/media', desc: '图片视频' },
+  { key: 'store', label: '插件市场', path: '/store', desc: '安装更新' },
+  { key: 'envpkg', label: '环境包', path: '/envpkg', desc: '运行时' },
+  { key: 'tasks', label: '任务队列', path: '/tasks', desc: '下载安装' },
+  { key: 'settings', label: '设置', path: '/settings', desc: '偏好' },
+  { key: 'docs', label: '开发文档', path: '/docs', desc: '插件指南' },
+]
+const SYSTABS = ['日志','进程','服务','防火墙','硬件','更新','定时','磁盘','快照','用户','存储清理','关机重启','内核','时间','健康','事件','日志保留','系统备份','启动历史']
+const searchQ = ref('')
+const favs = ref(loadFavs())
+function loadFavs() { try { return JSON.parse(localStorage.getItem('rc-favs') || '[]') } catch (e) { return [] } }
+function saveFavs() { localStorage.setItem('rc-favs', JSON.stringify(favs.value)) }
+function favKey(label, path) { return path }
+const searchResults = computed(() => {
+  const q = searchQ.value.trim().toLowerCase()
+  if (!q) return []
+  const out = []
+  for (const p of PAGES) if ((p.label + p.desc).toLowerCase().includes(q)) out.push({ label: p.label, desc: p.desc, path: p.path })
+  for (const p of plugins.value) if ((p.label + ' ' + (p.description || '')).toLowerCase().includes(q)) out.push({ label: p.label, desc: p.description || '', path: '/plugin/' + p.name })
+  for (const t of SYSTABS) if (t.toLowerCase().includes(q)) out.push({ label: '系统中心 · ' + t, desc: '系统功能子选项卡', path: '/sysfunc' })
+  return out.slice(0, 10)
+})
+function pick(entry) { go(entry.path); searchQ.value = '' }
+function toggleFav(entry) {
+  const i = favs.value.findIndex((f) => f.path === entry.path)
+  if (i >= 0) favs.value.splice(i, 1); else favs.value.push({ label: entry.label, path: entry.path })
+  saveFavs()
+}
+function inFav(path) { return favs.value.some((f) => f.path === path) }
+
 
 function go(path) { router.push(path) }
 
@@ -36,6 +72,22 @@ function isActive(name) {
     <div class="sidebar-header">
       <span class="brand-dot"></span>
       <h2>RainCough</h2>
+    </div>
+    <div style="padding:10px">
+      <input v-model="searchQ" class="input" style="width:100%" placeholder="搜索: 页面/插件/功能…" @keydown.enter="searchResults.length && pick(searchResults[0])" />
+      <div v-if="searchQ && searchResults.length" class="search-pop">
+        <div v-for="r in searchResults" :key="r.path" class="search-item">
+          <span style="flex:1;cursor:pointer" @click="pick(r)"><b>{{ r.label }}</b> <span class="faint" style="font-size:11px">{{ r.desc }}</span></span>
+          <button class="btn btn-sm" @click="toggleFav(r)">{{ inFav(r.path) ? '★' : '☆' }}</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="favs.length" style="padding:0 10px 6px">
+      <div class="sidebar-section-label">收藏</div>
+      <div v-for="f in favs" :key="f.path" class="plugin-item" @click="go(f.path)">
+        <div class="info"><div class="label">{{ f.label }}</div></div>
+        <button class="btn btn-sm btn-ghost" @click.stop="toggleFav(f)">★</button>
+      </div>
     </div>
     <nav class="plugin-list">
       <div class="plugin-item" :class="{ active: isActive('workspace') }" @click="go('/')">

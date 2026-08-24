@@ -699,4 +699,14 @@ export const api = {
   sysfEvents: (limit) => req('GET', `/api/sysfunc/events/timeline?limit=${limit || 100}`),
   sysfLogrotateList: () => req('GET', '/api/sysfunc/logrotate/list'),
   sysfLogrotateSave: (name, content) => req('POST', '/api/sysfunc/logrotate/save', { name, content }),
+
+
+  // 系统级功能·第四批
+  sysfBootHistory: () => req('GET', '/api/sysfunc/boot/history'),
+
+
+  // 系统级功能·第五批(接口监控)
+  sysfApiStats: () => req('GET', '/api/sysfunc/api-monitor/stats'),
+  sysfApiCalls: (n) => req('GET', `/api/sysfunc/api-monitor/calls?limit=${n || 300}`),
+  sysfApiClear: () => req('POST', '/api/sysfunc/api-monitor/clear', {}),
 }

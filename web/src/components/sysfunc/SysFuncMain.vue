@@ -37,10 +37,12 @@ function loadSection(k) {
     health: () => api.sysfHealth(),
     events: () => api.sysfEvents(150),
     lr: () => api.sysfLogrotateList(),
+    boot: () => api.sysfBootHistory(),
+    api: () => loadApi(),
   };
   if (jobs[k]) call(k, jobs[k])
 }
-function switchSub(k) { sub.value = k; if (k !== 'logs' && k !== 'processes' && k !== 'backup' && !data.value[k]) loadSection(k) }
+function switchSub(k) { sub.value = k; if (k !== 'logs' && k !== 'processes' && k !== 'backup' && !data.value[k]) loadSection(k); apiPoll(k) }
 async function svcAct(u, act) {
   try { const r = await api.sysfServiceAction(u.unit, act); data.value.svcMsg = (r && (r.out || r.error)) || 'ok' } catch (e) { data.value.svcMsg = e.message }
   loadSection('svc')
@@ -91,6 +93,8 @@ const SUBS = [
   { key: 'events', label: '事件时间线' },
   { key: 'lr', label: '日志保留' },
   { key: 'backup', label: '系统备份' },
+  { key: 'boot', label: '启动历史' },
+  { key: 'api', label: '接口监控' },
 ];
 
 // ---- 第三批功能动作 ----
@@ -105,6 +109,25 @@ async function lrSave() {
   try { const r = await api.sysfLogrotateSave(lrEdit.value.name, lrEdit.value.content); toast((r && r.ok !== false) ? '已保存' : ((r && r.error) || '失败')) } catch (e) { toast(e.message) }
   loadSection('lr')
 }
+
+
+let apiTimer = null
+const apiPollOn = ref(true)
+async function loadApi() {
+  const [st, cl] = await Promise.all([api.sysfApiStats(), api.sysfApiCalls(300)])
+  data.value.apiStats = st
+  data.value.apiCalls = (cl && cl.calls) || []
+}
+function apiPoll(k) {
+  if (apiTimer) { clearInterval(apiTimer); apiTimer = null }
+  if (k === 'api' && apiPollOn.value) apiTimer = setInterval(() => { loadApi().catch(() => {}) }, 3000)
+}
+function toggleApiPoll() {
+  apiPollOn.value = !apiPollOn.value
+  if (sub.value === 'api') apiPoll('api')
+}
+async function clearApiCalls() { try { await api.sysfApiClear(); data.value.apiCalls = [] } catch (e) {} }
+function codeCls(c) { return c < 400 ? 'ok' : (c < 500 ? 'run' : 'err') }
 
 </script>
 
@@ -132,7 +155,44 @@ async function lrSave() {
     <Processes v-if="sub === 'processes'" />
     <BackupMain v-if="sub === 'backup'" />
 
-    <div v-if="sub !== 'logs' && sub !== 'processes' && sub !== 'backup'" class="sf-body">
+    
+      <template v-if="sub === 'boot'">
+        <div class="flex" style="margin-bottom:8px">
+          <button class="btn btn-sm" @click="loadSection('boot')">刷新</button>
+          <span v-if="(data.boot || {}).boot_started" class="muted mono">本次启动: {{ (data.boot || {}).boot_started }}</span>
+        </div>
+        <table class="table"><thead><tr><th>动作</th><th>时间</th></tr></thead>
+          <tbody><tr v-for="(r,i) in (data.boot || {}).rows || []" :key="i">
+            <td><span :class="r.action === 'reboot' ? 'ok' : 'err'">{{ r.action }}</span></td><td class="mono faint">{{ r.when }}</td></tr></tbody></table>
+        <div v-if="!((data.boot || {}).rows || []).length" class="hint">无记录(或 last 无法读取)</div>
+      </template>
+      <template v-if="sub === 'api'">
+        <div class="flex" style="margin-bottom:8px">
+          <button class="btn btn-sm" @click="loadApi">刷新</button>
+          <button class="btn btn-sm" @click="toggleApiPoll">{{ apiPollOn ? '暂停轮询' : '开启轮询' }}</button>
+          <button class="btn btn-sm btn-ghost" @click="clearApiCalls">清空记录</button>
+          <span class="muted">后端路由: <b class="mono">{{ (data.apiStats || {}).routes_total || 0 }}</b> · 累计调用: <b class="mono">{{ (data.apiStats || {}).calls_total || 0 }}</b> · 4xx: <b class="mono" :class="((data.apiStats||{}).calls_4xx||0)>0?'err':''">{{ (data.apiStats||{}).calls_4xx||0 }}</b> · 5xx: <b class="mono" :class="((data.apiStats||{}).calls_5xx||0)>0?'err':''">{{ (data.apiStats||{}).calls_5xx||0 }}</b></span>
+        </div>
+        <div class="flex" style="margin-bottom:6px;flex-wrap:wrap;gap:6px">
+          <span v-for="(n,m) in (data.apiStats||{}).methods || {}" :key="m" class="tag-chip">{{ m }} {{ n }}</span>
+        </div>
+        <table class="table">
+          <thead><tr><th>时间</th><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>来源</th></tr></thead>
+          <tbody>
+            <tr v-for="(c,i) in data.apiCalls || []" :key="i">
+              <td class="mono faint">{{ c.ts }}</td>
+              <td><span :class="c.method==='POST' ? 'err' : (c.method==='DELETE' ? 'run' : 'ok')">{{ c.method }}</span></td>
+              <td class="mono">{{ c.path }}</td>
+              <td><span :class="codeCls(c.code)">{{ c.code }}</span></td>
+              <td class="mono">{{ c.ms }}ms</td>
+              <td class="mono faint">{{ c.ip }}</td>
+            </tr>
+            <tr v-if="!(data.apiCalls || []).length"><td colspan="6" class="hint">暂无记录(有请求后出现; 轮询 3s 自动刷新)</td></tr>
+          </tbody>
+        </table>
+      </template>
+
+<div v-if="sub !== 'logs' && sub !== 'processes' && sub !== 'backup'" class="sf-body">
       <div v-if="err[sub]" class="error">{{ err[sub] }}</div>
 
       <template v-if="sub === 'svc'">
@@ -339,6 +399,15 @@ async function lrSave() {
           </div>
         </div>
       </template>
+      <template v-if="sub === 'boot'">
+        <div class="flex" style="margin-bottom:8px"><button class="btn btn-sm" @click="loadSection('boot')">刷新</button>
+          <span v-if="(data.boot || {}).boot_started" class="muted mono">本次启动: {{ (data.boot || {}).boot_started }}</span></div>
+        <table class="table"><thead><tr><th>动作</th><th>时间</th></tr></thead>
+          <tbody><tr v-for="(r,i) in (data.boot || {}).rows || []" :key="i">
+            <td><span :class="r.action === 'reboot' ? 'ok' : 'err'">{{ r.action }}</span></td><td class="mono faint">{{ r.when }}</td></tr></tbody></table>
+        <div v-if="!((data.boot || {}).rows || []).length" class="hint">无记录(或 last 无法读取)</div>
+      </template>
+
 
     </div>
   </div>
