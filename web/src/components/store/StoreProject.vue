@@ -101,7 +101,7 @@ onMounted(() => { loadStatus(); doCheck() })
         <a v-if="updateInfo.release_url" :href="updateInfo.release_url" target="_blank"
            rel="noopener" style="font-size:12px;">在 GitHub 查看</a>
       </div>
-      <div style="max-height:260px;overflow:auto;padding:10px;border:1px solid var(--border);border-radius:6px;
+      <div style="max-height:260px;overflow:auto;padding:10px;border:1px solid var(--border);border-radius: 0;
                   background:var(--bg);white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);">
         {{ updateInfo.changelog || '该版本没有更新说明。' }}
       </div>

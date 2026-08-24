@@ -132,7 +132,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
     <h1>系统备份</h1>
     <div class="subtitle">目录打包备份与保留轮换 · 支持定时执行，进度接入任务队列</div>
 
-    <div v-if="notice" class="notice" style="padding:8px 12px;border-radius:8px;background:var(--success-soft);color:var(--success);margin-bottom:12px;">{{ notice }}</div>
+    <div v-if="notice" class="notice" style="padding:8px 12px;border-radius: 0;background:var(--success-soft);color:var(--success);margin-bottom:12px;">{{ notice }}</div>
     <div v-if="error" class="error" style="margin-bottom:12px;">{{ error }}</div>
 
     <div class="section">
@@ -227,7 +227,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 <style scoped>
 .table th { color: var(--text-faint); font-size: 12px; }
 .modal-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal-panel { width: 520px; max-width: 94vw; max-height: 86vh; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+.modal-panel { width: 520px; max-width: 94vw; max-height: 86vh; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); border-radius: 0; box-shadow: var(--shadow); }
 .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 700; }
 .modal-body { padding: 14px; }
 .lbl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }

@@ -623,7 +623,7 @@ onUnmounted(() => {
 .ql-label { color: #555; font-weight: 600; letter-spacing: .5px; }
 .quick_links_input {
   flex: 0 1 420px; max-width: 480px;
-  border: 1px solid #cfd2d6; border-radius: 3px;
+  border: 1px solid #cfd2d6; border-radius: 0;
   padding: 5px 10px; font-size: 13px; outline: none;
 }
 .quick_links_input:focus { border-color: #66afe9; box-shadow: 0 0 3px rgba(102,175,233,.4); }
@@ -645,7 +645,7 @@ onUnmounted(() => {
   display: flex; align-items: center; gap: 6px;
   padding: 7px 12px 6px; margin-right: 4px;
   border: 1px solid #e3e5e8; border-bottom: none;
-  border-radius: 4px 4px 0 0;
+  border-radius: 0 0 0;
   background: #f5f6f7; color: #666;
   cursor: pointer; white-space: nowrap; user-select: none;
   max-width: 220px;
@@ -660,13 +660,13 @@ onUnmounted(() => {
 .term_item_tab .item .icon-warning { background: #f0ad4e; }
 .term_item_tab .item .icon-info { background: #b9bec4; }
 .term_item_tab .item .icon-trem-close {
-  color: #999; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 3px;
+  color: #999; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 0;
 }
 .term_item_tab .item .icon-trem-close:hover { color: #fff; background: #e2544b; }
 .term_item_tab .addServer {
   display: inline-flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; margin: 0 4px;
-  border: 1px solid #e3e5e8; border-radius: 4px;
+  border: 1px solid #e3e5e8; border-radius: 0;
   background: #fff; color: #2d8f5e; font-size: 16px; cursor: pointer;
 }
 .term_item_tab .addServer:hover { border-color: #2d8f5e; color: #fff; background: #2d8f5e; }
@@ -676,9 +676,9 @@ onUnmounted(() => {
   font-size: 12px; user-select: none;
 }
 .term_item_tab .tab_tootls:hover { color: #2d8f5e; }
-.tt-icon { display: inline-block; width: 13px; height: 13px; border: 1.5px solid currentColor; border-radius: 2px; position: relative; }
+.tt-icon { display: inline-block; width: 13px; height: 13px; border: 1.5px solid currentColor; border-radius: 0; position: relative; }
 .tt-max::after { content: ''; position: absolute; top: -3px; left: -3px; width: 8px; height: 8px; border: 1.5px solid #fff; }
-.tt-min::after { content: ''; position: absolute; top: 1px; left: 1px; right: 1px; bottom: 1px; border: 1.5px solid currentColor; border-radius: 1px; }
+.tt-min::after { content: ''; position: absolute; top: 1px; left: 1px; right: 1px; bottom: 1px; border: 1.5px solid currentColor; border-radius: 0; }
 
 /* 终端内容区 */
 .term_content_tab { position: relative; flex: 1; min-height: 0; background: #000; }
@@ -691,7 +691,7 @@ onUnmounted(() => {
   position: absolute; top: 50%; right: 0; transform: translateY(-50%);
   width: 18px; height: 56px;
   background: #eceef1; border: 1px solid #d0d4d8; border-right: none;
-  border-radius: 4px 0 0 4px;
+  border-radius: 0 0 0 4px;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; z-index: 6;
 }
@@ -730,7 +730,7 @@ onUnmounted(() => {
 .term_tootls li .tootls .glyph:hover { color: #2d8f5e; }
 
 /* 通用按钮 */
-.btn { display: inline-block; border: 1px solid transparent; border-radius: 3px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+.btn { display: inline-block; border: 1px solid transparent; border-radius: 0; padding: 5px 12px; font-size: 13px; cursor: pointer; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-success { background: #2d8f5e; border-color: #2d8f5e; color: #fff; }
 .btn-success:hover { background: #26794f; }
@@ -743,20 +743,20 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: center;
 }
 .term-modal {
-  width: 560px; background: #fff; border-radius: 4px; box-shadow: 0 8px 30px rgba(0,0,0,.2);
+  width: 560px; background: #fff; border-radius: 0; box-shadow: 0 8px 30px rgba(0,0,0,.2);
   overflow: hidden;
 }
 .term-modal .tm-title { padding: 14px 16px; font-size: 15px; font-weight: 600; border-bottom: 1px solid #eee; }
 .bt-form .line { display: flex; align-items: center; padding: 8px 0; }
 .bt-form .tname { width: 90px; color: #666; text-align: right; padding-right: 10px; flex-shrink: 0; }
-.bt-input-text { border: 1px solid #cfd2d6; border-radius: 3px; padding: 5px 8px; font-size: 13px; outline: none; }
+.bt-input-text { border: 1px solid #cfd2d6; border-radius: 0; padding: 5px 8px; font-size: 13px; outline: none; }
 .bt-input-text:focus { border-color: #66afe9; box-shadow: 0 0 3px rgba(102,175,233,.4); }
 .tm-actions { padding: 12px 16px; border-top: 1px solid #eee; text-align: right; }
 
 /* 提示 / 错误 */
 .bt-toast {
   position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
-  background: #fff; border: 1px solid #e3e5e8; border-radius: 4px;
+  background: #fff; border: 1px solid #e3e5e8; border-radius: 0;
   padding: 9px 20px; font-size: 13px; color: #333; z-index: 10000;
   box-shadow: 0 4px 14px rgba(0,0,0,.12);
 }

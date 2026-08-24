@@ -426,7 +426,7 @@ defineExpose({ measure, forceDraw: () => scheduleDraw() })
   position: absolute;
   left: 0;
   width: 10px;
-  border-radius: 5px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.25);
   cursor: pointer;
   display: none;

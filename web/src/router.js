@@ -10,6 +10,7 @@ import MediaCenter from './components/media/MediaCenter.vue'
 import Scheduler from './components/scheduler/Scheduler.vue'
 import EnvPkgMain from './components/envpkg/EnvPkgMain.vue'
 import TaskQueue from './components/tasks/TaskQueue.vue'
+import SysFuncMain from './components/sysfunc/SysFuncMain.vue'
 import StorePlugins from './components/store/StorePlugins.vue'
 
 const router = createRouter({
@@ -25,6 +26,7 @@ const router = createRouter({
     { path: '/scheduler', name: 'scheduler', component: Scheduler },
     { path: '/envpkg', name: 'envpkg', component: EnvPkgMain },
     { path: '/tasks', name: 'tasks', component: TaskQueue },
+    { path: '/sysfunc', name: 'sysfunc', component: SysFuncMain },
     { path: '/store', name: 'store', component: StorePlugins },
     { path: '/plugin/:name', name: 'plugin', component: PluginView },
     { path: '/:pathMatch(.*)*', redirect: '/' },

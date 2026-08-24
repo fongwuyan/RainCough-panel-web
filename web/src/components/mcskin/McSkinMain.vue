@@ -416,21 +416,21 @@ watch(params, () => drawOverlay(), { deep: true })
         <span class="hint" style="font-size:12px;">CPU 推理约 5-15 秒</span>
       </div>
       <div v-if="textBusy" style="margin-top:10px;">
-        <div style="height:8px;background:rgba(255,255,255,.1);border-radius:4px;overflow:hidden;">
-          <div style="height:100%;background:linear-gradient(90deg,#7c4dff,#40c4ff);transition:width .4s;border-radius:4px;" :style="{ width: textProgress + '%' }"></div>
+        <div style="height:8px;background:rgba(255,255,255,.1);border-radius: 0;overflow:hidden;">
+          <div style="height:100%;background:linear-gradient(90deg,#7c4dff,#40c4ff);transition:width .4s;border-radius: 0;" :style="{ width: textProgress + '%' }"></div>
         </div>
         <div class="hint" style="font-size:12px;margin-top:4px;">{{ textProgress }}%</div>
       </div>
       <div v-if="textResult && textResult.candidate" style="margin-top:12px;display:flex;gap:20px;flex-wrap:wrap;">
         <div>
           <div class="hint" style="font-size:12px;margin-bottom:6px;">3D 预览</div>
-          <div style="width:320px;height:320px;background:linear-gradient(135deg,rgba(0,0,0,.35),rgba(0,0,0,.55));border-radius:10px;overflow:hidden;">
+          <div style="width:320px;height:320px;background:linear-gradient(135deg,rgba(0,0,0,.35),rgba(0,0,0,.55));border-radius: 0;overflow:hidden;">
             <canvas ref="viewerRef" width="320" height="320"></canvas>
           </div>
         </div>
         <div>
           <div class="hint" style="font-size:12px;margin-bottom:6px;">皮肤贴图</div>
-          <img :src="'data:image/png;base64,' + textResult.candidate.png" style="width:256px;height:256px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.15);border-radius:6px;" />
+          <img :src="'data:image/png;base64,' + textResult.candidate.png" style="width:256px;height:256px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.15);border-radius: 0;" />
           <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-primary" @click="downloadText">下载 PNG</button>
             <button class="btn" @click="regenerate(textResult.id)">重新生成</button>
@@ -448,8 +448,8 @@ watch(params, () => drawOverlay(), { deep: true })
             <div class="hint" style="font-size:12px;margin:10px 0 6px;color:#90a4ae;">
               {{ gk === 'today' ? '今天' : (gk === 'yesterday' ? '昨天' : '更早') }}
             </div>
-            <div v-for="item in items" :key="item.id" style="display:flex;align-items:center;gap:12px;padding:8px;border:1px solid rgba(255,255,255,.1);border-radius:8px;margin-bottom:8px;flex-wrap:wrap;">
-              <img :src="'data:image/png;base64,' + (item.candidates && item.candidates[0] && item.candidates[0].png)" style="width:48px;height:48px;image-rendering:pixelated;border-radius:4px;border:1px solid rgba(255,255,255,.1);" />
+            <div v-for="item in items" :key="item.id" style="display:flex;align-items:center;gap:12px;padding:8px;border:1px solid rgba(255,255,255,.1);border-radius: 0;margin-bottom:8px;flex-wrap:wrap;">
+              <img :src="'data:image/png;base64,' + (item.candidates && item.candidates[0] && item.candidates[0].png)" style="width:48px;height:48px;image-rendering:pixelated;border-radius: 0;border:1px solid rgba(255,255,255,.1);" />
               <div style="flex:1;min-width:200px;">
                 <div style="font-size:13px;">{{ item.prompt }}</div>
                 <div class="hint" style="font-size:11px;">风格:{{ item.style }} · 色调:{{ item.tone }} · 强度:{{ item.strength }} · {{ new Date(item.created * 1000).toLocaleTimeString() }}</div>
@@ -488,11 +488,11 @@ watch(params, () => drawOverlay(), { deep: true })
       </div>
       <div v-if="srcUrl" style="margin-top:10px;display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;">
         <div>
-          <img :src="srcUrl" style="max-height:300px;max-width:220px;border-radius:8px;object-fit:contain;background:rgba(0,0,0,.25);" />
+          <img :src="srcUrl" style="max-height:300px;max-width:220px;border-radius: 0;object-fit:contain;background:rgba(0,0,0,.25);" />
         </div>
         <div style="min-width:0;flex:1;">
           <div class="hint" style="font-size:12px;margin-bottom:8px;">分区预览：头 / 躯干 / 左右臂 / 左右腿</div>
-          <canvas ref="overlayRef" style="width:auto;height:auto;max-width:100%;max-height:340px;border-radius:8px;border:1px solid rgba(255,255,255,.12);" />
+          <canvas ref="overlayRef" style="width:auto;height:auto;max-width:100%;max-height:340px;border-radius: 0;border:1px solid rgba(255,255,255,.12);" />
         </div>
       </div>
       <div v-if="srcUrl" class="section" style="margin-top:14px;">
@@ -543,21 +543,21 @@ watch(params, () => drawOverlay(), { deep: true })
         <span v-if="paintRegion" class="hint" style="font-size:12px;">正在重绘：{{ paintRegion }}</span>
       </div>
       <div v-if="paintBusy" style="margin-top:10px;">
-        <div style="height:8px;background:rgba(255,255,255,.1);border-radius:4px;overflow:hidden;">
-          <div style="height:100%;background:linear-gradient(90deg,#7c4dff,#40c4ff);transition:width .4s;border-radius:4px;" :style="{ width: paintProgress + '%' }"></div>
+        <div style="height:8px;background:rgba(255,255,255,.1);border-radius: 0;overflow:hidden;">
+          <div style="height:100%;background:linear-gradient(90deg,#7c4dff,#40c4ff);transition:width .4s;border-radius: 0;" :style="{ width: paintProgress + '%' }"></div>
         </div>
         <div class="hint" style="font-size:12px;margin-top:4px;">{{ paintProgress }}%</div>
       </div>
       <div v-if="paintResult" style="margin-top:12px;display:flex;gap:20px;flex-wrap:wrap;">
         <div>
           <div class="hint" style="font-size:12px;margin-bottom:6px;">3D 预览（AI 重绘后）</div>
-          <div style="width:320px;height:320px;background:linear-gradient(135deg,rgba(0,0,0,.35),rgba(0,0,0,.55));border-radius:10px;overflow:hidden;">
+          <div style="width:320px;height:320px;background:linear-gradient(135deg,rgba(0,0,0,.35),rgba(0,0,0,.55));border-radius: 0;overflow:hidden;">
             <canvas ref="viewerRef" width="320" height="320"></canvas>
           </div>
         </div>
         <div>
           <div class="hint" style="font-size:12px;margin-bottom:6px;">AI 皮肤贴图</div>
-          <img :src="'data:image/png;base64,' + paintResult.png" style="width:256px;height:256px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.15);border-radius:6px;" />
+          <img :src="'data:image/png;base64,' + paintResult.png" style="width:256px;height:256px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.15);border-radius: 0;" />
           <div style="margin-top:10px;">
             <button class="btn btn-primary" @click="downloadPaint">下载 PNG</button>
           </div>
@@ -570,13 +570,13 @@ watch(params, () => drawOverlay(), { deep: true })
       <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:12px;">
         <div>
           <div class="hint" style="font-size:12px;margin-bottom:6px;">3D 预览（拖拽旋转）</div>
-          <div style="width:320px;height:320px;background:linear-gradient(135deg,rgba(0,0,0,.35),rgba(0,0,0,.55));border-radius:10px;overflow:hidden;">
+          <div style="width:320px;height:320px;background:linear-gradient(135deg,rgba(0,0,0,.35),rgba(0,0,0,.55));border-radius: 0;overflow:hidden;">
             <canvas ref="viewerRef" width="320" height="320"></canvas>
           </div>
         </div>
         <div>
           <div class="hint" style="font-size:12px;margin-bottom:6px;">皮肤贴图</div>
-          <img :src="'data:image/png;base64,' + result.png" style="width:256px;height:256px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.15);border-radius:6px;" />
+          <img :src="'data:image/png;base64,' + result.png" style="width:256px;height:256px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.15);border-radius: 0;" />
           <div style="margin-top:10px;">
             <button class="btn btn-primary" @click="downloadPng">下载 PNG</button>
           </div>
@@ -594,13 +594,13 @@ watch(params, () => drawOverlay(), { deep: true })
       <div v-if="previewUrl" style="margin-top:12px;display:flex;gap:20px;flex-wrap:wrap;">
         <div>
           <div class="hint" style="font-size:12px;margin-bottom:6px;">3D 预览（拖拽旋转）</div>
-          <div style="width:320px;height:320px;background:linear-gradient(135deg,rgba(0,0,0,.35),rgba(0,0,0,.55));border-radius:10px;overflow:hidden;">
+          <div style="width:320px;height:320px;background:linear-gradient(135deg,rgba(0,0,0,.35),rgba(0,0,0,.55));border-radius: 0;overflow:hidden;">
             <canvas ref="viewerRef" width="320" height="320"></canvas>
           </div>
         </div>
         <div>
           <div class="hint" style="font-size:12px;margin-bottom:6px;">皮肤贴图</div>
-          <img :src="previewUrl" style="width:256px;height:256px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.15);border-radius:6px;" />
+          <img :src="previewUrl" style="width:256px;height:256px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.15);border-radius: 0;" />
         </div>
       </div>
     </div>

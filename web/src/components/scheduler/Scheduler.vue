@@ -532,7 +532,7 @@ onUnmounted(() => {
 
 .job-card {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 14px 16px;
   margin-bottom: 10px;
   background: var(--surface);
@@ -544,13 +544,13 @@ onUnmounted(() => {
 .job-main { flex: 1; min-width: 0; }
 .job-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .job-name { font-weight: 700; }
-.badge { font-size: 11px; padding: 1px 7px; border-radius: 4px; }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 0; }
 .badge-on { background: var(--success-soft); color: var(--success); }
 .badge-off { background: var(--surface-3); color: var(--text-muted); }
 .act-tag {
   font-size: 11px;
   padding: 1px 7px;
-  border-radius: 4px;
+  border-radius: 0;
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -565,7 +565,7 @@ onUnmounted(() => {
   color: var(--text-faint);
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 4px 8px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -577,7 +577,7 @@ onUnmounted(() => {
   color: var(--danger);
   background: var(--danger-soft);
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 0;
   padding: 4px 8px;
   word-break: break-all;
 }
@@ -663,7 +663,7 @@ onUnmounted(() => {
   color: var(--accent);
   background: var(--accent-soft);
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: 0;
 }
 .form-err { font-size: 12px; color: var(--danger); padding: 6px 0; }
 .form-ops { display: flex; gap: 8px; justify-content: flex-end; }

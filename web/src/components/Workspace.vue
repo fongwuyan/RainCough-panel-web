@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
 import { api } from '../api'
 import RealtimeChart from './sys/RealtimeChart.vue'
+import SysPerf from './sysfunc/SysPerf.vue'
+import SysNet from './sysfunc/SysNet.vue'
 
 const router = useRouter()
 const { plugins, remove } = usePlugins()
@@ -245,13 +247,14 @@ async function removePlugin(name) {
 }
 
 function openPlugin(name) { router.push(`/plugin/${name}`) }
+
 </script>
 
 <template>
   <div>
     <h1>工作台</h1>
     <div class="subtitle">已加载 {{ plugins.length }} 个插件</div>
-
+        
     <div class="section" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
       <div>
         <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">{{ plugins.length }}</div>
@@ -419,7 +422,10 @@ function openPlugin(name) { router.push(`/plugin/${name}`) }
       </div>
     </div>
 
-    <div class="section">
+        <SysPerf />
+    <SysNet />
+
+<div class="section">
       <div class="section-title">磁盘设备
         <button class="btn btn-sm btn-ghost" style="float:right;" @click="loadDisks">刷新</button>
       </div>
@@ -437,7 +443,7 @@ function openPlugin(name) { router.push(`/plugin/${name}`) }
         </div>
         <div v-if="d.partitions && d.partitions.length" style="margin-top:8px;margin-left:18px;">
           <div v-for="p in d.partitions" :key="p.path"
-               style="display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--surface-2);">
+               style="display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--border);border-radius: 0;margin-bottom:6px;background:var(--surface-2);">
             <span style="font-family:var(--font-mono);font-size:12px;min-width:110px;">{{ p.path }}</span>
             <span style="font-size:11px;color:var(--text-muted);min-width:60px;">{{ p.fstype || '-' }}</span>
             <span style="font-size:12px;font-family:var(--font-mono);min-width:80px;">{{ fmtBytes(p.size) }}</span>

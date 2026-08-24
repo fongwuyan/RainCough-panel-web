@@ -211,7 +211,7 @@ function fmt24(i, c, len) {
                 最近检查 {{ fmtAgo(t.last_check) }} · 记录 {{ t.history_count }} 条
               </div>
               <div v-if="status24[t.name] && status24[t.name].length" style="margin-top:8px;">
-                <div style="display:flex;gap:1px;height:16px;overflow:hidden;border-radius:2px;max-width:720px;">
+                <div style="display:flex;gap:1px;height:16px;overflow:hidden;border-radius: 0;max-width:720px;">
                   <div
                     v-for="(c, i) in status24[t.name]"
                     :key="i"

@@ -24,6 +24,7 @@ function isActive(name) {
   if (name === 'media') return route.name === 'media'
   if (name === 'scheduler') return route.name === 'scheduler'
   if (name === 'tasks') return route.name === 'tasks'
+  if (name === 'sysfunc') return route.name === 'sysfunc'
   if (name === 'envpkg') return route.name === 'envpkg'
   if (name === 'store') return route.name === 'store'
   return route.name === 'plugin' && route.params.name === name
@@ -33,19 +34,20 @@ function isActive(name) {
 <template>
   <aside class="sidebar">
     <div class="sidebar-header">
-      <h2>插件</h2>
+      <span class="brand-dot"></span>
+      <h2>RainCough</h2>
     </div>
     <nav class="plugin-list">
       <div class="plugin-item" :class="{ active: isActive('workspace') }" @click="go('/')">
         <div class="info">
           <div class="label">工作台</div>
-          <div class="desc">插件概览与状态</div>
+          <div class="desc">概览与状态</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('filemanager') }" @click="go('/plugin/filemanager')">
         <div class="info">
           <div class="label">文件管理</div>
-          <div class="desc">浏览服务器文件系统</div>
+          <div class="desc">服务器文件系统</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('terminal') }" @click="go('/terminal')">
@@ -54,61 +56,57 @@ function isActive(name) {
           <div class="desc">服务器 Shell</div>
         </div>
       </div>
+
       <div class="sidebar-section-label">系统</div>
       <div class="plugin-item" :class="{ active: isActive('media') }" @click="go('/media')">
         <div class="info">
           <div class="label">媒体中心</div>
-          <div class="desc">聚合浏览图片与视频</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('logs') }" @click="go('/logs')">
-        <div class="info">
-          <div class="label">系统日志</div>
-          <div class="desc">查看运行日志</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('processes') }" @click="go('/processes')">
-        <div class="info">
-          <div class="label">进程管理</div>
-          <div class="desc">进程列表与结束</div>
+          <div class="desc">图片与视频聚合</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('scheduler') }" @click="go('/scheduler')">
         <div class="info">
           <div class="label">定时任务</div>
-          <div class="desc">生图/抓取/清理调度</div>
+          <div class="desc">调度器编排</div>
+        </div>
+      </div>
+      <div class="plugin-item" :class="{ active: isActive('sysfunc') }" @click="go('/sysfunc')">
+        <div class="info">
+          <div class="label">系统中心</div>
+          <div class="desc">日志/进程/服务/硬件/更新等</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('tasks') }" @click="go('/tasks')">
         <div class="info">
           <div class="label">任务队列</div>
-          <div class="desc">下载/安装/生成进度</div>
+          <div class="desc">下载/安装/生成</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('store') }" @click="go('/store')">
         <div class="info">
           <div class="label">插件市场</div>
-          <div class="desc">拉取安装/更新第三方插件</div>
+          <div class="desc">安装/更新/卸载</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('envpkg') }" @click="go('/envpkg')">
         <div class="info">
-          <div class="label">环境包管理</div>
-          <div class="desc">PHP/JDK/Node/Maven 运行时</div>
+          <div class="label">环境包</div>
+          <div class="desc">运行时管理</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('settings') }" @click="go('/settings')">
         <div class="info">
           <div class="label">设置</div>
-          <div class="desc">界面主题与偏好</div>
+          <div class="desc">主题与偏好</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('docs') }" @click="go('/docs')">
         <div class="info">
-          <div class="label">插件开发文档</div>
+          <div class="label">开发文档</div>
           <div class="desc">插件开发指南</div>
         </div>
       </div>
+
       <div class="sidebar-divider"></div>
       <div class="sidebar-section-label">插件</div>
       <template v-if="plugins.length">
@@ -117,7 +115,7 @@ function isActive(name) {
           :key="p.name"
           class="plugin-item"
           :class="{ active: isActive(p.name) }"
-          @click="go(`/plugin/${p.name}`)"
+          @click="go('/plugin/' + p.name)"
         >
           <div class="info">
             <div class="label">{{ p.label }}</div>
@@ -129,7 +127,7 @@ function isActive(name) {
     </nav>
     <div class="sidebar-footer">
       <button class="btn btn-primary btn-block" @click="installOpen = true">安装插件</button>
-      <span class="version">v1.0</span>
+      <span class="version">v1.0 · 仅局域网</span>
     </div>
   </aside>
 </template>

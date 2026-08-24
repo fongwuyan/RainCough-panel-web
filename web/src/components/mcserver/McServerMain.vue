@@ -390,7 +390,7 @@ function stopInstallPoll() {
 .btn-lg { padding: 10px 20px; font-size: 15px; }
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 20px; }
-.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; transition: transform .15s, border-color .15s; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 18px 20px; transition: transform .15s, border-color .15s; }
 .stat-card:hover { transform: translateY(-2px); border-color: var(--border-strong); }
 .stat-num { font-size: 30px; font-weight: 700; font-family: var(--font-mono); color: var(--text); }
 .stat-label { font-size: 13px; color: var(--text-faint); margin-top: 4px; }
@@ -398,19 +398,19 @@ function stopInstallPoll() {
 .stat-card.red .stat-num { color: #f85149; }
 .stat-card.accent .stat-num { color: var(--accent); font-size: 22px; }
 
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-top: 20px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 20px; margin-top: 20px; }
 .panel-title { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 18px; }
 @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
 
-.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 70px 20px; margin-top: 20px; border: 1px dashed var(--border-strong); border-radius: 16px; }
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 70px 20px; margin-top: 20px; border: 1px dashed var(--border-strong); border-radius: 0; }
 .empty-icon { font-size: 54px; color: var(--border-strong); margin-bottom: 12px; }
 .empty-title { font-size: 20px; font-weight: 600; }
 .empty-desc { color: var(--text-faint); margin-top: 8px; font-size: 14px; }
 .empty-actions { margin-top: 18px; }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 20px; }
-.card { border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; background: var(--surface); transition: transform .15s, box-shadow .15s, border-color .15s; }
+.card { border: 1px solid var(--border); border-radius: 0; padding: 16px 18px; background: var(--surface); transition: transform .15s, box-shadow .15s, border-color .15s; }
 .card:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(0,0,0,.22); border-color: var(--border-strong); }
 .card.run { border-color: rgba(63,185,80,.4); }
 .card-top { display: flex; align-items: center; gap: 8px; }
@@ -430,7 +430,7 @@ function stopInstallPoll() {
 .btn-danger-ghost:hover:not(:disabled) { background: rgba(248,81,73,.12); border-color: #f85149; }
 
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.modal { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; width: min(600px, 94vw); padding: 22px; max-height: 88vh; overflow: auto; }
+.modal { background: var(--bg); border: 1px solid var(--border); border-radius: 0; width: min(600px, 94vw); padding: 22px; max-height: 88vh; overflow: auto; }
 .modal-head { font-size: 17px; font-weight: 600; margin-bottom: 14px; }
 .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
 .modal-sep { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 14px; }
@@ -438,7 +438,7 @@ function stopInstallPoll() {
 
 .form-row-col { flex-direction: column; align-items: stretch !important; gap: 4px !important; }
 .textarea { min-height: 70px; resize: vertical; font-family: var(--font-mono); font-size: 12px !important; }
-.inst-status { margin-top: 12px; padding: 8px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.inst-status { margin-top: 12px; padding: 8px 12px; border-radius: 0; background: var(--surface); border: 1px solid var(--border); font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .inst-status.err { border-color: #f85149; color: #f85149; }
 .spin { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: dash-spin .8s linear infinite; }
 @keyframes dash-spin { to { transform: rotate(360deg); } }

@@ -166,7 +166,7 @@ function isRunning() { return detail.value && (detail.value.state || '') === 'ru
           <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;">
             <div style="min-width:180px;flex:1;">
               <div class="meta" style="font-size:12px;">CPU 使用率 {{ stats.cpu_pct }}%</div>
-              <div class="progress" style="margin-top:6px;border-radius:4px;">
+              <div class="progress" style="margin-top:6px;border-radius: 0;">
                 <div :style="{ width: Math.min(100, stats.cpu_pct) + '%' }"></div>
               </div>
             </div>
@@ -177,7 +177,7 @@ function isRunning() { return detail.value && (detail.value.state || '') === 'ru
                 / {{ fmtSize(stats.mem.maximum_kb * 1024) }}
                 <span v-if="stats.mem.rss_kb" class="meta">（宿主 RSS {{ fmtSize(stats.mem.rss_kb * 1024) }}）</span>
               </div>
-              <div class="progress" style="margin-top:6px;border-radius:4px;">
+              <div class="progress" style="margin-top:6px;border-radius: 0;">
                 <div :style="{ width: Math.min(100, 100 * (stats.mem.maximum_kb - (stats.mem.available_kb || 0)) / stats.mem.maximum_kb) + '%' }"></div>
               </div>
             </div>
@@ -229,8 +229,8 @@ function isRunning() { return detail.value && (detail.value.state || '') === 'ru
 
     <div v-if="vncShow" class="section" style="margin-top:16px;">
       <div class="section-title">VNC 控制台 · {{ vncName }}</div>
-      <div style="background:#111;border-radius:10px;overflow:hidden;margin-top:10px;padding:8px;">
-        <canvas id="vnc-canvas" style="width:100%;height:520px;background:#000;border-radius:6px;"></canvas>
+      <div style="background:#111;border-radius: 0;overflow:hidden;margin-top:10px;padding:8px;">
+        <canvas id="vnc-canvas" style="width:100%;height:520px;background:#000;border-radius: 0;"></canvas>
       </div>
       <div style="margin-top:8px;">
         <button class="btn btn-sm btn-ghost" @click="closeVnc">关闭控制台</button>

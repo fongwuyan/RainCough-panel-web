@@ -14,6 +14,7 @@ from plugins.converter import convert_java_plugin, is_java_plugin
 from filemanager import fm
 from terminal import tm
 from system import sys as sys_api
+from sysfunc import sysfunc
 from media import media
 from scheduler import scheduler_api, init_scheduler
 from envpkg import envpkg
@@ -27,6 +28,7 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024 * 1024
 app.register_blueprint(fm)
 app.register_blueprint(tm)
 app.register_blueprint(sys_api)
+app.register_blueprint(sysfunc, url_prefix='/api/sysfunc')
 app.register_blueprint(media)
 app.register_blueprint(scheduler_api)
 app.register_blueprint(envpkg)
@@ -167,7 +169,8 @@ def plugin_info(name):
 
 @app.route('/api/plugins')
 def list_plugins():
-    return jsonify(manager.list_plugins())
+    # 系统备份已并入系统中心作为系统功能, 不再以插件条目展示(功能与 API 保留)
+    return jsonify([p for p in manager.list_plugins() if p.get('name') != 'backup'])
 
 
 @app.route('/api/terminal/ws_token')

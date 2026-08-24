@@ -136,7 +136,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 }
 .proc-table-wrap {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   overflow: auto;
 }
 .proc-table {

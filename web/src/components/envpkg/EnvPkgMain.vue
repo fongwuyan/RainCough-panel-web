@@ -269,7 +269,7 @@ function installedPkg(name) {
 <style scoped>
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .tab { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--border);
-  border-radius: 10px; background: var(--surface); color: var(--text-faint); cursor: pointer; font-size: 13px; transition: all .15s; }
+  border-radius: 0; background: var(--surface); color: var(--text-faint); cursor: pointer; font-size: 13px; transition: all .15s; }
 .tab:hover { border-color: var(--border-strong); }
 .tab--active { background: var(--surface); font-weight: 600; }
 .tab-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
@@ -280,7 +280,7 @@ function installedPkg(name) {
 .checkbox { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-faint); }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 14px;
   transition: transform .15s, border-color .15s; }
 .card:hover { transform: translateY(-2px); border-color: var(--border-strong); }
 .card--installed { border-color: #3fb950; }
@@ -289,14 +289,14 @@ function installedPkg(name) {
 .card-meta { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
 .card-actions { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
 .empty-card { display: flex; align-items: center; justify-content: center; min-height: 90px;
-  border: 1px dashed var(--border-strong); border-radius: 12px; color: var(--text-faint); }
+  border: 1px dashed var(--border-strong); border-radius: 0; color: var(--text-faint); }
 
-.section { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+.section { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 20px; }
 .section-title { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
 .tag-chip.warn { color: #f0b429; }
 
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.modal { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; width: min(420px, 92vw); padding: 22px; max-height: 88vh; overflow: auto; }
+.modal { background: var(--bg); border: 1px solid var(--border); border-radius: 0; width: min(420px, 92vw); padding: 22px; max-height: 88vh; overflow: auto; }
 .modal-head { font-size: 17px; font-weight: 600; margin-bottom: 14px; }
 .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
 </style>

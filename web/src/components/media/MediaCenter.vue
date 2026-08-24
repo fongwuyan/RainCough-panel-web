@@ -311,7 +311,7 @@ onMounted(async () => {
 .tab {
   padding: 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: 0;
   background: var(--surface-2);
   color: var(--text-muted);
   font-size: 12px;
@@ -327,7 +327,7 @@ onMounted(async () => {
 }
 .media-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
   background: var(--surface-2);
   cursor: pointer;
@@ -387,7 +387,7 @@ onMounted(async () => {
 .modal {
   background: var(--surface);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 16px;
   width: 560px;
   max-width: 92vw;
@@ -406,14 +406,14 @@ onMounted(async () => {
   color: var(--text-muted);
   background: var(--surface-3);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 1px 6px;
 }
 .dedup-list { max-height: 55vh; overflow: auto; }
 .dedup-note { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
 .dedup-group {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 8px 10px;
   margin-bottom: 8px;
   background: var(--surface-2);

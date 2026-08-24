@@ -337,7 +337,7 @@ function drawChart() {
         <button class="btn btn-primary" :disabled="!st.running" @click="sendCmd">发送</button>
         <button class="btn btn-ghost" @click="loadConsole">重新载入</button>
       </div>
-      <div ref="termEl" style="background:#0f1216;border:1px solid var(--border);border-radius:6px;padding:8px;height:420px;overflow:hidden;"></div>
+      <div ref="termEl" style="background:#0f1216;border:1px solid var(--border);border-radius: 0;padding:8px;height:420px;overflow:hidden;"></div>
     </div>
 
     <!-- 玩家 -->

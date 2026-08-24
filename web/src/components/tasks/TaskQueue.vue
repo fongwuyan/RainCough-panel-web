@@ -236,7 +236,7 @@ function timeAgo(ts) {
 .header-actions { display: flex; gap: 8px; }
 
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 14px 16px; }
 .stat-num { font-size: 26px; font-weight: 700; }
 .stat-num.accent { color: var(--accent); }
 .stat-num.warn { color: #f0b429; }
@@ -244,18 +244,18 @@ function timeAgo(ts) {
 .stat-label { font-size: 12px; color: var(--border-strong); margin-top: 2px; }
 
 .filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
-.filter-chip { padding: 6px 14px; border: 1px solid var(--border); border-radius: 20px; cursor: pointer; font-size: 13px; color: var(--border-strong); }
+.filter-chip { padding: 6px 14px; border: 1px solid var(--border); border-radius: 0; cursor: pointer; font-size: 13px; color: var(--border-strong); }
 .filter-chip:hover { border-color: var(--border-strong); }
 .filter-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .search-input { max-width: 260px; margin-left: auto; }
 
 .task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.task-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.task-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 14px; }
 .task-card.clickable { cursor: pointer; }
 .task-card.clickable:hover { border-color: var(--border-strong); }
 
 .task-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.task-badge { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); }
+.task-badge { font-size: 11px; padding: 2px 8px; border-radius: 0; background: var(--accent-soft); color: var(--accent); }
 .task-badge.kind-download { background: rgba(63, 185, 80, 0.15); color: #3fb950; }
 .task-badge.kind-install { background: rgba(109, 92, 255, 0.15); color: var(--accent); }
 .task-badge.kind-generate { background: rgba(240, 180, 41, 0.15); color: #f0b429; }

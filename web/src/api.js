@@ -284,6 +284,49 @@ export const api = {
   bkpDeleteRun: (file) => req('POST', '/api/plugins/backup/runs/delete', { file }),
   bkpStatus: () => req('GET', '/api/plugins/backup/status'),
 
+  // VPN 网络 (v2 重写)
+  vpnEnv: () => req('GET', '/api/plugins/vpn/env'),
+  vpnOverview: () => req('GET', '/api/plugins/vpn/overview'),
+  vpnLogs: (n) => req('GET', `/api/plugins/vpn/logs?lines=${n || 60}`),
+  vpnStopAll: () => req('POST', '/api/plugins/vpn/stop-all', {}),
+  vpnSubs: () => req('GET', '/api/plugins/vpn/v2/subs'),
+  vpnSubAdd: (name, url) => req('POST', '/api/plugins/vpn/v2/subs', { name, url }),
+  vpnSubRefresh: () => req('POST', '/api/plugins/vpn/v2/subs/refresh', {}),
+  vpnSubDelete: (name) => req('DELETE', `/api/plugins/vpn/v2/subs?name=${encodeURIComponent(name)}`),
+  vpnNodes: (q) => req('GET', `/api/plugins/vpn/v2/nodes${q ? '?q=' + encodeURIComponent(q) : ''}`),
+  vpnNodeDelete: (ids) => req('POST', '/api/plugins/vpn/v2/nodes/delete', { ids }),
+  vpnNodeTest: (ids) => req('POST', '/api/plugins/vpn/v2/nodes/test', { ids }),
+  vpnNodeSpeed: (id) => req('POST', '/api/plugins/vpn/v2/nodes/speedtest', { id }),
+  vpnConnect: (id) => req('POST', '/api/plugins/vpn/v2/connect', { id }),
+  vpnDisconnect: () => req('POST', '/api/plugins/vpn/v2/connect', { action: 'disconnect' }),
+  vpnStatus: () => req('GET', '/api/plugins/vpn/v2/status'),
+  vpnWgStatus: () => req('GET', '/api/plugins/vpn/wg/status'),
+  vpnWgUp: (name) => req('POST', '/api/plugins/vpn/wg/up', { name }),
+  vpnWgDown: (name) => req('POST', '/api/plugins/vpn/wg/down', { name }),
+  vpnWgImport: (name, text) => req('POST', '/api/plugins/vpn/wg/import', { name, text }),
+  vpnOvpnStatus: () => req('GET', '/api/plugins/vpn/ovpn/status'),
+  vpnOvpnUp: (name) => req('POST', '/api/plugins/vpn/ovpn/up', { name }),
+  vpnOvpnDown: (name) => req('POST', '/api/plugins/vpn/ovpn/down', { name }),
+  vpnOvpnImport: (name, text) => req('POST', '/api/plugins/vpn/ovpn/import', { name, text }),
+
+  // 系统级功能 (sysfunc)
+  sysfServiceList: () => req('GET', '/api/sysfunc/service/list'),
+  sysfServiceAction: (unit, action) => req('POST', '/api/sysfunc/service/action', { unit, action }),
+  sysfFw: () => req('GET', '/api/sysfunc/fw/all'),
+  sysfHardware: () => req('GET', '/api/sysfunc/hardware'),
+  sysfUpdatesRefresh: () => req('POST', '/api/sysfunc/updates/refresh', {}),
+  sysfUpdatesList: () => req('GET', '/api/sysfunc/updates/list'),
+  sysfUpdatesRun: () => req('POST', '/api/sysfunc/updates/run', { confirm: 'yes' }),
+  sysfCronGet: (user) => req('GET', `/api/sysfunc/cron/get?user=${user || ''}`),
+  sysfCronSave: (user, content) => req('POST', '/api/sysfunc/cron/save', { user, content }),
+  sysfDisks: () => req('GET', '/api/sysfunc/disks/fs'),
+  sysfSnapCap: () => req('GET', '/api/sysfunc/snapshot/cap'),
+  sysfSnapCreate: (name) => req('POST', '/api/sysfunc/snapshot/create', { name }),
+  sysfSnapList: () => req('GET', '/api/sysfunc/snapshot/list'),
+  sysfUsers: () => req('GET', '/api/sysfunc/users'),
+  sysfSshKeys: (user) => req('GET', `/api/sysfunc/ssh/keys?user=${encodeURIComponent(user)}`),
+  sysfSshKeysSave: (user, keys) => req('POST', '/api/sysfunc/ssh/keys/save', { user, keys }),
+
   // 系统 (日志 / 进程)
   sysLogs: (lines, grep) => req('GET', `/api/sys/logs?lines=${lines || 200}&grep=${encodeURIComponent(grep || '')}`),
   sysProcesses: (sort) => req('GET', `/api/sys/processes?sort=${sort || 'cpu'}`),
@@ -481,6 +524,14 @@ export const api = {
   dkRemoveImage: (id, force) => req('POST', '/api/plugins/docker/images/remove', { id, force }),
   dkNetworks: () => req('GET', '/api/plugins/docker/networks'),
   dkVolumes: () => req('GET', '/api/plugins/docker/volumes'),
+  dkEnv: () => req('GET', '/api/plugins/docker/env'),
+  dkStatus: () => req('GET', '/api/plugins/docker/status'),
+  dkCreate: (cfg) => req('POST', '/api/plugins/docker/containers/create', cfg),
+  dkPrune: (all, volumes) => req('POST', '/api/plugins/docker/system/prune', { all, volumes }),
+  dkVolumeRemove: (name) => req('POST', '/api/plugins/docker/volume/remove', { name }),
+  dkComposeUp: (path) => req('POST', '/api/plugins/docker/compose/up', { path }),
+  dkComposeDown: (path) => req('POST', '/api/plugins/docker/compose/down', { path }),
+  dkComposePs: (path) => req('POST', '/api/plugins/docker/compose/ps', { path }),
 
   // KVM 虚拟机
   kvConfig: () => req('GET', '/api/plugins/kvm/config'),
@@ -626,4 +677,26 @@ export const api = {
   v2NodesSelect: (id, name, port) => req('POST', '/api/plugins/vpn/v2/nodes/select', { id, name, port }),
   v2ModeGet: () => req('GET', '/api/plugins/vpn/v2/mode'),
   v2ModeSet: (mode) => req('POST', '/api/plugins/vpn/v2/mode', { mode }),
+
+
+  // 系统级功能·第二批
+  sysfCleanScan: () => req('GET', '/api/sysfunc/clean/scan'),
+  sysfCleanDo: (item) => req('POST', '/api/sysfunc/clean/do', { item }),
+  sysfPerf: (hours) => req('GET', `/api/sysfunc/perf/history?hours=${hours || 24}`),
+  sysfNet: () => req('GET', '/api/sysfunc/net/status'),
+  sysfPwrPlan: (action, minutes) => req('POST', '/api/sysfunc/pwr/plan', { action, minutes }),
+  sysfPwrCancel: () => req('POST', '/api/sysfunc/pwr/cancel', {}),
+  sysfPwrState: () => req('GET', '/api/sysfunc/pwr/state'),
+  sysfKernels: () => req('GET', '/api/sysfunc/kernels'),
+  sysfKernelRemove: (pkg) => req('POST', '/api/sysfunc/kernels/remove', { pkg, confirm: 'yes' }),
+  sysfTime: () => req('GET', '/api/sysfunc/time/status'),
+  sysfTimeSync: () => req('POST', '/api/sysfunc/time/sync', {}),
+
+
+  // 系统级功能·第三批
+  sysfHealth: () => req('GET', '/api/sysfunc/health/check'),
+  sysfHealthRestart: () => req('POST', '/api/sysfunc/health/restart', { confirm: 'yes' }),
+  sysfEvents: (limit) => req('GET', `/api/sysfunc/events/timeline?limit=${limit || 100}`),
+  sysfLogrotateList: () => req('GET', '/api/sysfunc/logrotate/list'),
+  sysfLogrotateSave: (name, content) => req('POST', '/api/sysfunc/logrotate/save', { name, content }),
 }

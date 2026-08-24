@@ -91,7 +91,7 @@ onUnmounted(stop)
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 5px 8px;
   font-size: 13px;
 }
@@ -112,7 +112,7 @@ onUnmounted(stop)
   padding: 10px 12px;
   background: #0b0e11;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
