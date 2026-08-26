@@ -1,12 +1,16 @@
 import { ref } from 'vue'
-import { api } from '../api'
+import { pluginsApi } from '../api/plugins'
 
+// 插件注册表 store: 侧栏/搜索/远程组件加载共用。
 const plugins = ref([])
+const loaded = ref(false)
 
 export function usePlugins() {
-  async function load() {
+  async function load(force = false) {
+    if (loaded.value && !force) return
     try {
-      plugins.value = await api.listPlugins()
+      plugins.value = await pluginsApi.list()
+      loaded.value = true
     } catch (e) {
       plugins.value = []
     }
@@ -15,8 +19,8 @@ export function usePlugins() {
     return plugins.value.find((p) => p.name === name)
   }
   async function remove(name) {
-    await api.removePlugin(name)
-    await load()
+    await pluginsApi.remove(name)
+    await load(true)
   }
-  return { plugins, load, find, remove }
+  return { plugins, loaded, load, find, remove }
 }

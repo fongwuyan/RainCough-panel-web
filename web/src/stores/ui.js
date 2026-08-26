@@ -2,16 +2,18 @@ import { ref } from 'vue'
 
 const installOpen = ref(false)
 
-const THEME_KEY = 'touchgal_theme'
+// 主题命名空间统一: rc_theme(清理 touchgal_theme 残留)
+// 默认浅色模式; 用户选择深色后持久化
+const THEME_KEY = 'rc_theme'
 
 function applyTheme(t) {
-  if (t === 'light') document.documentElement.dataset.theme = 'light'
+  if (t === 'dark') document.documentElement.dataset.theme = 'dark'
   else delete document.documentElement.dataset.theme
 }
 
 const theme = ref((() => {
   const saved = localStorage.getItem(THEME_KEY)
-  const t = saved === 'light' ? 'light' : 'dark'
+  const t = saved === 'dark' ? 'dark' : 'light'
   applyTheme(t)
   return t
 })())
