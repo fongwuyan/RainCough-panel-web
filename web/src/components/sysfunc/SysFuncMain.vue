@@ -129,6 +129,31 @@ function toggleApiPoll() {
 async function clearApiCalls() { try { await api.sysfApiClear(); data.value.apiCalls = [] } catch (e) {} }
 function codeCls(c) { return c < 400 ? 'ok' : (c < 500 ? 'run' : 'err') }
 
+// ---- 补充动作函数(模板引用, 旧源码缺) ----
+async function cleanDo(item) {
+  if (!confirm('清理 ' + (item.label || item.key) + ' ?')) return
+  try { const r = await api.sysfCleanDo(item.key); toast(r && r.ok !== false ? '已清理' : ((r && r.error) || '清理失败')) } catch (e) { toast('清理失败: ' + e.message) }
+  loadSection('clean')
+}
+async function kernRemove(pkg) {
+  if (!confirm('删除内核 ' + pkg + ' ?')) return
+  try { const r = await api.sysfKernelRemove(pkg); toast(r && r.ok !== false ? '已删除' : ((r && r.error) || '删除失败')) } catch (e) { toast(e.message) }
+  loadSection('kern')
+}
+async function timeSyncDo() {
+  try { const r = await api.sysfTimeSync(); toast(r && r.ok !== false ? '已同步' : ((r && r.error) || '同步失败')) } catch (e) { toast(e.message) }
+  loadSection('tz')
+}
+async function pwrPlan(action, minutes) {
+  if (!confirm((action === 'reboot' ? '重启' : '关机') + ' ' + (minutes || 1) + ' 分钟后?')) return
+  try { const r = await api.sysfPwrPlan(action, minutes || 1); toast(r && r.ok !== false ? '已计划' : ((r && r.error) || '失败')) } catch (e) { toast(e.message) }
+  loadSection('pwr')
+}
+async function pwrCancel() {
+  try { const r = await api.sysfPwrCancel(); toast(r && r.ok !== false ? '已取消' : ((r && r.error) || '失败')) } catch (e) { toast(e.message) }
+  loadSection('pwr')
+}
+
 </script>
 
 <template>
