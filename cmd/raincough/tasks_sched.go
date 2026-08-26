@@ -20,6 +20,11 @@ func (s *server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		includeDone := r.URL.Query().Get("include_done") == "1"
+		if r.URL.Query().Get("done") == "0" {
+			includeDone = false
+		} else if r.URL.Query().Get("done") == "1" {
+			includeDone = true
+		}
 		limit := 0
 		if v := r.URL.Query().Get("limit"); v != "" {
 			var n int
@@ -27,9 +32,26 @@ func (s *server) handleTasks(w http.ResponseWriter, r *http.Request) {
 				limit = n
 			}
 		}
+		// 兼容前端 t.created 键: 序列化为 created 副本
+		tasks := globalTasks.List(includeDone, limit)
+		outTasks := make([]map[string]interface{}, 0, len(tasks))
+		for _, t := range tasks {
+			m := map[string]interface{}{
+				"id": t.ID, "source": t.Source, "kind": t.Kind, "name": t.Name,
+				"status": t.Status, "phase": t.Phase, "progress": t.Progress,
+				"message": t.Message, "error": t.Error,
+				"created": t.CreatedAt, "created_at": t.CreatedAt, "updated_at": t.UpdatedAt,
+				"meta": t.Meta,
+			}
+			outTasks = append(outTasks, m)
+		}
+		cnt := globalTasks.Count()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"tasks": globalTasks.List(includeDone, limit),
-			"count": globalTasks.Count(),
+			"tasks":   outTasks,
+			"count":   cnt,
+			"total":   cnt["done"] + cnt["failed"] + cnt["queued"] + cnt["running"],
+			"running": cnt["running"], "queued": cnt["queued"],
+			"failed": cnt["failed"], "done": cnt["done"],
 		})
 	case http.MethodPost:
 		var b struct {
