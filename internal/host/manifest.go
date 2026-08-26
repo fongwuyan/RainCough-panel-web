@@ -10,8 +10,8 @@ import (
 	"regexp"
 )
 
-// PluginNameRE 插件名白名单。
-var PluginNameRE = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+// PluginNameRE 插件名白名单(兼容 JMComic 这类既有大写名称)。
+var PluginNameRE = regexp.MustCompile(`^[a-zA-Z0-9_]{1,32}$`)
 
 // Manifest plugin.json v2 规范。
 // 插件 = 独立包: manifest + 任意语言子进程服务 + 自带前端产物(可选)。

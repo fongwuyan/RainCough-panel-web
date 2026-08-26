@@ -20,8 +20,8 @@ import (
 )
 
 var (
-	nsRE    = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
-	tableRE = regexp.MustCompile(`\bns_[a-z0-9_]{1,32}_[a-z0-9_]{1,64}\b`)
+	nsRE    = regexp.MustCompile(`^[a-zA-Z0-9_]{1,32}$`)
+	tableRE = regexp.MustCompile(`\bns_[a-zA-Z0-9_]{1,32}_[a-zA-Z0-9_]{1,64}\b`)
 )
 
 // ValidateNS 校验 namespace 合法性。

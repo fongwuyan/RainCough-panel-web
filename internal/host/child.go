@@ -55,7 +55,7 @@ func (c *Child) Start() error {
 	fullEnv := appendEnv(os.Environ(), c.env)
 	fullEnv = append(fullEnv,
 		fmt.Sprintf("RAINCOUGH_PORT=%d", c.port),
-		fmt.Sprintf("RAINCOUGH_NS=%s", c.name),
+		fmt.Sprintf("RAINCOUGH_NS=%s", strings.ToLower(c.name)),
 		fmt.Sprintf("RAINCOUGH_PLUGIN_DIR=%s", c.dir),
 	)
 	cmd.Env = fullEnv
