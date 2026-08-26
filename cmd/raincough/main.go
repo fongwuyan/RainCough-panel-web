@@ -129,6 +129,9 @@ func main() {
 	// 系统中心(服务/进程/日志/防火墙)
 	globalSys = core.NewSysCenter(cfg.SudoPW)
 
+	// 终端主机/常用命令存储
+	initTermNS(sd)
+
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -191,6 +194,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/terminal/resize", s.handleTermResize)
 	mux.HandleFunc("/api/terminal/close", s.handleTermClose)
 	mux.HandleFunc("/api/terminal/sessions", s.handleTermSessions)
+	mux.HandleFunc("/api/terminal/hosts", s.handleTermHosts)
+	mux.HandleFunc("/api/terminal/commands", s.handleTermCommands)
 
 	// ---- 环境包 ----
 	mux.HandleFunc("/api/envpkg/recipes", s.handleEnvRecipes)
