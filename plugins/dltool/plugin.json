@@ -1,0 +1,12 @@
+{
+  "name": "dltool",
+  "label": "下载工具",
+  "version": "2.0.0",
+  "description": "下载/分片/重命名/删除与文档转换检查(独立子进程)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 20,
+  "routes": ["/networktools/download", "/networktools/split", "/networktools/join",
+             "/networktools/rename", "/networktools/delete", "/docconvert/check"]
+}

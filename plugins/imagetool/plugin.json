@@ -1,0 +1,11 @@
+{
+  "name": "imagetool",
+  "label": "图像工具",
+  "version": "2.0.0",
+  "description": "图片相似度与图像处理(独立子进程, 需 Pillow)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 20,
+  "routes": ["/image/similar", "/image/process"]
+}

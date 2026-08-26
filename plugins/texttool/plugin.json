@@ -1,0 +1,11 @@
+{
+  "name": "texttool",
+  "label": "文本工具",
+  "version": "2.0.0",
+  "description": "正则/替换/格式转换/统计(独立子进程)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 20,
+  "routes": ["/text/regex", "/text/replace", "/text/convert", "/text/stats"]
+}
