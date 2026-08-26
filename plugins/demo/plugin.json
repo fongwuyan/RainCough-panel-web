@@ -1,4 +1,0 @@
-﻿{
-  "name": "demo", "label": "演示插件", "version": "1.0.0", "lang": "python",
-  "entry": ["python", "server.py"], "timeout": 15
-}
