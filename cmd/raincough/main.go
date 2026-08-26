@@ -104,6 +104,17 @@ func main() {
 		}
 	}()
 
+	// 环境包管理器
+	envNS, err := sd.Namespace("core_envpkg")
+	if err != nil {
+		log.Fatalf("环境包 namespace 初始化失败: %v", err)
+	}
+	envRoot := os.Getenv("RC_ENV_ROOT")
+	if envRoot == "" {
+		envRoot = "/opt/envs"
+	}
+	globalEnv = core.NewEnvManager(envRoot, envNS)
+
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -166,6 +177,15 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/terminal/resize", s.handleTermResize)
 	mux.HandleFunc("/api/terminal/close", s.handleTermClose)
 	mux.HandleFunc("/api/terminal/sessions", s.handleTermSessions)
+
+	// ---- 环境包 ----
+	mux.HandleFunc("/api/envpkg/recipes", s.handleEnvRecipes)
+	mux.HandleFunc("/api/envpkg/envs", s.handleEnvList)
+	mux.HandleFunc("/api/envpkg/catalog", s.handleEnvCatalog)
+	mux.HandleFunc("/api/envpkg/install", s.handleEnvInstall)
+	mux.HandleFunc("/api/envpkg/tasks/", s.handleEnvTask)
+	mux.HandleFunc("/api/envpkg/uninstall", s.handleEnvUninstall)
+	mux.HandleFunc("/api/envpkg/run", s.handleEnvRun)
 	mux.HandleFunc("/api/scheduler/jobs/", s.handleSchedulerJob)
 
 	// ---- 插件 ----
