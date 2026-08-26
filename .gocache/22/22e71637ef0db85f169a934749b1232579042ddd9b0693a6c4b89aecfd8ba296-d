@@ -1,0 +1,366 @@
+# test log
+getenv GOTMPDIR
+stat E:\jiaob\RainCough-Core\.gotmp\TestChildStartAndProxy882069845\001\hello
+stat E:\jiaob\RainCough-Core\.gotmp\TestChildStartAndProxy882069845\001
+open E:\jiaob\RainCough-Core\.gotmp\TestChildStartAndProxy882069845\001\hello\plugin.json
+open E:\jiaob\RainCough-Core\.gotmp\TestChildStartAndProxy882069845\001\hello\hello_server.py
+open E:\jiaob\RainCough-Core\.gotmp\TestChildStartAndProxy882069845\001\hello\plugin.json
+open E:\jiaob\RainCough-Core\.gotmp\TestChildStartAndProxy882069845\001\hello\plugin.json
+getenv PATHEXT
+getenv NoDefaultCurrentDirectoryInExePath
+stat python.com
+stat python.exe
+stat python.bat
+stat python.cmd
+stat python.vbs
+stat python.vbe
+stat python.js
+stat python.jse
+stat python.wsf
+stat python.wsh
+stat python.msc
+stat python.cpl
+getenv path
+stat C:\Program Files\Go\bin\python.com
+stat C:\Program Files\Go\bin\python.exe
+stat C:\Program Files\Go\bin\python.bat
+stat C:\Program Files\Go\bin\python.cmd
+stat C:\Program Files\Go\bin\python.vbs
+stat C:\Program Files\Go\bin\python.vbe
+stat C:\Program Files\Go\bin\python.js
+stat C:\Program Files\Go\bin\python.jse
+stat C:\Program Files\Go\bin\python.wsf
+stat C:\Program Files\Go\bin\python.wsh
+stat C:\Program Files\Go\bin\python.msc
+stat C:\Program Files\Go\bin\python.cpl
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.com
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.exe
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.bat
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.cmd
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.vbs
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.vbe
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.js
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.jse
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.wsf
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.wsh
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.msc
+stat C:\Users\fongwuyan\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\.bin\python.cpl
+stat C:\Users\fongwuyan\node_modules\.bin\python.com
+stat C:\Users\fongwuyan\node_modules\.bin\python.exe
+stat C:\Users\fongwuyan\node_modules\.bin\python.bat
+stat C:\Users\fongwuyan\node_modules\.bin\python.cmd
+stat C:\Users\fongwuyan\node_modules\.bin\python.vbs
+stat C:\Users\fongwuyan\node_modules\.bin\python.vbe
+stat C:\Users\fongwuyan\node_modules\.bin\python.js
+stat C:\Users\fongwuyan\node_modules\.bin\python.jse
+stat C:\Users\fongwuyan\node_modules\.bin\python.wsf
+stat C:\Users\fongwuyan\node_modules\.bin\python.wsh
+stat C:\Users\fongwuyan\node_modules\.bin\python.msc
+stat C:\Users\fongwuyan\node_modules\.bin\python.cpl
+stat C:\Users\node_modules\.bin\python.com
+stat C:\Users\node_modules\.bin\python.exe
+stat C:\Users\node_modules\.bin\python.bat
+stat C:\Users\node_modules\.bin\python.cmd
+stat C:\Users\node_modules\.bin\python.vbs
+stat C:\Users\node_modules\.bin\python.vbe
+stat C:\Users\node_modules\.bin\python.js
+stat C:\Users\node_modules\.bin\python.jse
+stat C:\Users\node_modules\.bin\python.wsf
+stat C:\Users\node_modules\.bin\python.wsh
+stat C:\Users\node_modules\.bin\python.msc
+stat C:\Users\node_modules\.bin\python.cpl
+stat C:\node_modules\.bin\python.com
+stat C:\node_modules\.bin\python.exe
+stat C:\node_modules\.bin\python.bat
+stat C:\node_modules\.bin\python.cmd
+stat C:\node_modules\.bin\python.vbs
+stat C:\node_modules\.bin\python.vbe
+stat C:\node_modules\.bin\python.js
+stat C:\node_modules\.bin\python.jse
+stat C:\node_modules\.bin\python.wsf
+stat C:\node_modules\.bin\python.wsh
+stat C:\node_modules\.bin\python.msc
+stat C:\node_modules\.bin\python.cpl
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.com
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.exe
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.bat
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.cmd
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.vbs
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.vbe
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.js
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.jse
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.wsf
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.wsh
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.msc
+stat C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin\python.cpl
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.com
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.exe
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.bat
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.cmd
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.vbs
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.vbe
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.js
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.jse
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.wsf
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.wsh
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.msc
+stat C:\Program Files\Eclipse Adoptium\jdk-25.0.4.7-hotspot\bin\python.cpl
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.com
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.exe
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.bat
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.cmd
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.vbs
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.vbe
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.js
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.jse
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.wsf
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.wsh
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.msc
+stat C:\Program Files\Common Files\Oracle\Java\javapath\python.cpl
+stat C:\WINDOWS\system32\python.com
+stat C:\WINDOWS\system32\python.exe
+stat C:\WINDOWS\system32\python.bat
+stat C:\WINDOWS\system32\python.cmd
+stat C:\WINDOWS\system32\python.vbs
+stat C:\WINDOWS\system32\python.vbe
+stat C:\WINDOWS\system32\python.js
+stat C:\WINDOWS\system32\python.jse
+stat C:\WINDOWS\system32\python.wsf
+stat C:\WINDOWS\system32\python.wsh
+stat C:\WINDOWS\system32\python.msc
+stat C:\WINDOWS\system32\python.cpl
+stat C:\WINDOWS\python.com
+stat C:\WINDOWS\python.exe
+stat C:\WINDOWS\python.bat
+stat C:\WINDOWS\python.cmd
+stat C:\WINDOWS\python.vbs
+stat C:\WINDOWS\python.vbe
+stat C:\WINDOWS\python.js
+stat C:\WINDOWS\python.jse
+stat C:\WINDOWS\python.wsf
+stat C:\WINDOWS\python.wsh
+stat C:\WINDOWS\python.msc
+stat C:\WINDOWS\python.cpl
+stat C:\WINDOWS\System32\Wbem\python.com
+stat C:\WINDOWS\System32\Wbem\python.exe
+stat C:\WINDOWS\System32\Wbem\python.bat
+stat C:\WINDOWS\System32\Wbem\python.cmd
+stat C:\WINDOWS\System32\Wbem\python.vbs
+stat C:\WINDOWS\System32\Wbem\python.vbe
+stat C:\WINDOWS\System32\Wbem\python.js
+stat C:\WINDOWS\System32\Wbem\python.jse
+stat C:\WINDOWS\System32\Wbem\python.wsf
+stat C:\WINDOWS\System32\Wbem\python.wsh
+stat C:\WINDOWS\System32\Wbem\python.msc
+stat C:\WINDOWS\System32\Wbem\python.cpl
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.com
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.exe
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.bat
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.cmd
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.vbs
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.vbe
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.js
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.jse
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.wsf
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.wsh
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.msc
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\python.cpl
+stat C:\WINDOWS\System32\OpenSSH\python.com
+stat C:\WINDOWS\System32\OpenSSH\python.exe
+stat C:\WINDOWS\System32\OpenSSH\python.bat
+stat C:\WINDOWS\System32\OpenSSH\python.cmd
+stat C:\WINDOWS\System32\OpenSSH\python.vbs
+stat C:\WINDOWS\System32\OpenSSH\python.vbe
+stat C:\WINDOWS\System32\OpenSSH\python.js
+stat C:\WINDOWS\System32\OpenSSH\python.jse
+stat C:\WINDOWS\System32\OpenSSH\python.wsf
+stat C:\WINDOWS\System32\OpenSSH\python.wsh
+stat C:\WINDOWS\System32\OpenSSH\python.msc
+stat C:\WINDOWS\System32\OpenSSH\python.cpl
+stat C:\Program Files\dotnet\python.com
+stat C:\Program Files\dotnet\python.exe
+stat C:\Program Files\dotnet\python.bat
+stat C:\Program Files\dotnet\python.cmd
+stat C:\Program Files\dotnet\python.vbs
+stat C:\Program Files\dotnet\python.vbe
+stat C:\Program Files\dotnet\python.js
+stat C:\Program Files\dotnet\python.jse
+stat C:\Program Files\dotnet\python.wsf
+stat C:\Program Files\dotnet\python.wsh
+stat C:\Program Files\dotnet\python.msc
+stat C:\Program Files\dotnet\python.cpl
+stat C:\Program Files\nodejs\python.com
+stat C:\Program Files\nodejs\python.exe
+stat C:\Program Files\nodejs\python.bat
+stat C:\Program Files\nodejs\python.cmd
+stat C:\Program Files\nodejs\python.vbs
+stat C:\Program Files\nodejs\python.vbe
+stat C:\Program Files\nodejs\python.js
+stat C:\Program Files\nodejs\python.jse
+stat C:\Program Files\nodejs\python.wsf
+stat C:\Program Files\nodejs\python.wsh
+stat C:\Program Files\nodejs\python.msc
+stat C:\Program Files\nodejs\python.cpl
+stat C:\tools\php\python.com
+stat C:\tools\php\python.exe
+stat C:\tools\php\python.bat
+stat C:\tools\php\python.cmd
+stat C:\tools\php\python.vbs
+stat C:\tools\php\python.vbe
+stat C:\tools\php\python.js
+stat C:\tools\php\python.jse
+stat C:\tools\php\python.wsf
+stat C:\tools\php\python.wsh
+stat C:\tools\php\python.msc
+stat C:\tools\php\python.cpl
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.com
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.exe
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.bat
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.cmd
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.vbs
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.vbe
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.js
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.jse
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.wsf
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.wsh
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.msc
+stat C:\tools\mysql\mysql-8.0.41-winx64\bin\python.cpl
+stat C:\Program Files\Go\bin\python.com
+stat C:\Program Files\Go\bin\python.exe
+stat C:\Program Files\Go\bin\python.bat
+stat C:\Program Files\Go\bin\python.cmd
+stat C:\Program Files\Go\bin\python.vbs
+stat C:\Program Files\Go\bin\python.vbe
+stat C:\Program Files\Go\bin\python.js
+stat C:\Program Files\Go\bin\python.jse
+stat C:\Program Files\Go\bin\python.wsf
+stat C:\Program Files\Go\bin\python.wsh
+stat C:\Program Files\Go\bin\python.msc
+stat C:\Program Files\Go\bin\python.cpl
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.com
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.exe
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.bat
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.cmd
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.vbs
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.vbe
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.js
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.jse
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.wsf
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.wsh
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.msc
+stat C:\Program Files\Microsoft SQL Server\150\Tools\Binn\python.cpl
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.com
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.exe
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.bat
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.cmd
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.vbs
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.vbe
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.js
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.jse
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.wsf
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.wsh
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.msc
+stat C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\python.cpl
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.com
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.exe
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.bat
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.cmd
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.vbs
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.vbe
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.js
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.jse
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.wsf
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.wsh
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.msc
+stat D:\Windows Kits\10\Windows Performance Toolkit\python.cpl
+stat D:\Program Files (x86)\CMake\bin\python.com
+stat D:\Program Files (x86)\CMake\bin\python.exe
+stat D:\Program Files (x86)\CMake\bin\python.bat
+stat D:\Program Files (x86)\CMake\bin\python.cmd
+stat D:\Program Files (x86)\CMake\bin\python.vbs
+stat D:\Program Files (x86)\CMake\bin\python.vbe
+stat D:\Program Files (x86)\CMake\bin\python.js
+stat D:\Program Files (x86)\CMake\bin\python.jse
+stat D:\Program Files (x86)\CMake\bin\python.wsf
+stat D:\Program Files (x86)\CMake\bin\python.wsh
+stat D:\Program Files (x86)\CMake\bin\python.msc
+stat D:\Program Files (x86)\CMake\bin\python.cpl
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.com
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.exe
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.bat
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.cmd
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.vbs
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.vbe
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.js
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.jse
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.wsf
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.wsh
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.msc
+stat C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR\python.cpl
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.com
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.exe
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.bat
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.cmd
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.vbs
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.vbe
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.js
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.jse
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.wsf
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.wsh
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.msc
+stat C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common\python.cpl
+stat C:\Program Files\Git\cmd\python.com
+stat C:\Program Files\Git\cmd\python.exe
+stat C:\Program Files\Git\cmd\python.bat
+stat C:\Program Files\Git\cmd\python.cmd
+stat C:\Program Files\Git\cmd\python.vbs
+stat C:\Program Files\Git\cmd\python.vbe
+stat C:\Program Files\Git\cmd\python.js
+stat C:\Program Files\Git\cmd\python.jse
+stat C:\Program Files\Git\cmd\python.wsf
+stat C:\Program Files\Git\cmd\python.wsh
+stat C:\Program Files\Git\cmd\python.msc
+stat C:\Program Files\Git\cmd\python.cpl
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.com
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.exe
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.bat
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.cmd
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.vbs
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.vbe
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.js
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.jse
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.wsf
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.wsh
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.msc
+stat C:\Program Files\MySQL\MySQL Shell 8.0\bin\python.cpl
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.com
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.exe
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.bat
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.cmd
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.vbs
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.vbe
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.js
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.jse
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.wsf
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.wsh
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.msc
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\Scripts\python.cpl
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\python.com
+stat C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\python.exe
+open E:\jiaob\RainCough-Core\.gotmp\TestChildStartAndProxy882069845\001\hello\.runtime.log
+getenv PATHEXT
+open NUL
+open C:\Users\fongwuyan\AppData\Local\Programs\Python\Python310\python.exe
+stat E:\jiaob\RainCough-Core\.gotmp\TestChildStartAndProxy882069845\001\hello
+getenv HTTP_PROXY
+getenv http_proxy
+getenv HTTPS_PROXY
+getenv https_proxy
+getenv NO_PROXY
+getenv no_proxy
+getenv REQUEST_METHOD
+open E:\jiaob\RainCough-Core\.gotmp
+getenv GOTMPDIR
+open E:\jiaob\RainCough-Core\.gotmp\TestLoadManifestInvalid2560059692\001\plugin.json
+open E:\jiaob\RainCough-Core\.gotmp\TestLoadManifestInvalid2560059692\001\plugin.json
+open E:\jiaob\RainCough-Core\.gotmp
