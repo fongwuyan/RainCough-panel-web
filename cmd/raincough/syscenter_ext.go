@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -321,18 +322,96 @@ func (s *server) sysfBootHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ---- 性能趋势/网络状态(工作台 SysPerf/SysNet) ----
+
+// perfHist 环形采样历史(每 60s 一点, 保留 24h=1440 点)。
+var perfHist = struct {
+	mu     sync.Mutex
+	points []map[string]float64 // {cpu, mem, disk}
+	netRx  uint64
+	netTx  uint64
+}{}
+
+func perfSampler() {
+	prev := sysMon.Snapshot()
+	prevSeen := time.Now()
+	for {
+		time.Sleep(60 * time.Second)
+		cur := sysMon.Snapshot()
+		netDur := time.Since(prevSeen).Seconds()
+		if netDur <= 0 {
+			netDur = 1
+		}
+		perfHist.mu.Lock()
+		perfHist.points = append(perfHist.points, map[string]float64{
+			"cpu":  cur.CPUPercent,
+			"mem":  cur.MemoryPercent,
+			"disk": cur.DiskPercent,
+		})
+		if len(perfHist.points) > 1440 {
+			perfHist.points = perfHist.points[len(perfHist.points)-1440:]
+		}
+		perfHist.netRx = uint64(float64(cur.NetRecv-prev.NetRecv) / netDur)
+		perfHist.netTx = uint64(float64(cur.NetSent-prev.NetSent) / netDur)
+		perfHist.mu.Unlock()
+		prev = cur
+		prevSeen = time.Now()
+	}
+}
+
 func (s *server) sysfPerfNet(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/")
 	if strings.HasPrefix(sub, "perf") {
+		perfHist.mu.Lock()
+		pts := make([]map[string]float64, len(perfHist.points))
+		copy(pts, perfHist.points)
+		rx, tx := perfHist.netRx, perfHist.netTx
+		perfHist.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"hours": 24, "cpu": []float64{}, "mem": []float64{}, "net": []map[string]interface{}{},
+			"points": pts, "net": map[string]uint64{"rx": rx, "tx": tx}, "hours": 24,
 		})
 	} else if strings.HasPrefix(sub, "net") {
-		nets := sysMon.Snapshot().NetIfaces
-		writeJSON(w, http.StatusOK, map[string]interface{}{"interfaces": nets})
+		writeJSON(w, http.StatusOK, netStatus())
 	} else {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unknown"})
 	}
+}
+
+// netStatus 网络状态: 接口/连接数/IP/DNS/公网IP/速率(对应旧前端 SysNet)。
+func netStatus() map[string]interface{} {
+	snap := sysMon.Snapshot()
+	nics := []map[string]interface{}{}
+	for _, ni := range snap.NetIfaces {
+		nics = append(nics, map[string]interface{}{
+			"name": ni.Name, "up": ni.Up, "ip": firstNonEmpty(ni.Addr, "-"),
+			"mtu": 1500, "rate": map[string]float64{"rx": ni.DownRate, "tx": ni.UpRate},
+		})
+	}
+	tcp := 0
+	if b, err := os.ReadFile("/proc/net/tcp"); err == nil {
+		tcp = strings.Count(string(b), "\n") - 1
+	}
+	dns := ""
+	if b, err := os.ReadFile("/etc/resolv.conf"); err == nil {
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(l, "nameserver") {
+				dns = strings.TrimSpace(strings.TrimPrefix(l, "nameserver"))
+				break
+			}
+		}
+	}
+	return map[string]interface{}{
+		"nics": nics, "tcp_conns": tcp, "dns": dns,
+		"public_ip": "-",
+		"rate":      map[string]float64{"rx": snap.NetDownRate, "tx": snap.NetUpRate},
+	}
+}
+
+func firstNonEmpty(v, def string) string {
+	if v != "" {
+		return v
+	}
+	return def
 }
 
 func runtimeNumCPU() int { return sysMon.Snapshot().CPUCount }

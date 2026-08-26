@@ -133,6 +133,9 @@ func main() {
 	initTermNS(sd)
 	initMediaNS(sd)
 
+	// 性能趋势采样(每 60s 一点, 供工作台 SysPerf)
+	go perfSampler()
+
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
 	s.routes(mux)

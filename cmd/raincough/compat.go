@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"os"
+	"strconv"
 	"strings"
 )
 
@@ -104,22 +104,85 @@ func (s *server) handleSchedulerActions(w http.ResponseWriter, r *http.Request) 
 // 旧面板存 data/terminal_hosts.json; 新面板用 SharedData 简版内存实现。
 
 // lsblkDisks 磁盘列表(读 /sys/block, 简版)。
+// lsblkDisks 磁盘列表(真实 lsblk -J 输出, 带分区/挂载/使用率)。
 func lsblkDisks() []map[string]interface{} {
-	var out []map[string]interface{}
-	entries, err := os.ReadDir("/sys/block")
+	out, err := globalSys.Run("lsblk", "-J", "-o", "NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINT,ROTA,HOTPLUG")
 	if err != nil {
-		return out
+		return []map[string]interface{}{}
 	}
-	for _, e := range entries {
-		name := e.Name()
-		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") {
+	var parsed struct {
+		Blockdevices []struct {
+			Name      string `json:"name"`
+			Path      string `json:"path"`
+			Type      string `json:"type"`
+			Size      string `json:"size"`
+			Rot       bool   `json:"rota"`
+			Hotplug   bool   `json:"hotplug"`
+			FSType    string `json:"fstype"`
+			Label     string `json:"label"`
+			Mount     string `json:"mountpoint"`
+			Children  []struct {
+				Name      string `json:"name"`
+				Path      string `json:"path"`
+				Type      string `json:"type"`
+				Size      string `json:"size"`
+				FSType    string `json:"fstype"`
+				Label     string `json:"label"`
+				Mount     string `json:"mountpoint"`
+			} `json:"children"`
+		} `json:"blockdevices"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		return []map[string]interface{}{}
+	}
+	var disks []map[string]interface{}
+	for _, b := range parsed.Blockdevices {
+		if b.Type != "disk" || strings.HasPrefix(b.Name, "loop") || strings.HasPrefix(b.Name, "ram") {
 			continue
 		}
-		out = append(out, map[string]interface{}{
-			"name": name, "path": "/dev/" + name,
-			"type": "disk", "hotplug": false, "removable": false,
-			"size": 0, "partitions": []interface{}{},
+		partitions := []map[string]interface{}{}
+		for _, c := range b.Children {
+			part := map[string]interface{}{
+				"path": c.Path, "name": c.Name, "fstype": c.FSType,
+				"label": c.Label, "mountpoint": c.Mount, "size": c.Size,
+				"mounted": c.Mount != "", "removable": false,
+			}
+			// 使用率: 挂载点 + 真实用量(从 /proc/self/mountinfo 或 df)
+			addPartUsage(part, c.Mount)
+			partitions = append(partitions, part)
+		}
+		disks = append(disks, map[string]interface{}{
+			"name": b.Name, "path": b.Path, "type": b.Type,
+			"size": b.Size, "hotplug": b.Hotplug, "removable": false,
+			"model": "", "tran": "",
+			"partitions": partitions,
 		})
 	}
-	return out
+	return disks
+}
+
+// addPartUsage 为挂载分区补充 used/total/percent(读 /proc/mounts + statfs 简化为 df)。
+func addPartUsage(part map[string]interface{}, mount string) {
+	if mount == "" {
+		return
+	}
+	out, err := globalSys.Run("df", "-P", "-k", mount)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		return
+	}
+	f := strings.Fields(lines[1])
+	if len(f) >= 5 {
+		total, _ := strconv.ParseFloat(f[1], 64)
+		used, _ := strconv.ParseFloat(f[2], 64)
+		pct, _ := strconv.ParseFloat(strings.TrimSuffix(f[4], "%"), 64)
+		if total > 0 {
+			part["total"] = total * 1024
+			part["used"] = used * 1024
+			part["percent"] = pct
+		}
+	}
 }
