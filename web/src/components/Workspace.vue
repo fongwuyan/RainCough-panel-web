@@ -222,7 +222,7 @@ onMounted(() => {
   loadSys()
   loadDisks()
   sysTimer = setInterval(loadSys, 1000)
-  diskTimer = setInterval(loadDisks, 1000)
+  diskTimer = setInterval(loadDisks, 5000)
   clockTimer = setInterval(() => { nowClock.value = fmtClock(Date.now() / 1000) }, 1000)
 })
 

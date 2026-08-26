@@ -35,7 +35,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 </template>
 
 <style scoped>
-.bar-row { display: flex; align-items: flex-end; gap: 2px; height: 48px; padding: 4px; background: var(--surface-2); }
-.bar-cell { flex: 1; background: var(--accent); min-width: 2px; }
+.bar-row { display: flex; align-items: flex-end; gap: 2px; height: 48px; padding: 4px; background: var(--surface-2); overflow: hidden; }
+.bar-cell { flex: 1; background: var(--accent); min-width: 2px; transition: height .8s cubic-bezier(0.4,0,0.2,1); }
 .bar-cell.hot { background: var(--danger); }
 </style>
