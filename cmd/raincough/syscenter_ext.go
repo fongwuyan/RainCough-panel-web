@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"encoding/json"
@@ -10,10 +10,8 @@ import (
 	"time"
 )
 
-// 系统中心扩展端点(对应旧前端 api.js sysf* 全部契约)。
-// 数据来自 systemctl/lsblk/apt/crontab/snapshot(简化实现, 模块化的 sudo 执行)。
-
-// ---- 硬件 ----
+// 绯荤粺涓績鎵╁睍绔偣(瀵瑰簲鏃у墠绔?api.js sysf* 鍏ㄩ儴濂戠害)銆?// 鏁版嵁鏉ヨ嚜 systemctl/lsblk/apt/crontab/snapshot(绠€鍖栧疄鐜? 妯″潡鍖栫殑 sudo 鎵ц)銆?
+// ---- 纭欢 ----
 func (s *server) sysfHardware(w http.ResponseWriter, r *http.Request) {
 	out := map[string]interface{}{}
 	if b, err := os.ReadFile("/proc/cpuinfo"); err == nil {
@@ -29,12 +27,12 @@ func (s *server) sysfHardware(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// ---- 系统更新(apt) ----
+// ---- 绯荤粺鏇存柊(apt) ----
 func (s *server) sysfUpdates(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/updates/")
 	switch r.Method {
 	case http.MethodGet: // /list
-		out, err := globalSys.sudo("apt", "list", "--upgradable", "-q")
+		out, err := globalSys.Sudo("apt", "list", "--upgradable", "-q")
 		var lines []string
 		for _, l := range strings.Split(out, "\n") {
 			if strings.Contains(l, "upgradable") || strings.HasPrefix(l, "Listing") {
@@ -47,13 +45,13 @@ func (s *server) sysfUpdates(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"updates": lines, "error": errStr(err)})
 	case http.MethodPost:
 		if sub == "refresh" {
-			_, err := globalSys.sudo("apt", "update", "-q")
-			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "message": "已刷新", "error": errStr(err)})
+			_, err := globalSys.Sudo("apt", "update", "-q")
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "message": "宸插埛鏂?, "error": errStr(err)})
 		} else if sub == "run" {
 			go func() {
-				globalSys.sudo("apt", "upgrade", "-y")
+				globalSys.Sudo("apt", "upgrade", "-y")
 			}()
-			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "升级已在后台执行(可能数分钟)"})
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "鍗囩骇宸插湪鍚庡彴鎵ц(鍙兘鏁板垎閽?"})
 		} else {
 			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unsupported"})
 		}
@@ -84,7 +82,7 @@ func cronTabFor(user string) (string, error) {
 	if user == "" {
 		user = "root"
 	}
-	// 读 /var/spool/cron/crontabs/<user>
+	// 璇?/var/spool/cron/crontabs/<user>
 	path := "/var/spool/cron/crontabs/" + user
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -104,18 +102,18 @@ func saveCronTab(user, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
 
-// ---- 磁盘 fs ----
+// ---- 纾佺洏 fs ----
 func (s *server) sysfDisks(w http.ResponseWriter, r *http.Request) {
 	out := lsblkDisks()
 	writeJSON(w, http.StatusOK, map[string]interface{}{"disks": out})
 }
 
-// ---- 快照(lvm) ----
+// ---- 蹇収(lvm) ----
 func (s *server) sysfSnap(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/snapshot/")
 	switch sub {
 	case "cap":
-		out, err := globalSys.sudo("lvs", "--noheadings", "-o", "lv_name,lv_size,lv_attr")
+		out, err := globalSys.Sudo("lvs", "--noheadings", "-o", "lv_name,lv_size,lv_attr")
 		caps := []map[string]interface{}{}
 		for _, line := range strings.Split(out, "\n") {
 			f := strings.Fields(line)
@@ -127,17 +125,17 @@ func (s *server) sysfSnap(w http.ResponseWriter, r *http.Request) {
 	case "create":
 		var b struct{ Name string `json:"name"` }
 		json.NewDecoder(r.Body).Decode(&b)
-		out, err := globalSys.sudo("lvcreate", "-L", "2G", "-s", "-n", b.Name, "vg0/root")
+		out, err := globalSys.Sudo("lvcreate", "-L", "2G", "-s", "-n", b.Name, "vg0/root")
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	case "list":
-		out, err := globalSys.sudo("lvs", "--noheadings", "-o", "lv_name,lv_size,lv_attr")
+		out, err := globalSys.Sudo("lvs", "--noheadings", "-o", "lv_name,lv_size,lv_attr")
 		writeJSON(w, http.StatusOK, map[string]interface{}{"output": out, "error": errStr(err)})
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unsupported"})
 	}
 }
 
-// ---- 用户/SSH ----
+// ---- 鐢ㄦ埛/SSH ----
 func (s *server) sysfUsers(w http.ResponseWriter, r *http.Request) {
 	out, err := os.ReadFile("/etc/passwd")
 	var users []map[string]interface{}
@@ -179,16 +177,16 @@ func (s *server) sysfSshKeysSave(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "error": errStr(err)})
 }
 
-// ---- 存储清理 ----
+// ---- 瀛樺偍娓呯悊 ----
 func (s *server) sysfClean(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/clean/")
 	if sub == "scan" {
 		items := []map[string]interface{}{}
-		// apt 缓存
+		// apt 缂撳瓨
 		sz := dirSize("/var/cache/apt")
-		items = append(items, map[string]interface{}{"key": "apt", "path": "/var/cache/apt", "size": sz, "label": "apt 缓存"})
+		items = append(items, map[string]interface{}{"key": "apt", "path": "/var/cache/apt", "size": sz, "label": "apt 缂撳瓨"})
 		sz2 := dirSize("/tmp")
-		items = append(items, map[string]interface{}{"key": "tmp", "path": "/tmp", "size": sz2, "label": "/tmp 临时文件"})
+		items = append(items, map[string]interface{}{"key": "tmp", "path": "/tmp", "size": sz2, "label": "/tmp 涓存椂鏂囦欢"})
 		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 	} else if sub == "do" {
 		var b struct{ Item string `json:"item"` }
@@ -197,21 +195,21 @@ func (s *server) sysfClean(w http.ResponseWriter, r *http.Request) {
 		var err error
 		switch b.Item {
 		case "apt":
-			out, err = globalSys.sudo("apt", "clean")
+			out, err = globalSys.Sudo("apt", "clean")
 		case "tmp":
-			out, err = globalSys.sudo("sh", "-c", "find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} +")
+			out, err = globalSys.Sudo("sh", "-c", "find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} +")
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	}
 }
 
-// ---- 关机/重启 ----
+// ---- 鍏虫満/閲嶅惎 ----
 func (s *server) sysfPwr(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/pwr/")
 	switch sub {
 	case "state":
 		out, err := os.ReadFile("/run/systemd/shutdown/scheduled")
-		state := "无计划"
+		state := "鏃犺鍒?
 		if err == nil {
 			state = strings.TrimSpace(string(out))
 		}
@@ -226,22 +224,22 @@ func (s *server) sysfPwr(w http.ResponseWriter, r *http.Request) {
 			b.Minutes = 1
 		}
 		when := "+" + fmt.Sprint(b.Minutes)
-		out, err := globalSys.sudo("shutdown", "-P", when) // default poweroff
+		out, err := globalSys.Sudo("shutdown", "-P", when) // default poweroff
 		if b.Action == "reboot" {
-			out, err = globalSys.sudo("shutdown", "-r", when)
+			out, err = globalSys.Sudo("shutdown", "-r", when)
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	case "cancel":
-		out, err := globalSys.sudo("shutdown", "-c")
+		out, err := globalSys.Sudo("shutdown", "-c")
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	}
 }
 
-// ---- 内核 ----
+// ---- 鍐呮牳 ----
 func (s *server) sysfKernels(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/kernels")
 	if r.Method == http.MethodGet {
-		out, err := globalSys.sudo("dpkg", "--list", "linux-image-*")
+		out, err := globalSys.Sudo("dpkg", "--list", "linux-image-*")
 		var kernels []string
 		for _, l := range strings.Split(out, "\n") {
 			if strings.Contains(l, "linux-image") {
@@ -252,16 +250,16 @@ func (s *server) sysfKernels(w http.ResponseWriter, r *http.Request) {
 	} else if strings.HasSuffix(sub, "/remove") {
 		var b struct{ Pkg string `json:"pkg"` }
 		json.NewDecoder(r.Body).Decode(&b)
-		out, err := globalSys.sudo("apt", "remove", "-y", b.Pkg)
+		out, err := globalSys.Sudo("apt", "remove", "-y", b.Pkg)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	}
 }
 
-// ---- 时间/NTP ----
+// ---- 鏃堕棿/NTP ----
 func (s *server) sysfTime(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/time/")
 	if sub == "sync" {
-		out, err := globalSys.sudo("timedatectl", "set-ntp", "true")
+		out, err := globalSys.Sudo("timedatectl", "set-ntp", "true")
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	} else {
 		out, _ := globalSys.run("timedatectl", "status")
@@ -269,31 +267,31 @@ func (s *server) sysfTime(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ---- 健康 ----
+// ---- 鍋ュ悍 ----
 func (s *server) sysfHealth(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/health/")
 	if sub == "restart" {
-		out, err := globalSys.sudo("systemctl", "restart", "raincough")
+		out, err := globalSys.Sudo("systemctl", "restart", "raincough")
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	} else {
 		checks := []map[string]interface{}{}
 		add := func(name string, ok bool) { checks = append(checks, map[string]interface{}{"name": name, "ok": ok}) }
-		// 磁盘
+		// 纾佺洏
 		df, _ := globalSys.run("df", "-h", "/")
-		add("磁盘 /", !strings.Contains(df, "100%"))
-		// 内存
+		add("纾佺洏 /", !strings.Contains(df, "100%"))
+		// 鍐呭瓨
 		mem, _ := os.ReadFile("/proc/meminfo")
-		add("内存可用", !strings.Contains(string(mem), "MemAvailable:") || true)
-		// CPU 负载
-		add("CPU 负载", true)
-		// 服务
-		_, err := globalSys.sudo("systemctl", "is-active", "raincough")
-		add("面板服务", err == nil)
+		add("鍐呭瓨鍙敤", !strings.Contains(string(mem), "MemAvailable:") || true)
+		// CPU 璐熻浇
+		add("CPU 璐熻浇", true)
+		// 鏈嶅姟
+		_, err := globalSys.Sudo("systemctl", "is-active", "raincough")
+		add("闈㈡澘鏈嶅姟", err == nil)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"checks": checks})
 	}
 }
 
-// ---- 事件时间线 ----
+// ---- 浜嬩欢鏃堕棿绾?----
 func (s *server) sysfEvents(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -309,7 +307,7 @@ func (s *server) sysfEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events, "error": errStr(err)})
 }
 
-// ---- 日志保留 / 启动历史 / 接口监控 ----
+// ---- 鏃ュ織淇濈暀 / 鍚姩鍘嗗彶 / 鎺ュ彛鐩戞帶 ----
 func (s *server) sysfLogrotate(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/logrotate/")
 	if sub == "list" {
@@ -339,7 +337,7 @@ func (s *server) sysfBootHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"rows": rows, "boot_started": time.Now().Format("2006-01-02 15:04:05"), "error": errStr(err)})
 }
 
-// ---- 性能历史/网络状态(工作台 SysPerf/SysNet 用) ----
+// ---- 鎬ц兘鍘嗗彶/缃戠粶鐘舵€?宸ヤ綔鍙?SysPerf/SysNet 鐢? ----
 func (s *server) sysfPerfNet(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/")
 	if strings.HasPrefix(sub, "perf") {
@@ -354,7 +352,7 @@ func (s *server) sysfPerfNet(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ---- 辅助 ----
+// ---- 杈呭姪 ----
 func runtimeNumCPU() int { return sysMon.Snapshot().CPUCount }
 func errStr(err error) string {
 	if err == nil {

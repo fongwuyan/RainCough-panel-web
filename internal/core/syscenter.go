@@ -19,6 +19,11 @@ func NewSysCenter(sudoPW string) *SysCenter {
 }
 
 func (sc *SysCenter) sudo(args ...string) (string, error) {
+	return sc.Sudo(args...)
+}
+
+// Sudo 导出: 带提权执行命令(main 包及扩展端点使用)。
+func (sc *SysCenter) Sudo(args ...string) (string, error) {
 	cmd := []string{}
 	if sc.SudoPW != "" {
 		cmd = append(cmd, "sudo", "-S")
