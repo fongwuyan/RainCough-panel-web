@@ -114,23 +114,23 @@ func lsblkDisks() []map[string]interface{} {
 	}
 	var parsed struct {
 		Blockdevices []struct {
-			Name      string `json:"name"`
-			Path      string `json:"path"`
-			Type      string `json:"type"`
-			Size      string `json:"size"`
-			Rot       bool   `json:"rota"`
-			Hotplug   bool   `json:"hotplug"`
-			FSType    string `json:"fstype"`
-			Label     string `json:"label"`
-			Mount     string `json:"mountpoint"`
+			Name      string      `json:"name"`
+			Path      string      `json:"path"`
+			Type      string      `json:"type"`
+			Size      json.Number `json:"size"`
+			Rot       bool        `json:"rota"`
+			Hotplug   bool        `json:"hotplug"`
+			FSType    string      `json:"fstype"`
+			Label     string      `json:"label"`
+			Mount     string      `json:"mountpoint"`
 			Children  []struct {
-				Name      string `json:"name"`
-				Path      string `json:"path"`
-				Type      string `json:"type"`
-				Size      string `json:"size"`
-				FSType    string `json:"fstype"`
-				Label     string `json:"label"`
-				Mount     string `json:"mountpoint"`
+				Name      string      `json:"name"`
+				Path      string      `json:"path"`
+				Type      string      `json:"type"`
+				Size      json.Number `json:"size"`
+				FSType    string      `json:"fstype"`
+				Label     string      `json:"label"`
+				Mount     string      `json:"mountpoint"`
 			} `json:"children"`
 		} `json:"blockdevices"`
 	}
@@ -165,18 +165,18 @@ func lsblkDisks() []map[string]interface{} {
 	return disks
 }
 
-// parseSizeStr 把 lsblk 大小字符串("119.2G"/字节数字)解析为 uint64。
-func parseSizeStr(s string) uint64 {
-	s = strings.TrimSpace(s)
+// parseSizeStr 把 lsblk 大小(json.Number/字符串)解析为 uint64。
+func parseSizeStr(s json.Number) uint64 {
 	if s == "" {
 		return 0
 	}
-	if v, err := strconv.ParseUint(s, 10, 64); err == nil {
+	if v, err := strconv.ParseUint(string(s), 10, 64); err == nil {
 		return v
 	}
+	// 人类可读格式兜底: 如 "119.2G"
 	var num float64
 	var unit string
-	fmt.Sscanf(s, "%f%s", &num, &unit)
+	fmt.Sscanf(string(s), "%f%s", &num, &unit)
 	mult := map[string]float64{"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}[unit]
 	if mult == 0 && unit != "" {
 		mult = 1
