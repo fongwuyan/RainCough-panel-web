@@ -135,8 +135,10 @@ func lsblkDisks() []map[string]interface{} {
 		} `json:"blockdevices"`
 	}
 	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		log.Printf("[disks] json 解析失败: %v (out len=%d, head=%q)", err, len(out), truncateStr(out, 120))
 		return []map[string]interface{}{}
 	}
+	log.Printf("[disks] lsblk 解析: 块设备 %d 个", len(parsed.Blockdevices))
 	var disks []map[string]interface{}
 	for _, b := range parsed.Blockdevices {
 		if b.Type != "disk" || strings.HasPrefix(b.Name, "loop") || strings.HasPrefix(b.Name, "ram") {
@@ -169,11 +171,9 @@ func parseSizeStr(s string) uint64 {
 	if s == "" {
 		return 0
 	}
-	// 已是纯数字(lsblk -b 输出)
 	if v, err := strconv.ParseUint(s, 10, 64); err == nil {
 		return v
 	}
-	// 人类可读格式兜底: 如 "119.2G"
 	var num float64
 	var unit string
 	fmt.Sscanf(s, "%f%s", &num, &unit)
@@ -182,6 +182,13 @@ func parseSizeStr(s string) uint64 {
 		mult = 1
 	}
 	return uint64(num * mult)
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 // addPartUsage 为挂载分区补充 used/total/percent(读 /proc/mounts + statfs 简化为 df)。
