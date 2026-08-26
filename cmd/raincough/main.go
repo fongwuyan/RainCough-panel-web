@@ -215,6 +215,28 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	// ---- 系统中心(服务/进程/日志/防火墙) ----
 	mux.HandleFunc("/api/sysfunc/", s.handleSysCenter)
+	mux.HandleFunc("/api/sysfunc/hardware", s.sysfHardware)
+	mux.HandleFunc("/api/sysfunc/updates/", s.sysfUpdates)
+	mux.HandleFunc("/api/sysfunc/updates", s.sysfUpdates)
+	mux.HandleFunc("/api/sysfunc/cron/", s.sysfCron)
+	mux.HandleFunc("/api/sysfunc/cron", s.sysfCron)
+	mux.HandleFunc("/api/sysfunc/disks/fs", s.sysfDisks)
+	mux.HandleFunc("/api/sysfunc/snapshot/", s.sysfSnap)
+	mux.HandleFunc("/api/sysfunc/users", s.sysfUsers)
+	mux.HandleFunc("/api/sysfunc/ssh/keys", s.sysfSshKeys)
+	mux.HandleFunc("/api/sysfunc/ssh/keys/save", s.sysfSshKeysSave)
+	mux.HandleFunc("/api/sysfunc/clean/", s.sysfClean)
+	mux.HandleFunc("/api/sysfunc/pwr/", s.sysfPwr)
+	mux.HandleFunc("/api/sysfunc/kernels", s.sysfKernels)
+	mux.HandleFunc("/api/sysfunc/kernels/remove", s.sysfKernels)
+	mux.HandleFunc("/api/sysfunc/time/", s.sysfTime)
+	mux.HandleFunc("/api/sysfunc/time", s.sysfTime)
+	mux.HandleFunc("/api/sysfunc/health/", s.sysfHealth)
+	mux.HandleFunc("/api/sysfunc/events/timeline", s.sysfEvents)
+	mux.HandleFunc("/api/sysfunc/logrotate/", s.sysfLogrotate)
+	mux.HandleFunc("/api/sysfunc/boot/history", s.sysfBootHistory)
+	mux.HandleFunc("/api/sysfunc/perf/", s.sysfPerfNet)
+	mux.HandleFunc("/api/sysfunc/net/status", s.sysfPerfNet)
 
 	// ---- 旧前端兼容端点 ----
 	mux.HandleFunc("/api/disks", s.handleDisks)
