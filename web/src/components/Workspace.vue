@@ -221,9 +221,9 @@ async function loadSys() {
 onMounted(() => {
   loadSys()
   loadDisks()
-  sysTimer = setInterval(loadSys, 300)
-  diskTimer = setInterval(loadDisks, 300)
-  clockTimer = setInterval(() => { nowClock.value = fmtClock(Date.now() / 1000) }, 300)
+  sysTimer = setInterval(loadSys, 1000)
+  diskTimer = setInterval(loadDisks, 1000)
+  clockTimer = setInterval(() => { nowClock.value = fmtClock(Date.now() / 1000) }, 1000)
 })
 
 onUnmounted(() => {

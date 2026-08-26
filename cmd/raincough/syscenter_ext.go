@@ -324,7 +324,7 @@ func (s *server) sysfBootHistory(w http.ResponseWriter, r *http.Request) {
 
 // ---- 性能趋势/网络状态(工作台 SysPerf/SysNet) ----
 
-// perfHist 环形采样历史(每 300ms 一点, 保留最近 60 点 = 18s 实时滚动窗口)。
+// perfHist 环形采样历史(每 1s 一点, 保留最近 60 点 = 60s 滚动窗口)。
 var perfHist = struct {
 	mu     sync.Mutex
 	points []map[string]float64 // {cpu, mem, disk}
@@ -338,7 +338,7 @@ func perfSampler() {
 	prev := sysMon.Snapshot()
 	prevSeen := time.Now()
 	for {
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(time.Second)
 		cur := sysMon.Snapshot()
 		netDur := time.Since(prevSeen).Seconds()
 		if netDur <= 0 {
