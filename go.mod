@@ -3,6 +3,7 @@ module raincough
 go 1.26.3
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/go-sql-driver/mysql v1.10.0
 	modernc.org/sqlite v1.57.0
 )

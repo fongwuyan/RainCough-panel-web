@@ -89,6 +89,21 @@ func main() {
 	globalSched = core.NewScheduler(schedNS, nil)
 	globalSched.Start()
 
+	// 终端管理器 + 闲置回收
+	globalTerm = core.NewTermManager()
+	go func() {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-taskCleanupStop:
+				return
+			case <-t.C:
+				globalTerm.Cleanup(60)
+			}
+		}
+	}()
+
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -143,6 +158,14 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/tasks/", s.handleTaskDetail)
 	mux.HandleFunc("/api/scheduler/jobs", s.handleSchedulerJobs)
+
+	// ---- 终端 ----
+	mux.HandleFunc("/api/terminal/open", s.handleTermOpen)
+	mux.HandleFunc("/api/terminal/stream", s.handleTermStream)
+	mux.HandleFunc("/api/terminal/input", s.handleTermInput)
+	mux.HandleFunc("/api/terminal/resize", s.handleTermResize)
+	mux.HandleFunc("/api/terminal/close", s.handleTermClose)
+	mux.HandleFunc("/api/terminal/sessions", s.handleTermSessions)
 	mux.HandleFunc("/api/scheduler/jobs/", s.handleSchedulerJob)
 
 	// ---- 插件 ----
