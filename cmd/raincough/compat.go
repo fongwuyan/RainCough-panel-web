@@ -38,10 +38,20 @@ func (s *server) handleDisks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"disks": disks})
 }
 
-// handleDiskUnmount POST /api/disks/unmount {part}
+// handleDiskUnmount POST /api/disks/unmount {part|device}
 func (s *server) handleDiskUnmount(w http.ResponseWriter, r *http.Request) {
-	var b struct{ Part string `json:"part"` }
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Part == "" {
+	var b struct {
+		Part   string `json:"part"`
+		Device string `json:"device"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+		return
+	}
+	if b.Part == "" {
+		b.Part = b.Device
+	}
+	if b.Part == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "part 必填"})
 		return
 	}
