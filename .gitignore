@@ -17,3 +17,6 @@ web/node_modules/
 # æ—¥å¿—ä¸Žä¸´æ—¶æ–‡ä»¶
 *.log
 .DS_Store
+# ±¾µØ»º´æ/½»²æ±àÒë²úÎï
+.npmcache/
+raincough-linux
