@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../../api'
 
 const data = ref(null)
@@ -15,7 +15,9 @@ function bars(key) {
 }
 function fmtRate(b) { b = Number(b) || 0; if (b >= 1048576) return (b / 1048576).toFixed(1) + 'MB/s'; if (b >= 1024) return (b / 1024).toFixed(1) + 'KB/s'; return b + 'B/s' }
 
-onMounted(load)
+let timer = null
+onMounted(() => { load(); timer = setInterval(load, 60000) })
+onUnmounted(() => { if (timer) clearInterval(timer) })
 </script>
 
 <template>
