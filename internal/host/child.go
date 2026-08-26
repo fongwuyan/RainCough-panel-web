@@ -13,12 +13,13 @@ import (
 
 // Child 单个插件子进程。
 type Child struct {
-	name     string
-	dir      string
-	manifest *Manifest
-	port     int
-	proc     *exec.Cmd
-	logFile  *os.File
+	name         string
+	dir          string
+	manifest     *Manifest
+	port         int
+	proc         *exec.Cmd
+	logFile      *os.File
+	proxyTimeout time.Duration // 网关代理到子进程的请求超时
 
 	mu        sync.Mutex
 	startErr  string

@@ -16,8 +16,9 @@ const (
 // Config 持有主系统全部运行配置。
 type Config struct {
 	// 数据层
-	DBDSN      string // mysql://user:pass@host:port/db 或 sqlite:///path
-	DBPoolSize int
+	DBDSN          string // mysql://user:pass@host:port/db 或 sqlite:///path
+	DBPoolSize     int
+	DBQueryTimeout int // 单条 SQL 查询超时秒
 
 	// 路径
 	BaseDir    string // 仓库根目录
@@ -29,6 +30,13 @@ type Config struct {
 	PluginStartTimeout int // 就绪等待秒
 	PluginMaxChildren  int // 并行子进程上限
 	PluginKeepalive    int // 空闲回收秒
+	PluginProxyTimeout int // 网关代理到插件子进程超时秒
+	PluginRestartMax   int // 单插件连续崩溃最大重启次数
+
+	// HTTP 服务
+	HTTPReadTimeout  int // 读请求超时秒(0=不设)
+	HTTPWriteTimeout int // 写响应超时秒(0=不设, SSE/大下载需不设)
+	HTTPIdleTimeout  int // 空闲连接超时秒
 
 	// sudo(局域网注入兼容)
 	SudoPW string
@@ -40,6 +48,7 @@ func Load() *Config {
 	return &Config{
 		DBDSN:              env("RC_DB", "sqlite:///data/rc.db"),
 		DBPoolSize:         envInt("RC_DB_POOL_SIZE", 5),
+		DBQueryTimeout:     envInt("RC_DB_QUERY_TIMEOUT", 10),
 		BaseDir:            base,
 		DataDir:            env("RC_DATA_DIR", filepath.Join(base, "data")),
 		PluginsDir:         env("RC_PLUGINS_DIR", filepath.Join(base, "plugins")),
@@ -47,6 +56,11 @@ func Load() *Config {
 		PluginStartTimeout: envInt("RC_PLUGIN_TIMEOUT", 30),
 		PluginMaxChildren:  envInt("RC_PLUGIN_MAX", 8),
 		PluginKeepalive:    envInt("RC_PLUGIN_KEEPALIVE", 3600),
+		PluginProxyTimeout: envInt("RC_PLUGIN_PROXY_TIMEOUT", 15),
+		PluginRestartMax:   envInt("RC_PLUGIN_RESTART_MAX", 5),
+		HTTPReadTimeout:    envInt("RC_HTTP_READ_TIMEOUT", 60),
+		HTTPWriteTimeout:   envInt("RC_HTTP_WRITE_TIMEOUT", 0),
+		HTTPIdleTimeout:    envInt("RC_HTTP_IDLE_TIMEOUT", 120),
 		SudoPW:             env("RC_SUDO_PW", os.Getenv("TOUCHGAL_SUDO_PW")),
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // ProxyRequest 将面板请求转发到插件子进程, 响应原样透传。
@@ -38,7 +37,7 @@ func ProxyRequest(child *Child, w http.ResponseWriter, r *http.Request, subpath 
 		req.Header.Set("Content-Type", ct)
 	}
 
-	client := &http.Client{Timeout: 12 * time.Second}
+	client := &http.Client{Timeout: child.proxyTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]interface{}{"error": "插件桥接失败: " + err.Error()})

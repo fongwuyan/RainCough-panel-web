@@ -17,19 +17,56 @@ type PluginHost struct {
 	dsn      string // 注入 SharedData DSN(库级账号)
 	sudoPW   string
 
+	proxyTimeout time.Duration // 网关代理到子进程超时(0=15s)
+	restartMax   int           // 单插件连续崩溃最大重启次数(0=5)
+
 	mu       sync.Mutex
-	children map[string]*Child // name -> child
-	order    []string          // 稳定顺序
+	children map[string]*Child  // name -> child
+	order    []string           // 稳定顺序
+	dead     map[string]Restart // 已死插件的退避状态
 	lastScan time.Time
+}
+
+// Restart 记录单插件的崩溃重启状态(指数退避)。
+type Restart struct {
+	Count    int       // 连续崩溃次数
+	Backoff  time.Time // 退避截止时间(此时间前不重启)
+	LastDied time.Time
+}
+
+// Options PluginHost 可选项。
+type Options struct {
+	MaxChildren  int
+	ProxyTimeout time.Duration
+	RestartMax   int
 }
 
 // New 创建 PluginHost。
 func New(pluginsDir, dsn string, maxChild int) *PluginHost {
+	return NewWithOptions(pluginsDir, dsn, Options{MaxChildren: maxChild})
+}
+
+// NewWithOptions 创建 PluginHost(可配置代理超时与重启上限)。
+func NewWithOptions(pluginsDir, dsn string, opts Options) *PluginHost {
+	proxyTimeout := opts.ProxyTimeout
+	if proxyTimeout <= 0 {
+		proxyTimeout = 15 * time.Second
+	}
+	restartMax := opts.RestartMax
+	if restartMax <= 0 {
+		restartMax = 5
+	}
+	if opts.MaxChildren <= 0 {
+		opts.MaxChildren = 8
+	}
 	return &PluginHost{
-		dir:      pluginsDir,
-		maxChild: maxChild,
-		dsn:      dsn,
-		children: map[string]*Child{},
+		dir:          pluginsDir,
+		maxChild:     opts.MaxChildren,
+		dsn:          dsn,
+		proxyTimeout: proxyTimeout,
+		restartMax:   restartMax,
+		children:     map[string]*Child{},
+		dead:         map[string]Restart{},
 	}
 }
 
@@ -63,6 +100,10 @@ func (h *PluginHost) Scan() []string {
 		if h.children[name] != nil {
 			continue // 已拉起
 		}
+		// 处于退避期的不尝试
+		if r, ok := h.dead[name]; ok && time.Now().Before(r.Backoff) {
+			continue
+		}
 		dir := filepath.Join(h.dir, name)
 		m, err := LoadManifest(dir)
 		if err != nil {
@@ -78,11 +119,13 @@ func (h *PluginHost) Scan() []string {
 		}
 		child, err := h.startChild(m, dir)
 		if err != nil {
+			h.noteDeath(name) // 启动失败也计入退避, 防止启动即崩的插件反复拉起
 			msgs = append(msgs, fmt.Sprintf("[host] %s: %v", name, err))
 			continue
 		}
 		h.children[name] = child
 		h.order = append(h.order, name)
+		delete(h.dead, name) // 成功拉起, 清除退避状态
 		msgs = append(msgs, fmt.Sprintf("[host] 已加载: %s (%s)", name, m.Label))
 	}
 	return msgs
@@ -94,11 +137,33 @@ func (h *PluginHost) startChild(m *Manifest, dir string) (*Child, error) {
 		env = append(env, fmt.Sprintf("RC_SUDO_PW=%s", h.sudoPW))
 		env = append(env, fmt.Sprintf("TOUCHGAL_SUDO_PW=%s", h.sudoPW))
 	}
-	child := &Child{name: m.Name, dir: dir, manifest: m, env: env}
+	child := &Child{name: m.Name, dir: dir, manifest: m,
+		env: env, proxyTimeout: h.proxyTimeout}
 	if err := child.Start(); err != nil {
 		return nil, err
 	}
 	return child, nil
+}
+
+// noteDeath 记录一次崩溃, 计算指数退避。
+func (h *PluginHost) noteDeath(name string) {
+	r := h.dead[name]
+	r.Count++
+	// 退避序列: 2,4,8,16,32,60(封顶) 秒
+	backoff := time.Duration(1<<min(r.Count, 5)) * time.Second
+	if backoff > 60*time.Second {
+		backoff = 60 * time.Second
+	}
+	r.Backoff = time.Now().Add(backoff)
+	r.LastDied = time.Now()
+	h.dead[name] = r
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // Get 按名返回子进程。
@@ -133,6 +198,7 @@ func (h *PluginHost) Remove(name string) error {
 		delete(h.children, name)
 		h.order = removeStr(h.order, name)
 	}
+	delete(h.dead, name) // 用户主动卸载, 清退避状态
 	h.mu.Unlock()
 	if c == nil {
 		return fmt.Errorf("插件 %s 未加载", name)
@@ -150,9 +216,11 @@ func (h *PluginHost) Shutdown() {
 	}
 	h.children = map[string]*Child{}
 	h.order = nil
+	h.dead = map[string]Restart{}
 }
 
-// Watchdog 常驻监视: 崩溃自动拉起(带 2s 退避)。
+// Watchdog 常驻监视: 崩溃自动拉起, 带指数退避与重启上限。
+// restartMax 达到后不再自动拉起(联系人工/面板操作)。
 func (h *PluginHost) Watchdog(stop <-chan struct{}, interval time.Duration) {
 	if interval <= 0 {
 		interval = 5 * time.Second
@@ -165,22 +233,47 @@ func (h *PluginHost) Watchdog(stop <-chan struct{}, interval time.Duration) {
 			return
 		case <-t.C:
 			h.mu.Lock()
+			// 1) 检测已挂子进程
 			for name, c := range h.children {
 				if c.Alive() {
 					continue
 				}
-				h.mu.Unlock()
+				delete(h.children, name)
+				h.order = removeStr(h.order, name)
+				h.noteDeath(name)
+				if h.dead[name].Count > h.restartMax {
+					fmt.Printf("[host] %s 连续崩溃 %d 次, 停止自动拉起\n", name, h.dead[name].Count)
+				}
+			}
+			// 2) 尝试重启(受退避约束)
+			var restart []string
+			for name, r := range h.dead {
+				if r.Count <= h.restartMax && time.Now().After(r.Backoff) {
+					restart = append(restart, name)
+				}
+			}
+			h.mu.Unlock()
+
+			for _, name := range restart {
+				if len(h.children) >= h.maxChild {
+					break
+				}
 				dir := filepath.Join(h.dir, name)
 				if m, err := LoadManifest(dir); err == nil {
 					if nc, err := h.startChild(m, dir); err == nil {
 						h.mu.Lock()
 						h.children[name] = nc
+						h.order = append(h.order, name)
+						delete(h.dead, name)
+						h.mu.Unlock()
+						fmt.Printf("[host] 已重启: %s\n", name)
+					} else {
+						h.mu.Lock()
+						h.noteDeath(name)
 						h.mu.Unlock()
 					}
 				}
-				h.mu.Lock()
 			}
-			h.mu.Unlock()
 		}
 	}
 }

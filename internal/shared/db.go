@@ -8,6 +8,7 @@
 package shared
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"regexp"
@@ -15,7 +16,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql" // mysql 驱动
-	_ "modernc.org/sqlite"            // sqlite 驱动(纯 Go)
+	_ "modernc.org/sqlite"             // sqlite 驱动(纯 Go)
 )
 
 var (
@@ -30,12 +31,23 @@ func ValidateNS(ns string) bool {
 
 // Shared 全局数据层入口。
 type Shared struct {
-	db     *sql.DB
-	sqlite bool
+	db           *sql.DB
+	sqlite       bool
+	queryTimeout time.Duration // 单条查询超时(0=不设)
 }
 
 // Open 按 DSN 打开数据层。支持 mysql:// 与 sqlite:///。
+// queryTimeout: 单条查询超时, <=0 表示不设。
 func Open(dsn string) (*Shared, error) {
+	return openWithTimeout(dsn, 0)
+}
+
+// OpenWithTimeout 与 Open 相同, 但指定单条查询超时。
+func OpenWithTimeout(dsn string, queryTimeout time.Duration) (*Shared, error) {
+	return openWithTimeout(dsn, queryTimeout)
+}
+
+func openWithTimeout(dsn string, queryTimeout time.Duration) (*Shared, error) {
 	var driver, src string
 	sqlite := false
 	switch {
@@ -60,7 +72,15 @@ func Open(dsn string) (*Shared, error) {
 		db.Close()
 		return nil, fmt.Errorf("数据层连接失败: %w", err)
 	}
-	return &Shared{db: db, sqlite: sqlite}, nil
+	return &Shared{db: db, sqlite: sqlite, queryTimeout: queryTimeout}, nil
+}
+
+// ctx 为单条查询生成带超时的 context。
+func (s *Shared) ctx() (context.Context, context.CancelFunc) {
+	if s.queryTimeout <= 0 {
+		return context.Background(), func() {}
+	}
+	return context.WithTimeout(context.Background(), s.queryTimeout)
 }
 
 // mysqlSource mysql://user:pass@host:port/dbname -> go-sql-driver DSN

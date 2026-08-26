@@ -39,15 +39,20 @@ func main() {
 		}
 	}
 
-	// 数据层
-	sd, err := shared.Open(cfg.ResolveDSN())
+	// 数据层(单条查询带超时, 防止 DB 卡死拖垮主进程)
+	sd, err := shared.OpenWithTimeout(cfg.ResolveDSN(),
+		time.Duration(cfg.DBQueryTimeout)*time.Second)
 	if err != nil {
 		log.Fatalf("数据层初始化失败: %v", err)
 	}
 	defer sd.Close()
 
 	// 插件运行时
-	ph := host.New(cfg.PluginsDir, cfg.ResolveDSN(), cfg.PluginMaxChildren)
+	ph := host.NewWithOptions(cfg.PluginsDir, cfg.ResolveDSN(), host.Options{
+		MaxChildren:  cfg.PluginMaxChildren,
+		ProxyTimeout: time.Duration(cfg.PluginProxyTimeout) * time.Second,
+		RestartMax:   cfg.PluginRestartMax,
+	})
 	ph.SetSudoPW(cfg.SudoPW)
 	for _, msg := range ph.Scan() {
 		log.Println(msg)
@@ -63,6 +68,16 @@ func main() {
 		Addr:              fmt.Sprintf("0.0.0.0:%d", *port),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+	if cfg.HTTPReadTimeout > 0 {
+		httpServer.ReadTimeout = time.Duration(cfg.HTTPReadTimeout) * time.Second
+	}
+	if cfg.HTTPWriteTimeout > 0 {
+		// 0=不设(SSE 终端/大文件下载不能有写超时)
+		httpServer.WriteTimeout = time.Duration(cfg.HTTPWriteTimeout) * time.Second
+	}
+	if cfg.HTTPIdleTimeout > 0 {
+		httpServer.IdleTimeout = time.Duration(cfg.HTTPIdleTimeout) * time.Second
 	}
 
 	// 优雅退出
