@@ -2,8 +2,6 @@ import { ref } from 'vue'
 
 const installOpen = ref(false)
 
-// 主题命名空间统一: rc_theme(清理 touchgal_theme 残留)
-// 默认浅色模式; 用户选择深色后持久化
 const THEME_KEY = 'rc_theme'
 
 function applyTheme(t) {
