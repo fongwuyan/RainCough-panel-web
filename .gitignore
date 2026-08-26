@@ -33,3 +33,6 @@ plugins/demo/
 .go/
 .gocache/
 *.tar
+
+# 前端构建产物(不入库, 部署时由 web build 生成)
+public/
