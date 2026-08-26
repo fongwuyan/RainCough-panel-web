@@ -5,7 +5,7 @@ import { api } from '../../api'
 const data = ref(null)
 const loading = ref(false)
 async function load() { loading.value = true; try { data.value = await api.sysfNet() } catch (e) {} finally { loading.value = false } }
-function fmtRate(b) { if (b >= 1048576) return (b / 1048576).toFixed(1) + 'MB/s'; if (b >= 1024) return (b / 1024).toFixed(1) + 'KB/s'; return b + 'B/s' }
+function fmtRate(b) { b = Number(b) || 0; if (b >= 1048576) return (b / 1048576).toFixed(1) + 'MB/s'; if (b >= 1024) return (b / 1024).toFixed(1) + 'KB/s'; return b + 'B/s' }
 onMounted(load)
 </script>
 

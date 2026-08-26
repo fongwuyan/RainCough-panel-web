@@ -13,7 +13,7 @@ function bars(key) {
   const max = Math.max.apply(null, vals.concat([1]))
   return vals.map((v) => ({ h: Math.max(2, Math.round((v / max) * 100)), v: v }))
 }
-function fmtRate(b) { if (b >= 1048576) return (b / 1048576).toFixed(1) + 'MB/s'; if (b >= 1024) return (b / 1024).toFixed(1) + 'KB/s'; return b + 'B/s' }
+function fmtRate(b) { b = Number(b) || 0; if (b >= 1048576) return (b / 1048576).toFixed(1) + 'MB/s'; if (b >= 1024) return (b / 1024).toFixed(1) + 'KB/s'; return b + 'B/s' }
 
 onMounted(load)
 </script>

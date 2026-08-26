@@ -108,6 +108,7 @@ async function doUnmount(part) {
 }
 
 function fmtBytes(b) {
+  b = Number(b)
   if (!b) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let i = 0
