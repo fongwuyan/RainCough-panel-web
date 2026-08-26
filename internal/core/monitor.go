@@ -74,6 +74,7 @@ func (m *SystemMonitor) Snapshot() *SystemSnapshot {
 		Platform:     runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		GoVersion:    runtime.Version(),
+		PythonVersion: runtime.Version(),
 		BootTime:     BootTime(),
 		Uptime:       uptimeSec(),
 		CurrentTime:  time.Now().Unix(),
