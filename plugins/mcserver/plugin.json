@@ -1,0 +1,11 @@
+{
+  "name": "mcserver",
+  "label": "MC 服务器",
+  "version": "2.0.0",
+  "description": "多实例 Minecraft 服务器: 实时控制台、监控、启动/停止、实例 CRUD(独立子进程)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 40,
+  "routes": ["/instances", "/instance/add", "/start", "/stop", "/restart", "/status", "/console"]
+}
