@@ -74,6 +74,18 @@ func (m *EnvManager) Get(name string) (*EnvRuntime, bool) {
 	return e, ok
 }
 
+// Has 是否已安装某 type-version。
+func (m *EnvManager) Has(typ, version string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.envs {
+		if e.Type == typ && e.Version == version {
+			return true
+		}
+	}
+	return false
+}
+
 // EnvRunPrefix 返回某运行时的环境变量前缀(插件子进程注入 PATH 用)。
 // 返回 nil 表示未安装。envpkg.env_run_prefix 的 Go 对应。
 func (m *EnvManager) EnvRunPrefix(name string) (map[string]string, bool) {

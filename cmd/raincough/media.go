@@ -22,6 +22,7 @@ func initMediaNS(sd *shared.Shared) {
 }
 
 type mediaRoot struct {
+	Name  string `json:"name"`
 	Label string `json:"label"`
 	Path  string `json:"path"`
 }
@@ -38,10 +39,16 @@ func mediaGetRoots() []mediaRoot {
 	var out []mediaRoot
 	for _, item := range arr {
 		if m, ok := item.(map[string]interface{}); ok {
-			out = append(out, mediaRoot{
-				Label: str(m, "label"),
-				Path:  str(m, "path"),
-			})
+			name := str(m, "name")
+			label := str(m, "label")
+			path := str(m, "path")
+			if name == "" {
+				name = label
+			}
+			if name == "" {
+				name = path
+			}
+			out = append(out, mediaRoot{Name: name, Label: label, Path: path})
 		}
 	}
 	return out
@@ -112,16 +119,14 @@ func (s *server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 	const pageSize = 48
 	var items []map[string]interface{}
 	for _, rt := range mediaGetRoots() {
-		if rt.Path != root && root != "" {
-			if rt.Path != root {
-				continue
-			}
+		// 前端传 name 或 path, 都匹配
+		if root != "" && rt.Name != root && rt.Path != root && rt.Label != root {
+			continue
 		}
-		if root == "" || rt.Path == root {
-			if !dirExists(rt.Path) {
-				continue
-			}
-			filepath.Walk(rt.Path, func(path string, info os.FileInfo, err error) error {
+		if !dirExists(rt.Path) {
+			continue
+		}
+		filepath.Walk(rt.Path, func(path string, info os.FileInfo, err error) error {
 				if err != nil || info.IsDir() {
 					return nil
 				}
@@ -148,7 +153,6 @@ func (s *server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 				})
 				return nil
 			})
-		}
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i]["mtime"].(int64) > items[j]["mtime"].(int64)

@@ -47,17 +47,20 @@ func (e httpCodeErr) Error() string {
 
 func errHTTPCode(code int) error { return httpCodeErr(code) }
 
-// handleEnvRecipes GET /api/envpkg/recipes
-func (s *server) handleEnvRecipes(w http.ResponseWriter, r *http.Request) {
-	// 配方目录: 支持的运行时类型与版本(旧版为固定表, 这里给静态清单)
-	recipes := []map[string]interface{}{
+// envpkgRecipeList 运行时配方表(静态清单)。
+func envpkgRecipeList() []map[string]interface{} {
+	return []map[string]interface{}{
 		{"type": "node", "label": "Node.js", "versions": []string{"20.12.0", "22.0.0"}},
 		{"type": "python", "label": "Python", "versions": []string{"3.11.0", "3.12.0"}},
 		{"type": "go", "label": "Go", "versions": []string{"1.22.0", "1.23.0"}},
 		{"type": "java", "label": "Java (OpenJDK)", "versions": []string{"17.0.10", "21.0.2"}},
 		{"type": "php", "label": "PHP", "versions": []string{"8.2.0", "8.3.0"}},
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"recipes": recipes})
+}
+
+// handleEnvRecipes GET /api/envpkg/recipes
+func (s *server) handleEnvRecipes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{"recipes": envpkgRecipeList()})
 }
 
 // handleEnvList GET /api/envpkg/envs
@@ -65,9 +68,22 @@ func (s *server) handleEnvList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"envs": globalEnv.List()})
 }
 
-// handleEnvCatalog GET /api/envpkg/catalog (在线目录: 静态同 recipes, 预留)
+// handleEnvCatalog GET /api/envpkg/catalog (目录: {catalog: {type: [{label,version,type,installed}]}})
 func (s *server) handleEnvCatalog(w http.ResponseWriter, r *http.Request) {
-	s.handleEnvRecipes(w, r)
+	recipes := envpkgRecipeList()
+	catalog := map[string][]map[string]interface{}{}
+	for _, rc := range recipes {
+		typeName := rc["type"].(string)
+		label := rc["label"].(string)
+		for _, v := range rc["versions"].([]string) {
+			installed := globalEnv.Has(typeName, v)
+			catalog[typeName] = append(catalog[typeName], map[string]interface{}{
+				"type": typeName, "version": v, "label": label + " " + v,
+				"installed": installed,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"catalog": catalog})
 }
 
 // handleEnvInstall POST /api/envpkg/install {type, version}
