@@ -181,6 +181,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/system/", s.handleSystemSub)
 
 	// ---- 文件管理 ----
+	mux.HandleFunc("/api/fm/ops", s.handleFmOps)       // 列表只在无子路径时生效
+	mux.HandleFunc("/api/fm/ops/", s.handleFmOps)      // {id}/cancel/download
+	mux.HandleFunc("/api/fm/unzip", s.handleFmUnzip)
 	mux.HandleFunc("/api/fm/", s.handleFm)
 
 	// ---- 任务队列 + 调度器 ----
