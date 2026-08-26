@@ -1,0 +1,11 @@
+{
+  "name": "mcskin",
+  "label": "图片转皮肤",
+  "version": "2.0.0",
+  "description": "图片转 MC Java 皮肤: 全身立绘映射、Steve/Alex 模型(独立子进程, 需 Pillow)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 30,
+  "routes": ["/detect", "/convert", "/paint/models"]
+}

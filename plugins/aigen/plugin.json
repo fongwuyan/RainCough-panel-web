@@ -1,0 +1,11 @@
+{
+  "name": "aigen",
+  "label": "AI 生图",
+  "version": "2.0.0",
+  "description": "本地 SD1.5 文生图/图生图(独立子进程, 需 diffusers/transformers)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 60,
+  "routes": ["/ping", "/models", "/generate", "/img2img", "/status", "/gallery"]
+}
