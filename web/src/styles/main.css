@@ -1,5 +1,24 @@
-/* RainCough 基础样式: 主题变量 + 全局布局(暗色为主, light 主题覆盖) */
+/* RainCough 基础样式: 主题变量 + 全局布局(默认浅色, 深色为可选手动主题) */
 :root {
+  --bg: #f5f6f8;
+  --sidebar-bg: #fafbfc;
+  --surface: #ffffff;
+  --border: #dde1e6;
+  --text: #1f2328;
+  --text-muted: #57606a;
+  --text-faint: #8b949e;
+  --accent: #6d5cff;
+  --accent-press: #5546d6;
+  --accent-dim: rgba(109, 92, 255, 0.12);
+  --ok: #1a7f37;
+  --err: #d1242f;
+  --radius: 10px;
+  --hover: rgba(0, 0, 0, 0.04);
+  --mono: Consolas, 'Cascadia Mono', monospace;
+}
+
+/* 深色主题(用户显式选择) */
+:root[data-theme='dark'] {
   --bg: #0d1117;
   --sidebar-bg: #12151d;
   --surface: #161b24;
@@ -12,20 +31,7 @@
   --accent-dim: rgba(109, 92, 255, 0.16);
   --ok: #3fb950;
   --err: #f85149;
-  --radius: 10px;
   --hover: rgba(255, 255, 255, 0.05);
-  --mono: Consolas, 'Cascadia Mono', monospace;
-}
-
-:root[data-theme='light'] {
-  --bg: #f5f6f8;
-  --sidebar-bg: #fafbfc;
-  --surface: #ffffff;
-  --border: #dde1e6;
-  --text: #1f2328;
-  --text-muted: #57606a;
-  --text-faint: #8b949e;
-  --hover: rgba(0, 0, 0, 0.04);
 }
 
 * { box-sizing: border-box; }

@@ -126,6 +126,9 @@ func main() {
 		}
 	})
 
+	// 系统中心(服务/进程/日志/防火墙)
+	globalSys = core.NewSysCenter(cfg.SudoPW)
+
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -204,6 +207,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/store/registry", s.handleStoreRegistry)
 	mux.HandleFunc("/api/store/plugin/install", s.handleStorePluginInstall)
 	mux.HandleFunc("/api/store/plugin/remove", s.handleStorePluginRemove)
+
+	// ---- 系统中心(服务/进程/日志/防火墙) ----
+	mux.HandleFunc("/api/sysfunc/", s.handleSysCenter)
 	mux.HandleFunc("/api/scheduler/jobs/", s.handleSchedulerJob)
 
 	// ---- 插件 ----

@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RainCough 面板</title>
   <script>
-    // 主题统一命名空间: rc_theme(清理 touchgal_theme 残留)
-    if (localStorage.getItem('rc_theme') === 'light') {
-      document.documentElement.dataset.theme = 'light'
+    // 主题: 默认浅色; 仅当用户选择深色时设置 rc_theme=dark
+    if (localStorage.getItem('rc_theme') === 'dark') {
+      document.documentElement.dataset.theme = 'dark'
     }
   </script>
 </head>
