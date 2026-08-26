@@ -49,6 +49,11 @@ func (sc *SysCenter) run(name string, args ...string) (string, error) {
 	return string(out), err
 }
 
+// Run 导出: 直接执行命令(不加 sudo)。
+func (sc *SysCenter) Run(name string, args ...string) (string, error) {
+	return sc.run(name, args...)
+}
+
 // ---- 服务管理 ----
 
 // ServiceList systemd 服务列表(含状态)。

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// 系统中心扩展端点(对应旧前端 api.js sysf* 全部契约, 脚本化 sudo 执行)。
+// 系统中心扩展端点(对应旧前端 api.js sysf* 契约, 脚本化 sudo 执行)。
 
 func (s *server) sysfHardware(w http.ResponseWriter, r *http.Request) {
 	out := map[string]interface{}{}
@@ -44,10 +44,10 @@ func (s *server) sysfUpdates(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		if sub == "refresh" {
 			_, err := globalSys.Sudo("apt", "update", "-q")
-			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "message": "已刷新", "error": errStr(err)})
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "message": "ok", "error": errStr(err)})
 		} else if sub == "run" {
 			go func() { globalSys.Sudo("apt", "upgrade", "-y") }()
-			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "升级已在后台执行"})
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "started-in-background"})
 		} else {
 			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unsupported"})
 		}
@@ -171,8 +171,8 @@ func (s *server) sysfClean(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/clean/")
 	if sub == "scan" {
 		items := []map[string]interface{}{
-			{"key": "apt", "path": "/var/cache/apt", "size": dirSize("/var/cache/apt"), "label": "apt 缓存"},
-			{"key": "tmp", "path": "/tmp", "size": dirSize("/tmp"), "label": "/tmp 临时文件"},
+			{"key": "apt", "path": "/var/cache/apt", "size": dirSize("/var/cache/apt"), "label": "apt-cache"},
+			{"key": "tmp", "path": "/tmp", "size": dirSize("/tmp"), "label": "tmp-files"},
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 	} else if sub == "do" {
@@ -195,7 +195,7 @@ func (s *server) sysfPwr(w http.ResponseWriter, r *http.Request) {
 	switch sub {
 	case "state":
 		b, err := os.ReadFile("/run/systemd/shutdown/scheduled")
-		state := "无计划"
+		state := "none"
 		if err == nil {
 			state = strings.TrimSpace(string(b))
 		}
@@ -251,7 +251,7 @@ func (s *server) sysfTime(w http.ResponseWriter, r *http.Request) {
 		out, err := globalSys.Sudo("timedatectl", "set-ntp", "true")
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	} else {
-		out, _ := globalSys.run("timedatectl", "status")
+		out, _ := globalSys.Run("timedatectl", "status")
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": out})
 	}
 }
@@ -263,12 +263,12 @@ func (s *server) sysfHealth(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	} else {
 		checks := []map[string]interface{}{}
-		df, _ := globalSys.run("df", "-h", "/")
-		checks = append(checks, map[string]interface{}{"name": "磁盘 / 使用率", "ok": !strings.Contains(df, "100%")})
+		df, _ := globalSys.Run("df", "-h", "/")
+		checks = append(checks, map[string]interface{}{"name": "disk-root", "ok": !strings.Contains(df, "100%")})
 		_, memErr := os.ReadFile("/proc/meminfo")
-		checks = append(checks, map[string]interface{}{"name": "内存可读", "ok": memErr == nil})
+		checks = append(checks, map[string]interface{}{"name": "mem-readable", "ok": memErr == nil})
 		_, srvErr := globalSys.Sudo("systemctl", "is-active", "raincough")
-		checks = append(checks, map[string]interface{}{"name": "面板服务", "ok": srvErr == nil})
+		checks = append(checks, map[string]interface{}{"name": "panel-service", "ok": srvErr == nil})
 		writeJSON(w, http.StatusOK, map[string]interface{}{"checks": checks})
 	}
 }
@@ -278,7 +278,7 @@ func (s *server) sysfEvents(w http.ResponseWriter, r *http.Request) {
 	if l := r.URL.Query().Get("limit"); l != "" {
 		fmt.Sscanf(l, "%d", &limit)
 	}
-	out, err := globalSys.run("journalctl", "--no-pager", "-n", fmt.Sprint(limit), "--output=short-iso")
+	out, err := globalSys.Run("journalctl", "--no-pager", "-n", fmt.Sprint(limit), "--output=short-iso")
 	events := []map[string]interface{}{}
 	for _, line := range strings.Split(out, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
@@ -308,7 +308,7 @@ func (s *server) sysfLogrotate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) sysfBootHistory(w http.ResponseWriter, r *http.Request) {
-	out, _ := globalSys.run("journalctl", "--list-boots", "--no-pager")
+	out, _ := globalSys.Run("journalctl", "--list-boots", "--no-pager")
 	rows := []map[string]interface{}{}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
