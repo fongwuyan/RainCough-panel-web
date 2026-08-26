@@ -116,7 +116,7 @@ func (sc *SysCenter) TailLog(path string, lines int, grep string) ([]string, err
 		args = append(args, "-F", grep)
 	}
 	args = append(args, path)
-	out, err := sc.sudo("tail", args...)
+	out, err := sc.sudo(append([]string{"tail"}, args...)...)
 	if err != nil {
 		return nil, err
 	}
