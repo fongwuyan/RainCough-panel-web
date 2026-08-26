@@ -1,6 +1,6 @@
 <script setup>
-// Sidebar v2 — 注册表驱动: 系统功能 + 插件列表均来自后端 /api/plugins 与本地路由表(不再硬编码 12 组件 MAP)。
-import { onMounted } from 'vue'
+// Sidebar — 复刻旧面板侧栏式样: 系统分组 + 插件分组(注册表驱动)
+import { onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
 
@@ -8,15 +8,35 @@ const route = useRoute()
 const { plugins, load } = usePlugins()
 onMounted(load)
 
-// 系统功能(M4 展开): 后端返回的 core 菜单会并入这里
-const CORE = [
-  { key: 'home', label: '工作台', path: '/', desc: '概览与状态' },
+// 系统功能(主系统, 对应后端核心 API)
+const SYSTEM = [
+  { key: 'workspace', label: '工作台', path: '/', icon: '⌂' },
+  { key: 'filemanager', label: '文件管理', path: '/file', icon: '🗂' },
+  { key: 'terminal', label: '终端', path: '/terminal', icon: '▯' },
+  { key: 'syscenter', label: '系统中心', path: '/syscenter', icon: '⚙' },
+]
+const SYSTEM2 = [
+  { key: 'tasks', label: '任务队列', path: '/tasks', icon: '☰' },
+  { key: 'scheduler', label: '定时任务', path: '/scheduler', icon: '⏱' },
+  { key: 'envpkg', label: '环境包', path: '/envpkg', icon: '▤' },
+  { key: 'store', label: '插件市场', path: '/store', icon: '▦' },
 ]
 
-function isActive(p) {
-  if (p === 'home') return route.path === '/'
-  return route.name === 'plugin' && route.params.name === p
+function isActive(key) {
+  if (key === 'workspace') return route.path === '/'
+  if (key === 'filemanager') return route.path === '/file'
+  if (key.startsWith('syscenter')) return route.path === '/syscenter'
+  if (key === 'tasks') return route.path === '/tasks'
+  if (key === 'scheduler') return route.path === '/scheduler'
+  if (key === 'envpkg') return route.path === '/envpkg'
+  if (key === 'store') return route.path === '/store'
+  if (key === 'terminal') return route.path === '/terminal'
+  return route.path === ('/' + key)
 }
+
+const pluginActive = computed(() =>
+  route.name === 'plugin' ? String(route.params.name || '') : ''
+)
 </script>
 
 <template>
@@ -25,25 +45,36 @@ function isActive(p) {
       <span class="brand-dot"></span>
       <h2>RainCough</h2>
     </div>
+
     <nav class="plugin-list">
-      <template v-for="p in CORE" :key="p.key">
+      <template v-for="p in SYSTEM" :key="p.key">
         <router-link class="plugin-item" :class="{ active: isActive(p.key) }" :to="p.path">
-          <div class="label">{{ p.label }}</div>
-          <div class="desc">{{ p.desc }}</div>
+          <span class="nav-icon">{{ p.icon }}</span>
+          <div class="info"><div class="label">{{ p.label }}</div></div>
+        </router-link>
+      </template>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-section-label">系统</div>
+      <template v-for="p in SYSTEM2" :key="p.key">
+        <router-link class="plugin-item" :class="{ active: isActive(p.key) }" :to="p.path">
+          <span class="nav-icon">{{ p.icon }}</span>
+          <div class="info"><div class="label">{{ p.label }}</div></div>
         </router-link>
       </template>
 
       <div class="sidebar-divider"></div>
       <div class="sidebar-section-label">插件</div>
       <router-link v-for="p in plugins" :key="p.name" class="plugin-item"
-        :class="{ active: isActive(p.name) }" :to="'/plugin/' + p.name">
-        <div class="label">
-          <span class="dot" :class="p.alive === false ? 'off' : 'on'"></span>{{ p.label }}
+        :class="{ active: pluginActive === p.name }" :to="'/plugin/' + p.name">
+        <span class="nav-icon dot" :class="p.alive === false ? 'off' : 'on'"></span>
+        <div class="info">
+          <div class="label">{{ p.label }}</div>
+          <div class="desc">{{ p.description || p.name }}</div>
         </div>
-        <div class="desc">{{ p.description || p.name }}</div>
       </router-link>
-      <div v-if="!plugins || (!plugins.length && plugins !== null)" class="hint">加载中...</div>
     </nav>
+
     <div class="sidebar-footer">
       <span class="version">v1.0 · 仅局域网</span>
     </div>
@@ -51,22 +82,7 @@ function isActive(p) {
 </template>
 
 <style scoped>
-.sidebar { width: 230px; flex-shrink: 0; display: flex; flex-direction: column; height: 100vh; background: var(--sidebar-bg, #12151d); border-right: 1px solid var(--border, #2a3140); }
-.sidebar-header { display: flex; align-items: center; gap: 10px; padding: 18px 18px 12px; }
-.sidebar-header h2 { margin: 0; font-size: 17px; }
-.brand-dot { width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, var(--accent, #6d5cff), var(--accent-press, #5546d6)); }
-.plugin-list { flex: 1; overflow-y: auto; padding: 4px 10px; display: flex; flex-direction: column; gap: 2px; }
-.plugin-item { display: block; padding: 8px 10px; border-radius: 8px; text-decoration: none; color: var(--text, #e6e8ee); }
-.plugin-item:hover { background: var(--hover, rgba(255,255,255,0.05)); }
-.plugin-item.active { background: var(--accent-dim, rgba(109,92,255,0.16)); color: var(--accent, #6d5cff); }
-.label { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-.desc { font-size: 11px; color: var(--text-muted, #9aa3b2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-divider { border-top: 1px solid var(--border, #2a3140); margin: 8px 4px; }
-.sidebar-section-label { font-size: 11px; color: var(--text-faint, #777); padding: 6px 10px 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-.dot { width: 7px; height: 7px; border-radius: 50%; }
-.dot.on { background: #3fb950; }
-.dot.off { background: #f85149; }
-.hint { padding: 12px 10px; font-size: 12px; color: var(--text-faint, #777); }
-.sidebar-footer { padding: 12px 18px; border-top: 1px solid var(--border, #2a3140); }
-.version { font-size: 11px; color: var(--text-faint, #777); }
+.nav-icon.dot { border-radius: 50%; font-size: 8px; line-height: 8px; padding: 0; }
+.nav-icon.on { background: var(--success); }
+.nav-icon.off { background: var(--danger); }
 </style>

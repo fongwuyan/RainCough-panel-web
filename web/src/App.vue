@@ -14,7 +14,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div v-if="errGlobal" class="global-err">全局错误: {{ errGlobal }}</div>
+  <div v-if="errGlobal" class="errbar">全局错误: {{ errGlobal }}</div>
   <div class="layout">
     <Sidebar />
     <main class="content">
@@ -29,6 +29,7 @@ onMounted(() => {
   </div>
 </template>
 
-<style>
-.global-err { position: fixed; top: 0; left: 0; right: 0; z-index: 99999; background: #c62828; color: #fff; padding: 10px 14px; font-size: 12px; font-family: monospace; max-height: 120px; overflow: auto; }
+<style scoped>
+.errbar { position: fixed; top: 0; left: 0; right: 0; z-index: 99999; background: var(--danger);
+  color: #fff; padding: 8px 14px; font-size: 12px; font-family: var(--font-mono); }
 </style>
