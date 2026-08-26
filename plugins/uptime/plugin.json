@@ -1,0 +1,11 @@
+{
+  "name": "uptime",
+  "label": "Uptime 监控",
+  "version": "2.0.0",
+  "description": "站点探活监控: 定时检测 HTTP 目标在线状态、响应时间与可用率(独立子进程)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 20,
+  "routes": ["/targets", "/targets/<name>", "/history/<name>"]
+}

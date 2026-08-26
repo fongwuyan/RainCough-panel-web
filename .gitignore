@@ -1,26 +1,24 @@
 # Go 构建产物
 raincough.exe
+raincough
 *.exe
 .gocache/
 .gotmp/
 go.work.sum
 
-# 运行时数据
-data/
-plugins/
-testdata/
+# 本地缓存/交叉编译产物
+.npmcache/
+raincough-linux
+.tmp/
+.export/
 
-# 前端构建产物
-public/
+# 前端依赖
 web/node_modules/
+
+# 运行时数据(业务数据入库, 不落盘)
+data/
+plugins/*/data/
 
 # 日志与临时文件
 *.log
 .DS_Store
-# ���ػ���/����������
-.npmcache/
-raincough-linux
-
-# ������ʱĿ¼
-.tmp/
-.export/
