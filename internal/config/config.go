@@ -54,7 +54,7 @@ func Load() *Config {
 		PluginsDir:         env("RC_PLUGINS_DIR", filepath.Join(base, "plugins")),
 		PluginHostPort:     envInt("RC_PLUGIN_HOST_PORT", 0),
 		PluginStartTimeout: envInt("RC_PLUGIN_TIMEOUT", 30),
-		PluginMaxChildren:  envInt("RC_PLUGIN_MAX", 8),
+		PluginMaxChildren:  envInt("RC_PLUGIN_MAX", 24),
 		PluginKeepalive:    envInt("RC_PLUGIN_KEEPALIVE", 3600),
 		PluginProxyTimeout: envInt("RC_PLUGIN_PROXY_TIMEOUT", 15),
 		PluginRestartMax:   envInt("RC_PLUGIN_RESTART_MAX", 5),
