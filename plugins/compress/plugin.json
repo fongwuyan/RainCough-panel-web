@@ -1,0 +1,11 @@
+{
+  "name": "compress",
+  "label": "解压压缩",
+  "version": "2.0.0",
+  "description": "解压/压缩/格式转换/对比(独立子进程, 调用系统 7z/tar)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 20,
+  "routes": ["/decompress/list", "/decompress/extract", "/decompress/compress", "/decompress/compare"]
+}

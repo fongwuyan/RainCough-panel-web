@@ -1,0 +1,11 @@
+{
+  "name": "webspy",
+  "label": "采集解析",
+  "version": "2.0.0",
+  "description": "搜索/链接检测/RSS/正文提取(独立子进程)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 20,
+  "routes": ["/search", "/urlcheck", "/rss/feeds", "/rss/fetch", "/readability"]
+}
