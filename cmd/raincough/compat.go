@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -104,11 +105,11 @@ func (s *server) handleSchedulerActions(w http.ResponseWriter, r *http.Request) 
 // handleTerminalHosts /api/terminal/hosts 与 commands 的 CRUD(SSE 终端用)
 // 旧面板存 data/terminal_hosts.json; 新面板用 SharedData 简版内存实现。
 
-// lsblkDisks 磁盘列表(读 /sys/block, 简版)。
 // lsblkDisks 磁盘列表(真实 lsblk -J -b 输出, 带分区/挂载/使用率)。
 func lsblkDisks() []map[string]interface{} {
 	out, err := globalSys.Run("lsblk", "-J", "-b", "-o", "NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINT,ROTA,HOTPLUG")
 	if err != nil {
+		log.Printf("[disks] lsblk 失败: %v (out=%q)", err, out)
 		return []map[string]interface{}{}
 	}
 	var parsed struct {
