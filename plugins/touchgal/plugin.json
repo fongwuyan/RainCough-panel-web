@@ -1,0 +1,11 @@
+{
+  "name": "touchgal",
+  "label": "TouchGal 游戏查找",
+  "version": "2.0.0",
+  "description": "搜索 Galgame 游戏资源、获取下载链接(独立子进程)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 30,
+  "routes": ["/search", "/resource"]
+}

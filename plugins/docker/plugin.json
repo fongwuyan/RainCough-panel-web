@@ -1,0 +1,11 @@
+{
+  "name": "docker",
+  "label": "Docker 管理",
+  "version": "2.0.0",
+  "description": "容器/镜像管理: 列表、启停、日志、stats(独立子进程, 调 docker CLI)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 25,
+  "routes": ["/env", "/info", "/containers", "/containers/logs", "/containers/stats"]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "laizhangsetu",
+  "label": "来张涩图",
+  "version": "2.0.0",
+  "description": "调用 Lolicon API 获取随机 Pixiv 图片, 支持标签搜索、R18、图片缓存(独立子进程)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 25,
+  "routes": ["/fetch", "/config", "/history", "/cooldown"]
+}
