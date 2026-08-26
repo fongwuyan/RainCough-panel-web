@@ -7,13 +7,34 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // 补充旧前端 api.js 依赖的系统端点, 保持界面可用。
 
-// handleDisks GET /api/disks (lsblk 磁盘列表)
+// 磁盘列表缓存(300ms 节拍下避免每请求都 exec lsblk+df)。
+var disksCache struct {
+	mu    sync.Mutex
+	data  []map[string]interface{}
+	stamp time.Time
+}
+
+// handleDisks GET /api/disks (lsblk 磁盘列表, 300ms 节拍缓存)
 func (s *server) handleDisks(w http.ResponseWriter, r *http.Request) {
+	disksCache.mu.Lock()
+	if time.Since(disksCache.stamp) < 300*time.Millisecond && disksCache.data != nil {
+		data := disksCache.data
+		disksCache.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]interface{}{"disks": data})
+		return
+	}
+	disksCache.mu.Unlock()
 	disks := lsblkDisks()
+	disksCache.mu.Lock()
+	disksCache.data = disks
+	disksCache.stamp = time.Now()
+	disksCache.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]interface{}{"disks": disks})
 }
 

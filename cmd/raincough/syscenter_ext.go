@@ -324,7 +324,7 @@ func (s *server) sysfBootHistory(w http.ResponseWriter, r *http.Request) {
 
 // ---- 性能趋势/网络状态(工作台 SysPerf/SysNet) ----
 
-// perfHist 环形采样历史(每 60s 一点, 保留 24h=1440 点)。
+// perfHist 环形采样历史(每 300ms 一点, 保留最近 60 点 = 18s 实时滚动窗口)。
 var perfHist = struct {
 	mu     sync.Mutex
 	points []map[string]float64 // {cpu, mem, disk}
@@ -332,11 +332,13 @@ var perfHist = struct {
 	netTx  uint64
 }{}
 
+const perfMaxPoints = 60
+
 func perfSampler() {
 	prev := sysMon.Snapshot()
 	prevSeen := time.Now()
 	for {
-		time.Sleep(60 * time.Second)
+		time.Sleep(300 * time.Millisecond)
 		cur := sysMon.Snapshot()
 		netDur := time.Since(prevSeen).Seconds()
 		if netDur <= 0 {
@@ -348,8 +350,8 @@ func perfSampler() {
 			"mem":  cur.MemoryPercent,
 			"disk": cur.DiskPercent,
 		})
-		if len(perfHist.points) > 1440 {
-			perfHist.points = perfHist.points[len(perfHist.points)-1440:]
+		if len(perfHist.points) > perfMaxPoints {
+			perfHist.points = perfHist.points[len(perfHist.points)-perfMaxPoints:]
 		}
 		perfHist.netRx = uint64(float64(cur.NetRecv-prev.NetRecv) / netDur)
 		perfHist.netTx = uint64(float64(cur.NetSent-prev.NetSent) / netDur)
