@@ -120,53 +120,94 @@ func (s *Store) Ping() (map[string]bool, error) {
 	return map[string]bool{"net": true, "auth": resp.StatusCode == 200}, nil
 }
 
-// Registry 拉取插件注册表。
+// Registry 拉取插件注册表(GitHub, 失败时回退本地扫描)。
 func (s *Store) Registry() ([]StorePlugin, error) {
 	repo := s.config.PluginRepo
 	path := fmt.Sprintf("/repos/%s/%s/contents/registry.json?ref=%s",
 		repo.Owner, repo.Repo, repo.Branch)
 	resp, err := s.ghGet(path)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			var gh struct {
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&gh); err == nil {
+				if raw, err := base64.StdEncoding.DecodeString(gh.Content); err == nil {
+					var reg struct {
+						Plugins []struct {
+							Name        string `json:"name"`
+							Label       string `json:"label"`
+							Version     string `json:"version"`
+							Path        string `json:"path"`
+							Description string `json:"description"`
+						} `json:"plugins"`
+					}
+					if err := json.Unmarshal(raw, &reg); err == nil {
+						out := []StorePlugin{}
+						for _, p := range reg.Plugins {
+							installed, ver := s.installedVersion(p.Name)
+							out = append(out, StorePlugin{
+								Name: p.Name, Label: p.Label, Version: p.Version,
+								Path: p.Path, Description: p.Description,
+								Installed: installed, InstalledV: ver,
+							})
+						}
+						return out, nil
+					}
+				}
+			}
+		}
+	}
+	// 回退: 扫描本地插件目录生成注册表
+	return s.localRegistry()
+}
+
+// localRegistry 从本地插件目录扫描生成注册表(无 GitHub 时兜底)。
+func (s *Store) localRegistry() ([]StorePlugin, error) {
+	entries, err := os.ReadDir(s.pluginsDir)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("拉取 registry 失败: HTTP %d", resp.StatusCode)
-	}
-	// GitHub contents API 返回 base64 内容
-	var gh struct {
-		Content string `json:"content"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&gh); err != nil {
-		return nil, err
-	}
-	raw, err := base64.StdEncoding.DecodeString(gh.Content)
-	if err != nil {
-		return nil, err
-	}
-	var reg struct {
-		Plugins []struct {
-			Name        string `json:"name"`
-			Label       string `json:"label"`
-			Version     string `json:"version"`
-			Path        string `json:"path"`
-			Description string `json:"description"`
-		} `json:"plugins"`
-	}
-	if err := json.Unmarshal(raw, &reg); err != nil {
-		return nil, err
-	}
-	// 标记已安装
 	out := []StorePlugin{}
-	for _, p := range reg.Plugins {
-		installed, ver := s.installedVersion(p.Name)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		dir := filepath.Join(s.pluginsDir, name)
+		label, version, desc := name, "", ""
+		// 读 plugin.json(若有)
+		if raw, err := os.ReadFile(filepath.Join(dir, "plugin.json")); err == nil {
+			var m struct {
+				Name        string `json:"name"`
+				Label       string `json:"label"`
+				Version     string `json:"version"`
+				Description string `json:"description"`
+			}
+			if json.Unmarshal(raw, &m) == nil {
+				if m.Label != "" {
+					label = m.Label
+				}
+				version = m.Version
+				desc = m.Description
+			}
+		}
+		installed, ver := s.installedVersion(name)
 		out = append(out, StorePlugin{
-			Name: p.Name, Label: p.Label, Version: p.Version,
-			Path: p.Path, Description: p.Description,
+			Name: name, Label: label, Version: orDefault(version, ver),
+			Path: dir, Description: desc,
 			Installed: installed, InstalledV: ver,
 		})
 	}
 	return out, nil
+}
+
+func orDefault(v, def string) string {
+	if v != "" {
+		return v
+	}
+	return def
 }
 
 // InstallPlugin 安装插件(异步任务)。
