@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"raincough/internal/config"
+	"raincough/internal/core"
 	"raincough/internal/host"
 	"raincough/internal/shared"
 )
@@ -60,6 +61,34 @@ func main() {
 	stopWd := make(chan struct{})
 	go ph.Watchdog(stopWd, 5*time.Second)
 
+	// 任务队列 + 调度器(core_tasks / core_scheduler namespace)
+	taskNS, err := sd.Namespace("core_tasks")
+	if err != nil {
+		log.Fatalf("任务 namespace 初始化失败: %v", err)
+	}
+	globalTasks = core.NewTaskStore(taskNS)
+	globalTasks.LoadPersisted()
+	taskCleanupStop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-taskCleanupStop:
+				return
+			case <-t.C:
+				globalTasks.Cleanup(7)
+			}
+		}
+	}()
+
+	schedNS, err := sd.Namespace("core_scheduler")
+	if err != nil {
+		log.Fatalf("调度器 namespace 初始化失败: %v", err)
+	}
+	globalSched = core.NewScheduler(schedNS, nil)
+	globalSched.Start()
+
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -86,6 +115,8 @@ func main() {
 	go func() {
 		<-sig
 		close(stopWd)
+		close(taskCleanupStop)
+		globalSched.Stop()
 		ph.Shutdown()
 		sd.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -107,6 +138,12 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	// ---- 文件管理 ----
 	mux.HandleFunc("/api/fm/", s.handleFm)
+
+	// ---- 任务队列 + 调度器 ----
+	mux.HandleFunc("/api/tasks", s.handleTasks)
+	mux.HandleFunc("/api/tasks/", s.handleTaskDetail)
+	mux.HandleFunc("/api/scheduler/jobs", s.handleSchedulerJobs)
+	mux.HandleFunc("/api/scheduler/jobs/", s.handleSchedulerJob)
 
 	// ---- 插件 ----
 	mux.HandleFunc("/api/plugins", s.handlePlugins) // 列表

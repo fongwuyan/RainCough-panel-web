@@ -5,10 +5,21 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// pyBin 返回可用的 python 解释器(python3 优先, 回退 python; Windows/Linux 通用)。
+func pyBin() string {
+	for _, name := range []string{"python3", "python"} {
+		if _, err := exec.LookPath(name); err == nil {
+			return name
+		}
+	}
+	return "python3"
+}
 
 // 构造一个临时插件目录: plugin.json + hello server(inline python 或 node)。
 // 用 Go 内部 httptest 不可行(子进程独立), 这里起一个极小的 python http.server 变体。
@@ -17,9 +28,9 @@ func mkPlugin(t *testing.T, dir, name string) {
 	os.MkdirAll(dir, 0o755)
 	manifest := fmt.Sprintf(`{
 	  "name": "%s", "label": "测试插件", "version": "1.0.0", "lang": "python",
-	  "entry": ["python", "-c", "hello_server.py"],
+	  "entry": ["%s", "-c", "hello_server.py"],
 	  "timeout": 10
-	}`, name)
+	}`, name, pyBin())
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -41,9 +52,9 @@ http.server.HTTPServer(('127.0.0.1', p), H).serve_forever()
 	}
 	manifest = fmt.Sprintf(`{
 	  "name": "%s", "label": "测试插件", "version": "1.0.0", "lang": "python",
-	  "entry": ["python", "hello_server.py"],
+	  "entry": ["%s", "hello_server.py"],
 	  "timeout": 15
-	}`, name)
+	}`, name, pyBin())
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
