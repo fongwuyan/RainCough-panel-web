@@ -1,0 +1,11 @@
+{
+  "name": "kvm",
+  "label": "KVM 虚拟机",
+  "version": "2.0.0",
+  "description": "KVM/QEMU 虚拟机管理: 列表、启停、详情、VNC(独立子进程, 调 virsh)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 30,
+  "routes": ["/config", "/info", "/domains", "/domain", "/domain/action", "/domain/vnc"]
+}

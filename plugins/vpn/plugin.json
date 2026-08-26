@@ -1,0 +1,11 @@
+{
+  "name": "vpn",
+  "label": "VPN 网络",
+  "version": "2.0.0",
+  "description": "v2ray/wireguard 订阅管理: 订阅拉取、节点测试、连接控制(独立子进程)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 30,
+  "routes": ["/env", "/overview", "/v2/subs", "/v2/nodes", "/v2/connect", "/v2/status", "/wg/status"]
+}

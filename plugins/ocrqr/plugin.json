@@ -1,0 +1,11 @@
+{
+  "name": "ocrqr",
+  "label": "识别二维码",
+  "version": "2.0.0",
+  "description": "OCR 识别(系统 tesseract/rapidocr)与二维码生成/解码(zbarimg/qrencode)",
+  "author": "RainCough",
+  "lang": "python",
+  "entry": ["python3", "server.py"],
+  "timeout": 20,
+  "routes": ["/ocr", "/ocr/check", "/qr/gen", "/qr/decode"]
+}
