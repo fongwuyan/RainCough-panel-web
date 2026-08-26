@@ -1,14 +1,12 @@
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
 import { api } from '../api'
 import RealtimeChart from './sys/RealtimeChart.vue'
 import SysPerf from './sysfunc/SysPerf.vue'
 import SysNet from './sysfunc/SysNet.vue'
 
-const router = useRouter()
-const { plugins, remove } = usePlugins()
+const { plugins } = usePlugins()
 
 const FUNC_COUNTS = {
   touchgal: 3,
@@ -232,24 +230,7 @@ onUnmounted(() => {
   if (sysTimer) clearInterval(sysTimer)
   if (diskTimer) clearInterval(diskTimer)
   if (clockTimer) clearInterval(clockTimer)
-})
-
-async function removePlugin(name) {
-  if (!window.confirm(`确定要移除插件 "${name}" 吗？`)) return
-  try {
-    await remove(name)
-    if (router.currentRoute.value.name === 'plugin' &&
-        router.currentRoute.value.params.name === name) {
-      router.push('/')
-    }
-  } catch (e) {
-    window.alert('移除失败: ' + e.message)
-  }
-}
-
-function openPlugin(name) { router.push(`/plugin/${name}`) }
-
-</script>
+})</script>
 
 <template>
   <div>
@@ -465,64 +446,6 @@ function openPlugin(name) { router.push(`/plugin/${name}`) }
         </div>
         <div v-else style="margin-top:6px;margin-left:18px;color:var(--text-faint);font-size:12px;">无分区</div>
       </div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">系统工具</div>
-      <div class="card-grid">
-        <div class="card" style="aspect-ratio:auto;" @click="router.push('/terminal')">
-          <div class="card-body">
-            <div class="card-title">终端</div>
-            <div class="card-meta">服务器 Shell 命令行</div>
-          </div>
-        </div>
-        <div class="card" style="aspect-ratio:auto;" @click="router.push('/logs')">
-          <div class="card-body">
-            <div class="card-title">系统日志</div>
-            <div class="card-meta">查看运行日志</div>
-          </div>
-        </div>
-        <div class="card" style="aspect-ratio:auto;" @click="router.push('/processes')">
-          <div class="card-body">
-            <div class="card-title">进程管理</div>
-            <div class="card-meta">进程列表与结束</div>
-          </div>
-        </div>
-        <div class="card" style="aspect-ratio:auto;" @click="router.push('/media')">
-          <div class="card-body">
-            <div class="card-title">媒体中心</div>
-            <div class="card-meta">聚合浏览图片与视频</div>
-          </div>
-        </div>
-        <div class="card" style="aspect-ratio:auto;" @click="router.push('/scheduler')">
-          <div class="card-body">
-            <div class="card-title">定时任务</div>
-            <div class="card-meta">生图/抓取/清理调度</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">已安装插件</div>
-      <div class="card-grid">
-        <div
-          v-for="p in plugins"
-          :key="p.name"
-          class="card"
-          style="aspect-ratio:auto;"
-          @click="openPlugin(p.name)"
-        >
-          <div class="card-body">
-            <div class="card-title">{{ p.label }}</div>
-            <div class="card-meta">{{ p.description }}</div>
-            <div style="margin-top:8px;">
-              <button class="btn btn-danger btn-sm" @click.stop="removePlugin(p.name)">移除</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div v-if="!plugins.length" class="empty">加载中...</div>
     </div>
   </div>
 </template>
