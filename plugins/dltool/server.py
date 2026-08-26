@@ -39,7 +39,10 @@ def split(path, parts=2):
     if not os.path.isfile(path):
         return {"ok": False, "error": "文件不存在"}
     size = os.path.getsize(path)
-    part_size = (size + parts - 1) // parts
+    if size == 0:
+        return {"ok": False, "error": "空文件无需分片"}
+    parts = max(1, min(parts, size))
+    part_size = max(1, (size + parts - 1) // parts)
     out = []
     with open(path, "rb") as f:
         for i in range(parts):
@@ -50,7 +53,7 @@ def split(path, parts=2):
             with open(part_path, "wb") as pf:
                 pf.write(chunk)
             out.append(part_path)
-    return {"ok": True, "parts": out, "part_size": part_size}
+    return {"ok": True, "parts": out, "part_size": part_size, "count": len(out)}
 
 
 def join(paths, dest):
