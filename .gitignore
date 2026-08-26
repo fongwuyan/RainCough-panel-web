@@ -29,3 +29,7 @@ testdata/fmwork/
 testdata/plugins/
 testdata/preview.html
 plugins/demo/
+
+.go/
+.gocache/
+*.tar
