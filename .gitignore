@@ -22,3 +22,10 @@ plugins/*/data/
 # 日志与临时文件
 *.log
 .DS_Store
+# 测试运行时产物
+testdata/src.tar
+testdata/save_body.json
+testdata/fmwork/
+testdata/plugins/
+testdata/preview.html
+plugins/demo/
