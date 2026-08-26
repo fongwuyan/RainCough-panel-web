@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -104,9 +105,9 @@ func (s *server) handleSchedulerActions(w http.ResponseWriter, r *http.Request) 
 // 旧面板存 data/terminal_hosts.json; 新面板用 SharedData 简版内存实现。
 
 // lsblkDisks 磁盘列表(读 /sys/block, 简版)。
-// lsblkDisks 磁盘列表(真实 lsblk -J 输出, 带分区/挂载/使用率)。
+// lsblkDisks 磁盘列表(真实 lsblk -J -b 输出, 带分区/挂载/使用率)。
 func lsblkDisks() []map[string]interface{} {
-	out, err := globalSys.Run("lsblk", "-J", "-o", "NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINT,ROTA,HOTPLUG")
+	out, err := globalSys.Run("lsblk", "-J", "-b", "-o", "NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINT,ROTA,HOTPLUG")
 	if err != nil {
 		return []map[string]interface{}{}
 	}
@@ -144,21 +145,42 @@ func lsblkDisks() []map[string]interface{} {
 		for _, c := range b.Children {
 			part := map[string]interface{}{
 				"path": c.Path, "name": c.Name, "fstype": c.FSType,
-				"label": c.Label, "mountpoint": c.Mount, "size": c.Size,
+				"label": c.Label, "mountpoint": c.Mount, "size": parseSizeStr(c.Size),
 				"mounted": c.Mount != "", "removable": false,
 			}
-			// 使用率: 挂载点 + 真实用量(从 /proc/self/mountinfo 或 df)
+			// 使用率: 挂载点 + 真实用量(从 df)
 			addPartUsage(part, c.Mount)
 			partitions = append(partitions, part)
 		}
 		disks = append(disks, map[string]interface{}{
 			"name": b.Name, "path": b.Path, "type": b.Type,
-			"size": b.Size, "hotplug": b.Hotplug, "removable": false,
+			"size": parseSizeStr(b.Size), "hotplug": b.Hotplug, "removable": false,
 			"model": "", "tran": "",
 			"partitions": partitions,
 		})
 	}
 	return disks
+}
+
+// parseSizeStr 把 lsblk 大小字符串("119.2G"/字节数字)解析为 uint64。
+func parseSizeStr(s string) uint64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	// 已是纯数字(lsblk -b 输出)
+	if v, err := strconv.ParseUint(s, 10, 64); err == nil {
+		return v
+	}
+	// 人类可读格式兜底: 如 "119.2G"
+	var num float64
+	var unit string
+	fmt.Sscanf(s, "%f%s", &num, &unit)
+	mult := map[string]float64{"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}[unit]
+	if mult == 0 && unit != "" {
+		mult = 1
+	}
+	return uint64(num * mult)
 }
 
 // addPartUsage 为挂载分区补充 used/total/percent(读 /proc/mounts + statfs 简化为 df)。
