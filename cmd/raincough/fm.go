@@ -36,6 +36,13 @@ func resolveFM(rel string) (string, error) {
 		if cleanRoot == "" {
 			continue
 		}
+		// 根 / 特判: 任何绝对路径都在其下
+		if cleanRoot == "/" {
+			if strings.HasPrefix(abs, "/") {
+				return abs, nil
+			}
+			continue
+		}
 		// 前缀匹配: 允许根本身或其下任意路径(兼容 Windows 反斜杠)
 		if abs == cleanRoot || strings.HasPrefix(abs, cleanRoot+string(filepath.Separator)) {
 			return abs, nil
