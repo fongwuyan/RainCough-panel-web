@@ -61,10 +61,8 @@ onUnmounted(() => {
     <main class="content">
       <div class="content-inner">
         <router-view v-slot="{ Component }">
-          <transition name="view" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
+        <component :is="Component" :key="$route.fullPath" />
+      </router-view>
       </div>
     </main>
     <InstallModal />
