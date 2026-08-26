@@ -1,0 +1,13 @@
+#!/bin/bash
+echo "=== g++ ==="
+g++ --version 2>&1 | head -1 || echo "no g++"
+echo "=== gcc ==="
+gcc --version 2>&1 | head -1 || echo "no gcc"
+echo "=== cmake/make ==="
+cmake --version 2>&1 | head -1 || echo "no cmake"
+make --version 2>&1 | head -1 || echo "no make"
+echo "=== 常用库头文件 ==="
+ls /usr/include/mysql 2>/dev/null | head -2 || echo "no mysql headers"
+ls /usr/include/sqlite3.h 2>/dev/null || echo "no sqlite3.h"
+echo "=== pkg-config ==="
+pkg-config --version 2>&1 || echo "no pkg-config"

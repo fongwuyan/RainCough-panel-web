@@ -13,8 +13,8 @@ import (
 // PluginNameRE 插件名白名单(兼容 JMComic 这类既有大写名称)。
 var PluginNameRE = regexp.MustCompile(`^[a-zA-Z0-9_]{1,32}$`)
 
-// Manifest plugin.json v2 规范。
-// 插件 = 独立包: manifest + 任意语言子进程服务 + 自带前端产物(可选)。
+// Manifest plugin.json v3 规范。
+// 插件 = 独立包: manifest + C++/任意语言后端 + 自带 Vue3 前端产物(可选)。
 type Manifest struct {
 	Name        string   `json:"name"`
 	Label       string   `json:"label"`
@@ -22,12 +22,13 @@ type Manifest struct {
 	Description string   `json:"description,omitempty"`
 	Author      string   `json:"author,omitempty"`
 	Icon        string   `json:"icon,omitempty"`
-	Lang        string   `json:"lang,omitempty"`    // python|node|go|rust|php|...
+	Lang        string   `json:"lang,omitempty"`    // cpp|python|node|go|rust|php|...
 	Entry       []string `json:"entry"`             // 启动命令(相对插件目录)
 	Env         string   `json:"env,omitempty"`     // 环境包名(envpkg), 注入 PATH
 	Health      string   `json:"health,omitempty"`  // 就绪探针路径, 默认 /__health
 	Timeout     int      `json:"timeout,omitempty"` // 就绪等待秒, 默认 30
-	Assets      *Assets  `json:"assets,omitempty"`  // 前端构建产物
+	DB          bool     `json:"db,omitempty"`      // 是否需要共用数据层(默认 false)
+	Assets      *Assets  `json:"assets,omitempty"`  // 前端构建产物(Vue3)
 	Routes      []string `json:"routes,omitempty"`  // 元信息: 插件 API 路由
 }
 
