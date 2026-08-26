@@ -115,6 +115,17 @@ func main() {
 	}
 	globalEnv = core.NewEnvManager(envRoot, envNS)
 
+	// 插件市场(回调: 安装/卸载后触发 PluginHost 重扫)
+	storeNS, err := sd.Namespace("core_store")
+	if err != nil {
+		log.Fatalf("插件市场 namespace 初始化失败: %v", err)
+	}
+	globalStore = core.NewStore(storeNS, cfg.PluginsDir, func() {
+		for _, msg := range ph.Scan() {
+			log.Println(msg)
+		}
+	})
+
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -186,6 +197,13 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/envpkg/tasks/", s.handleEnvTask)
 	mux.HandleFunc("/api/envpkg/uninstall", s.handleEnvUninstall)
 	mux.HandleFunc("/api/envpkg/run", s.handleEnvRun)
+
+	// ---- 插件市场 ----
+	mux.HandleFunc("/api/store/settings", s.handleStoreSettings)
+	mux.HandleFunc("/api/store/ping", s.handleStorePing)
+	mux.HandleFunc("/api/store/registry", s.handleStoreRegistry)
+	mux.HandleFunc("/api/store/plugin/install", s.handleStorePluginInstall)
+	mux.HandleFunc("/api/store/plugin/remove", s.handleStorePluginRemove)
 	mux.HandleFunc("/api/scheduler/jobs/", s.handleSchedulerJob)
 
 	// ---- 插件 ----
