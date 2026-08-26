@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"raincough/internal/core"
@@ -41,7 +42,7 @@ func defaultDownloader(url, dest string) error {
 type httpCodeErr int
 
 func (e httpCodeErr) Error() string {
-	return "HTTP " + itoa(int(e))
+	return "HTTP " + strconv.Itoa(int(e))
 }
 
 func errHTTPCode(code int) error { return httpCodeErr(code) }
@@ -66,7 +67,7 @@ func (s *server) handleEnvList(w http.ResponseWriter, r *http.Request) {
 
 // handleEnvCatalog GET /api/envpkg/catalog (在线目录: 静态同 recipes, 预留)
 func (s *server) handleEnvCatalog(w http.ResponseWriter, r *http.Request) {
-	handleEnvRecipes(w, r)
+	s.handleEnvRecipes(w, r)
 }
 
 // handleEnvInstall POST /api/envpkg/install {type, version}
