@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -35,6 +36,18 @@ func ProxyRequest(child *Child, w http.ResponseWriter, r *http.Request, subpath 
 	// 透传关键头(避免 all-header 复制带来 host 污染)
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		req.Header.Set("Content-Type", ct)
+	}
+	// body 显式带 Content-Length, 否则目标侧读不到正文(ReadCloser 不做长度推导)
+	if r.Body != nil && r.Method != "GET" {
+		if cl := r.Header.Get("Content-Length"); cl != "" {
+			req.ContentLength, _ = strconv.ParseInt(cl, 10, 64)
+		} else {
+			// 无长度头时先整体读入, 保证子进程能读到正文
+			if raw, err := io.ReadAll(r.Body); err == nil {
+				req.ContentLength = int64(len(raw))
+				req.Body = io.NopCloser(strings.NewReader(string(raw)))
+			}
+		}
 	}
 
 	client := &http.Client{Timeout: child.proxyTimeout}
