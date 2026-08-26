@@ -136,20 +136,23 @@ func (m *EnvManager) Install(rtype, version string, downloader func(url, dest st
 			})
 			return
 		}
-		dest := filepath.Join(m.root, name+".tar.gz")
+		url := urlFor(rtype, version)
+		// 保持 URL 的实际扩展名(如 .tar.xz), 否则解压走错分支
+		ext := archiveExt(url)
+		dest := filepath.Join(m.root, name+ext)
 		if err := os.MkdirAll(m.root, 0o755); err != nil {
 			m.failTask(id, err.Error())
 			return
 		}
 		m.setTask(id, func(t *EnvTask) { t.Message = "下载中: " + name; t.Progress = 40 })
-		if err := downloader(urlFor(rtype, version), dest); err != nil {
+		if err := downloader(url, dest); err != nil {
 			m.failTask(id, "下载失败: "+err.Error())
 			return
 		}
 		m.setTask(id, func(t *EnvTask) { t.Message = "解压安装中..."; t.Progress = 70 })
-		// 解压 tar.gz(安装根)
+		// 解压(安装根)
 		installDir := filepath.Join(m.root, name)
-		if err := extractTarGz(dest, installDir); err != nil {
+		if err := extractArchive(dest, installDir); err != nil {
 			m.failTask(id, "解压失败: "+err.Error())
 			return
 		}
@@ -253,6 +256,25 @@ func urlFor(rtype, version string) string {
 		return fmt.Sprintf("https://www.python.org/ftp/python/%s/Python-%s.tgz", version, version)
 	default:
 		return fmt.Sprintf("https://mirror/not-configured/%s-%s", rtype, version)
+	}
+}
+
+// archiveExt 从 URL 推断归档扩展名(.tar.gz/.tar.xz/.zip/.tgz)。
+func archiveExt(url string) string {
+	lower := strings.ToLower(url)
+	switch {
+	case strings.HasSuffix(lower, ".tar.gz"):
+		return ".tar.gz"
+	case strings.HasSuffix(lower, ".tar.xz"):
+		return ".tar.xz"
+	case strings.HasSuffix(lower, ".tgz"):
+		return ".tgz"
+	case strings.HasSuffix(lower, ".zip"):
+		return ".zip"
+	case strings.HasSuffix(lower, ".tar"):
+		return ".tar"
+	default:
+		return ".tar.gz"
 	}
 }
 
