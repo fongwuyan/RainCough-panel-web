@@ -135,7 +135,8 @@ func unzipTo(src, destDir string) error {
 // extractXZ 用外部 xz 命令解压(若可用)。
 func extractXZ(src, destDir string) error {
 	// 内部用 xz -dc | tar x
-	return runCommand("xz -dc "+shellQuote(src)+" | tar -x -C "+shellQuote(destDir), 600)
+	_, err := runCommand("xz -dc "+shellQuote(src)+" | tar -x -C "+shellQuote(destDir), 600)
+	return err
 }
 
 func shellQuote(s string) string {
