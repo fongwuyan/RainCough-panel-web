@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-
-	"raincough/internal/core"
 )
 
 // 补充旧前端 api.js 依赖的系统端点, 保持界面可用。
