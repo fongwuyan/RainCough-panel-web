@@ -327,7 +327,7 @@ func (s *server) handleFmOps(w http.ResponseWriter, r *http.Request) {
 		parts = strings.Split(rest, "/")
 	}
 	// POST /api/fm/ops = 启动新任务
-	if r.Method == http.MethodPost && len(parts) == 1 && parts[0] == "" {
+	if r.Method == http.MethodPost && (len(parts) == 0 || (len(parts) == 1 && parts[0] == "")) {
 		s.handleFmOpsStart(w, r)
 		return
 	}
