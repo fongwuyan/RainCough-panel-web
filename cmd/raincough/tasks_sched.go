@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"raincough/internal/core"
 )
@@ -97,7 +98,14 @@ func (s *server) handleSchedulerJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleSchedulerJob(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/api/scheduler/jobs/"):]
+	rest := r.URL.Path[len("/api/scheduler/jobs/"):]
+	// 子路径: {id} / {id}/pause / {id}/resume / {id}/run
+	id := rest
+	sub := ""
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		id = rest[:i]
+		sub = rest[i+1:]
+	}
 	switch r.Method {
 	case http.MethodGet:
 		job, ok := globalSched.Get(id)
@@ -135,13 +143,37 @@ func (s *server) handleSchedulerJob(w http.ResponseWriter, r *http.Request) {
 		job, _ := globalSched.Get(id)
 		writeJSON(w, http.StatusOK, job)
 	case http.MethodPost:
-		// 手动执行
-		msg, err := globalSched.RunNow(id)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
-			return
+		switch sub {
+		case "pause":
+			enabled := false
+			if err := globalSched.Update(id, "", "", "", nil, &enabled); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+		case "resume":
+			enabled := true
+			if err := globalSched.Update(id, "", "", "", nil, &enabled); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+		case "run":
+			msg, err := globalSched.RunNow(id)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "message": msg})
+		default:
+			// POST /jobs/{id} = 手动执行(兼容旧前端)
+			msg, err := globalSched.RunNow(id)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "message": msg})
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "message": msg})
 	case http.MethodDelete:
 		if err := globalSched.Delete(id); err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": err.Error()})
