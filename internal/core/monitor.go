@@ -16,12 +16,12 @@ type SystemMonitor struct {
 	// CPU 差值
 	prevCpu *CpuState
 	// 网络差值
-	prevNet  *NetCounters
+	prevNet    *NetCounters
 	prevIfaces map[string]*NetIfaceState
 	// 缓存
-	cached    *SystemSnapshot
-	cachedAt  time.Time
-	shadowAt  time.Time // 影子时钟(便于测试)
+	cached   *SystemSnapshot
+	cachedAt time.Time
+	shadowAt time.Time // 影子时钟(便于测试)
 
 	// 配置
 	cacheInterval time.Duration
@@ -52,18 +52,18 @@ func (m *SystemMonitor) Snapshot() *SystemSnapshot {
 	hostname, _ := os.Hostname()
 
 	snap := &SystemSnapshot{
-		CPUCount:   runtime.NumCPU(),
-		CPUModel:   CpuModel(),
-		LoadAvg:    LoadAvg(),
+		CPUCount: runtime.NumCPU(),
+		CPUModel: CpuModel(),
+		LoadAvg:  LoadAvg(),
 		// 内存
-		MemoryTotal:  mem.Total,
-		MemoryUsed:   mem.Total - mem.Avail,
+		MemoryTotal:     mem.Total,
+		MemoryUsed:      mem.Total - mem.Avail,
 		MemoryAvailable: mem.Avail,
-		MemoryPercent: MemPercent(mem),
-		SwapTotal:    mem.SwapTotal,
-		SwapUsed:     mem.SwapTotal - mem.SwapFree,
+		MemoryPercent:   MemPercent(mem),
+		SwapTotal:       mem.SwapTotal,
+		SwapUsed:        mem.SwapTotal - mem.SwapFree,
 		// 磁盘
-		Disks:   disks,
+		Disks: disks,
 		// 网络(累计)
 		NetSent: curNet.Sent,
 		NetRecv: curNet.Recv,

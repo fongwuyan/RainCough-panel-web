@@ -1,0 +1,254 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"raincough/internal/core"
+)
+
+// 文件管理根目录: 旧的 FM_ALLOW_ROOTS 语义, env 可覆盖(默认 /)。
+var fmRoots = func() []string {
+	if v := os.Getenv("FM_ALLOW_ROOTS"); v != "" {
+		return strings.Split(v, ",")
+	}
+	return []string{"/"}
+}()
+
+// resolveFM 解析请求路径到绝对路径(约束在允许根内)。
+func resolveFM(rel string) (string, error) {
+	if rel == "" || rel == "." {
+		rel = "/"
+	}
+	// 解析为绝对路径(防止相对路径逃逸)
+	abs := rel
+	if !filepath.IsAbs(abs) {
+		abs = "/" + strings.TrimLeft(rel, "/")
+	}
+	abs = filepath.Clean(abs)
+	for _, root := range fmRoots {
+		cleanRoot := filepath.Clean(root)
+		if cleanRoot == "" {
+			continue
+		}
+		// 前缀匹配: 允许根本身或其下任意路径(兼容 Windows 反斜杠)
+		if abs == cleanRoot || strings.HasPrefix(abs, cleanRoot+string(filepath.Separator)) {
+			return abs, nil
+		}
+	}
+	return "", fmt.Errorf("路径超出允许根目录: %s", rel)
+}
+
+// handleFm 文件管理路由分发。
+func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
+	// query path 仅 GET 型端点使用; POST 型(save/mkdir 等)路径在 body 内
+	rel := r.URL.Query().Get("path")
+	abs := "/"
+	if rel != "" {
+		var err error
+		abs, err = resolveFM(rel)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+			return
+		}
+	}
+
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/list":
+		entries, err := core.ListDir(abs)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"path": abs, "items": entries, "count": len(entries),
+		})
+
+	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/read":
+		content, tooBig, err := core.ReadFileText(abs, core.ReadLimitMax)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"path": abs, "content": content, "too_big": tooBig,
+			"encoding": "utf-8",
+		})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/save":
+		var b struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		target, err := resolveFM(b.Path)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		if err := core.SaveFileText(target, []byte(b.Content), core.SaveLimitMax); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "path": target})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/mkdir":
+		if err := core.Mkdir(abs); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/rename":
+		var b struct {
+			Old string `json:"old"`
+			New string `json:"new"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		oldAbs, err := resolveFM(b.Old)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		// 新路径可以是相对(同目录)或绝对
+		newAbs := b.New
+		if !filepath.IsAbs(newAbs) {
+			newAbs = filepath.Join(filepath.Dir(oldAbs), filepath.Base(b.New))
+		}
+		if err := core.Rename(oldAbs, newAbs); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/delete":
+		var b struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		target, err := resolveFM(b.Path)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		if err := core.Delete(target); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/upload":
+		// 单请求上传(旧版另有 /upload/chunk 分块, 单请求先支持小文件)
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "缺少 file 字段"})
+			return
+		}
+		defer file.Close()
+		target, err := core.SafeJoin(abs, header.Filename)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		if err := os.MkdirAll(abs, 0o755); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		out, err := os.Create(target)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		defer out.Close()
+		if _, err := copyStream(out, file); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status": true, "name": header.Filename, "path": target,
+		})
+
+	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/download":
+		if !isFile(abs) {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "文件不存在"})
+			return
+		}
+		w.Header().Set("Content-Disposition",
+			"attachment; filename="+filepath.Base(abs))
+		http.ServeFile(w, r, abs)
+
+	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/preview":
+		if !isFile(abs) {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "文件不存在"})
+			return
+		}
+		ctype := core.PreviewType(abs)
+		if ctype == "text" {
+			content, tooBig, err := core.ReadFileText(abs, core.PreviewLimit)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"type": "text", "content": content, "too_big": tooBig,
+			})
+			return
+		}
+		// 媒体类型直接流式返回
+		w.Header().Set("Content-Type", mimeFor(ctype))
+		http.ServeFile(w, r, abs)
+
+	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/hash":
+		if !isFile(abs) {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "文件不存在"})
+			return
+		}
+		h, err := core.FileHash(abs)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"path": abs, "md5": h})
+
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unsupported: " + r.Method + " " + r.URL.Path})
+	}
+}
+
+func isFile(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
+func copyStream(dst io.Writer, src io.Reader) (int64, error) {
+	return io.Copy(dst, src)
+}
+
+func mimeFor(ctype string) string {
+	switch ctype {
+	case "image":
+		return "image/jpeg"
+	case "video":
+		return "video/mp4"
+	case "audio":
+		return "audio/mpeg"
+	case "pdf":
+		return "application/pdf"
+	default:
+		return "application/octet-stream"
+	}
+}

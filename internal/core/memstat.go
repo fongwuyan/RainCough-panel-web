@@ -8,8 +8,8 @@ import (
 
 // MemInfo 内存信息。
 type MemInfo struct {
-	Total  uint64
-	Avail  uint64
+	Total     uint64
+	Avail     uint64
 	SwapTotal uint64
 	SwapFree  uint64
 }

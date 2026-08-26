@@ -105,6 +105,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/system", s.handleSystem)
 	mux.HandleFunc("/api/system/", s.handleSystemSub)
 
+	// ---- 文件管理 ----
+	mux.HandleFunc("/api/fm/", s.handleFm)
+
 	// ---- 插件 ----
 	mux.HandleFunc("/api/plugins", s.handlePlugins) // 列表
 	mux.HandleFunc("/api/plugins/", s.handlePlugin) // 网关+资产+删除

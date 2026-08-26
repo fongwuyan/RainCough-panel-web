@@ -17,12 +17,12 @@ type NetCounters struct {
 
 // NetIfaceState 接口累计计数器(用于速率差值)。
 type NetIfaceState struct {
-	Name string
-	Up   bool
+	Name  string
+	Up    bool
 	Speed int64
-	Sent uint64
-	Recv uint64
-	Addr string
+	Sent  uint64
+	Recv  uint64
+	Addr  string
 }
 
 // ReadNetCounters 读取整体网络累计字节(linux /proc/net/dev)。
@@ -84,9 +84,9 @@ func ReadNetIfaces() []NetIfaceState {
 			continue
 		}
 		st := NetIfaceState{
-			Name: name,
-			Recv: atou(fields[0]),
-			Sent: atou(fields[8]),
+			Name:  name,
+			Recv:  atou(fields[0]),
+			Sent:  atou(fields[8]),
 			Speed: 0,
 		}
 		// 探测接口是否 up + IP 地址
