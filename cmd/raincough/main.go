@@ -255,7 +255,13 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]interface{}{"message": "已移除插件: " + name})
 			return
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "不支持的删除目标"})
+		// DELETE 带 subpath: 代理给插件子进程(插件自有 DELETE 路由)
+		child := s.host.Get(name)
+		if child == nil {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未加载: " + name})
+			return
+		}
+		host.ProxyRequest(child, w, r, sub)
 		return
 	case http.MethodGet, http.MethodPost:
 		// 资产文件: /api/plugins/<name>/assets/<file>
