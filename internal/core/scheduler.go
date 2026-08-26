@@ -15,13 +15,22 @@ type ScheduleJob struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
 	Cron        string            `json:"cron"`   // 5 段 cron (分 时 日 月 周), * 或数字
+	Trigger     string            `json:"trigger"` // cron|interval(兼容旧前端)
+	Interval    int               `json:"interval"` // 秒(trigger=interval 时)
+	Minute      string            `json:"minute,omitempty"`
+	Hour        string            `json:"hour,omitempty"`
+	Day         string            `json:"day,omitempty"`
+	Month       string            `json:"month,omitempty"`
+	DayOfWeek   string            `json:"day_of_week,omitempty"`
 	Action      string            `json:"action"` // shell / 系统动作名
 	Params      map[string]string `json:"params,omitempty"`
 	Enabled     bool              `json:"enabled"`
+	Paused      bool              `json:"paused"` // = !enabled(兼容旧前端)
 	LastRun     int64             `json:"last_run,omitempty"`
 	LastStatus  string            `json:"last_status,omitempty"` // ok|fail|running
 	LastMessage string            `json:"last_message,omitempty"`
 	CreatedAt   int64             `json:"created_at"`
+	History     []map[string]any  `json:"history,omitempty"` // 兼容旧前端(展开用)
 }
 
 // Scheduler 调度器: 管理 jobs + 按 cron 触发。
@@ -99,6 +108,7 @@ func (s *Scheduler) Create(name, cron, action string, params map[string]string) 
 		Name: name, Cron: cron, Action: action, Params: params,
 		Enabled: true, CreatedAt: time.Now().Unix(),
 	}
+	syncJobCompat(j)
 	s.jobs[j.ID] = j
 	s.persist(j)
 	return j, nil
@@ -130,8 +140,22 @@ func (s *Scheduler) Update(id string, name, cron, action string, params map[stri
 	if enabled != nil {
 		j.Enabled = *enabled
 	}
+	syncJobCompat(j)
 	s.persist(j)
 	return nil
+}
+
+// syncJobCompat 将 cron 拆分为前端分钟/时/日/月/周 + 派生 trigger/paused。
+func syncJobCompat(j *ScheduleJob) {
+	j.Paused = !j.Enabled
+	j.Trigger = "cron"
+	if j.Cron == "" {
+		j.Trigger = "interval"
+	}
+	parts := strings.Split(j.Cron, " ")
+	if len(parts) == 5 {
+		j.Minute, j.Hour, j.Day, j.Month, j.DayOfWeek = parts[0], parts[1], parts[2], parts[3], parts[4]
+	}
 }
 
 // Delete 删除任务。
@@ -352,5 +376,6 @@ func jobFromMap(id string, m map[string]interface{}) *ScheduleJob {
 		}
 		j.Params = params
 	}
+	syncJobCompat(j)
 	return j
 }
