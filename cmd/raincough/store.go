@@ -16,9 +16,11 @@ func (s *server) handleStoreSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"plugin_repo": globalStore.GetConfig().PluginRepo,
-			"panel_repo":  globalStore.GetConfig().PanelRepo,
-			"has_token":   globalStore.Token() != "",
+			"config": map[string]interface{}{
+				"plugin_repo": globalStore.GetConfig().PluginRepo,
+				"panel_repo":  globalStore.GetConfig().PanelRepo,
+				"has_token":   globalStore.Token() != "",
+			},
 		})
 	case http.MethodPost:
 		var b struct {
@@ -37,7 +39,13 @@ func (s *server) handleStoreSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"config": map[string]interface{}{
+				"plugin_repo": globalStore.GetConfig().PluginRepo,
+				"panel_repo":  globalStore.GetConfig().PanelRepo,
+				"has_token":   globalStore.Token() != "",
+			},
+		})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
 	}
