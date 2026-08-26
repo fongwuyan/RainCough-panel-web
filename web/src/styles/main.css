@@ -1,0 +1,56 @@
+/* RainCough 基础样式: 主题变量 + 全局布局(暗色为主, light 主题覆盖) */
+:root {
+  --bg: #0d1117;
+  --sidebar-bg: #12151d;
+  --surface: #161b24;
+  --border: #2a3140;
+  --text: #e6e8ee;
+  --text-muted: #9aa3b2;
+  --text-faint: #777d8c;
+  --accent: #6d5cff;
+  --accent-press: #5546d6;
+  --accent-dim: rgba(109, 92, 255, 0.16);
+  --ok: #3fb950;
+  --err: #f85149;
+  --radius: 10px;
+  --hover: rgba(255, 255, 255, 0.05);
+  --mono: Consolas, 'Cascadia Mono', monospace;
+}
+
+:root[data-theme='light'] {
+  --bg: #f5f6f8;
+  --sidebar-bg: #fafbfc;
+  --surface: #ffffff;
+  --border: #dde1e6;
+  --text: #1f2328;
+  --text-muted: #57606a;
+  --text-faint: #8b949e;
+  --hover: rgba(0, 0, 0, 0.04);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.6 system-ui, 'Microsoft YaHei', sans-serif;
+}
+
+#app { height: 100%; }
+.layout { display: flex; height: 100vh; }
+.content { flex: 1; min-width: 0; overflow-y: auto; }
+.content-inner { padding: 18px 22px; max-width: 1400px; margin: 0 auto; }
+
+a { color: var(--accent); }
+
+/* 视图切换动画 */
+.view-enter-active, .view-leave-active { transition: opacity 0.18s ease; }
+.view-enter-from, .view-leave-to { opacity: 0; }
+
+.mono { font-family: var(--mono); }
+.faint { color: var(--text-faint); }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
