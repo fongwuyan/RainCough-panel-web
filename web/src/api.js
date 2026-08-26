@@ -550,6 +550,12 @@ export const api = {
   kvDomainNote: (name) => req('GET', `/api/plugins/kvm/domain/note?name=${encodeURIComponent(name)}`),
   kvSaveNote: (name, note) => req('POST', '/api/plugins/kvm/domain/note', { name, note }),
 
+  // ---- 终端 SSE 适配(新后端) ----
+  tmOpen: (rows, cols) => req('POST', '/api/terminal/open', { rows: rows || 24, cols: cols || 100 }),
+  tmInput: (sid, data) => req('POST', '/api/terminal/input', { sid, data }),
+  tmResize: (sid, rows, cols) => req('POST', '/api/terminal/resize', { sid, rows, cols }),
+  tmClose: (sid) => req('POST', '/api/terminal/close', { sid }),
+
   // MC 服务器
   mcStatus: () => req('GET', '/api/plugins/mcserver/status'),
   mcStart: () => req('POST', '/api/plugins/mcserver/start', {}),
