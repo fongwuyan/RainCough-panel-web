@@ -155,6 +155,23 @@ func (s *server) handleTermCommands(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleTermHostsSetSort POST /api/terminal/hosts/set_sort {hosts:[...]} 保存主机排序
+func (s *server) handleTermHostsSetSort(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Hosts []map[string]interface{} `json:"hosts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+		return
+	}
+	if b.Hosts == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "hosts 必填"})
+		return
+	}
+	termSave("hosts", b.Hosts)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "hosts": b.Hosts})
+}
+
 func str(m map[string]interface{}, k string) string {
 	if v, ok := m[k].(string); ok {
 		return strings.TrimSpace(v)

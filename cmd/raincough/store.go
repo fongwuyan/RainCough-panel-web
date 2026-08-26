@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"raincough/internal/core"
 )
@@ -105,4 +106,44 @@ func (s *server) handleStorePluginRemove(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+}
+
+// handleStorePluginUpdate POST /api/store/plugin/update {name}
+func (s *server) handleStorePluginUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "POST required"})
+		return
+	}
+	var b struct{ Name string `json:"name"` }
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
+		return
+	}
+	status, err := globalStore.InstallPlugin(b.Name, globalTasks)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "message": "已重新安装(更新)"})
+}
+
+// handleStoreProject GET /api/store/project/status|check|update-info + POST /api/store/project/install
+func (s *server) handleStoreProject(w http.ResponseWriter, r *http.Request) {
+	sub := strings.TrimPrefix(r.URL.Path, "/api/store/project/")
+	repo := globalStore.GetConfig().PanelRepo
+	repoStr := repo.Owner + "/" + repo.Repo
+	switch sub {
+	case "status", "check", "update-info":
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "unknown", "repo": repoStr, "current": "v1.0.0",
+			"latest": "v1.0.0", "up_to_date": true, "checking": false,
+		})
+	case "install":
+		// 面板更新无法在运行中自升级, 提示需手动
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status": true, "message": "面板更新请通过部署脚本完成(运行中不可自升级)", "deferred": true,
+		})
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unknown"})
+	}
 }

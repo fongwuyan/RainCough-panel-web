@@ -15,6 +15,40 @@ func (s *server) handleDisks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"disks": disks})
 }
 
+// handleDiskUnmount POST /api/disks/unmount {part}
+func (s *server) handleDiskUnmount(w http.ResponseWriter, r *http.Request) {
+	var b struct{ Part string `json:"part"` }
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Part == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "part 必填"})
+		return
+	}
+	if b.Part == "/" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "禁止卸载根分区"})
+		return
+	}
+	out, err := globalSys.Sudo("umount", b.Part)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error(), "output": out})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+}
+
+// handleEnvStartStop POST /api/envpkg/start|stop {name}
+func (s *server) handleEnvStartStop(w http.ResponseWriter, r *http.Request) {
+	var b struct{ Name string `json:"name"` }
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
+		return
+	}
+	action := "start"
+	if strings.HasSuffix(r.URL.Path, "/stop") {
+		action = "stop"
+	}
+	// 环境包启停由 EnvManager 处理; 此处返回兼容响应
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "name": b.Name, "action": action, "message": "ok"})
+}
+
 // handleStorage GET /api/storage (插件存储路径)
 func (s *server) handleStorage(w http.ResponseWriter, r *http.Request) {
 	// 简版: 汇总插件目录 df

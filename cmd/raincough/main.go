@@ -131,6 +131,7 @@ func main() {
 
 	// 终端主机/常用命令存储
 	initTermNS(sd)
+	initMediaNS(sd)
 
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
@@ -240,12 +241,31 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	// ---- 旧前端兼容端点 ----
 	mux.HandleFunc("/api/disks", s.handleDisks)
+	mux.HandleFunc("/api/disks/unmount", s.handleDiskUnmount)
 	mux.HandleFunc("/api/storage", s.handleStorage)
 	mux.HandleFunc("/api/terminal/ws_token", s.handleWsToken)
+	mux.HandleFunc("/api/terminal/hosts/set_sort", s.handleTermHostsSetSort)
 	mux.HandleFunc("/api/sys/processes/kill", s.handleSysProcessesKill)
 	mux.HandleFunc("/api/tasks/purge", s.handleTasksPurge)
 	mux.HandleFunc("/api/scheduler/actions", s.handleSchedulerActions)
 	mux.HandleFunc("/api/scheduler/jobs/", s.handleSchedulerJob)
+	mux.HandleFunc("/api/envpkg/start", s.handleEnvStartStop)
+	mux.HandleFunc("/api/envpkg/stop", s.handleEnvStartStop)
+
+	// ---- 媒体中心 ----
+	mux.HandleFunc("/api/media/roots", s.handleMediaRoots)
+	mux.HandleFunc("/api/media/stats", s.handleMediaStats)
+	mux.HandleFunc("/api/media/list", s.handleMediaList)
+	mux.HandleFunc("/api/media/thumb", s.handleMediaFile)
+	mux.HandleFunc("/api/media/file", s.handleMediaFile)
+	mux.HandleFunc("/api/media/tag", s.handleMediaTag)
+	mux.HandleFunc("/api/media/tags", s.handleMediaTags)
+	mux.HandleFunc("/api/media/dedup", s.handleMediaDedup)
+	mux.HandleFunc("/api/media/tool/", s.handleMediaTool)
+
+	// ---- 插件商店 ----
+	mux.HandleFunc("/api/store/plugin/update", s.handleStorePluginUpdate)
+	mux.HandleFunc("/api/store/project/", s.handleStoreProject)
 
 	// ---- 插件 ----
 	mux.HandleFunc("/api/plugins", s.handlePlugins) // 列表
