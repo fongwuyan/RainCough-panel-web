@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,6 +34,44 @@ func mkTestTarball(t *testing.T, path string) {
 
 	tw.Close()
 	gz.Close()
+}
+
+// mkTestXzTarball 构造 .tar.xz(用外部 xz, 需宿主装有 xz)。
+func mkTestXzTarball(t *testing.T, path string) {
+	t.Helper()
+	tmp := t.TempDir()
+	plain := filepath.Join(tmp, "pkg.tar")
+	mkTestPlainTar(t, plain)
+	if _, err := runCommand("xz -k "+shellQuote(plain)+" && mv "+shellQuote(plain+".xz")+" "+shellQuote(path), 30); err != nil {
+		t.Fatalf("xz 压缩失败(需安装 xz): %v", err)
+	}
+}
+
+// mkTestPlainTar 构造未压缩 .tar。
+func mkTestPlainTar(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	tw := tar.NewWriter(f)
+	content := []byte("#!/bin/sh\necho hello-from-env\n")
+	_ = tw.WriteHeader(&tar.Header{
+		Name: "node-v22/bin/node", Mode: 0o755, Size: int64(len(content)),
+	})
+	tw.Write(content)
+	tw.Close()
+}
+
+// mkFormatTarball 按目标扩展名生成对应格式(dest 后缀决定 gzip/xz)。
+func mkFormatTarball(t *testing.T, dest string) {
+	t.Helper()
+	if strings.HasSuffix(dest, ".tar.xz") {
+		mkTestXzTarball(t, dest)
+	} else {
+		mkTestTarball(t, dest)
+	}
 }
 
 func TestExtractTarGz(t *testing.T) {
@@ -70,9 +109,9 @@ func TestEnvManagerInstallFlow(t *testing.T) {
 	root := t.TempDir()
 	m := NewEnvManager(root, ns)
 
-	// 模拟下载器: 直接生成 tar.gz
+	// 模拟下载器: 按 dest 后缀生成对应格式(gzip 或 xz)
 	downloader := func(url, dest string) error {
-		mkTestTarball(t, dest)
+		mkFormatTarball(t, dest)
 		return nil
 	}
 
