@@ -116,12 +116,18 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/rename":
 		var b struct {
-			Old string `json:"old"`
-			New string `json:"new"`
+			Old     string `json:"old"`
+			New     string `json:"new"`
+			Path    string `json:"path"`
+			NewName string `json:"new_name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
 			return
+		}
+		// 兼容前端契约 {path, new_name} 与旧契约 {old, new}
+		if b.Path != "" && b.NewName != "" {
+			b.Old, b.New = b.Path, b.NewName
 		}
 		oldAbs, err := resolveFM(b.Old)
 		if err != nil {
@@ -141,20 +147,33 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/delete":
 		var b struct {
-			Path string `json:"path"`
+			Path  string   `json:"path"`
+			Paths []string `json:"paths"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
 			return
 		}
-		target, err := resolveFM(b.Path)
-		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+		targets := []string{}
+		if len(b.Paths) > 0 {
+			targets = b.Paths
+		} else if b.Path != "" {
+			targets = []string{b.Path}
+		}
+		if len(targets) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "path 必填"})
 			return
 		}
-		if err := core.Delete(target); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			return
+		for _, p := range targets {
+			target, err := resolveFM(p)
+			if err != nil {
+				writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			if err := core.Delete(target); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
 
@@ -231,6 +250,73 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"path": abs, "md5": h})
 
+	case r.Method == http.MethodPost && (r.URL.Path == "/api/fm/move" || r.URL.Path == "/api/fm/copy"):
+		var b struct {
+			Paths []string `json:"paths"`
+			Dest  string   `json:"dest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		if len(b.Paths) == 0 || b.Dest == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "paths 与 dest 必填"})
+			return
+		}
+		destAbs, err := resolveFM(b.Dest)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		if err := os.MkdirAll(destAbs, 0o755); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		isCopy := r.URL.Path == "/api/fm/copy"
+		for _, p := range b.Paths {
+			srcAbs, err := resolveFM(p)
+			if err != nil {
+				writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			dst := filepath.Join(destAbs, filepath.Base(srcAbs))
+			if isCopy {
+				if err := copyPathFM(srcAbs, dst); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+					return
+				}
+			} else {
+				if err := os.Rename(srcAbs, dst); err != nil {
+					if err2 := copyPathFM(srcAbs, dst); err2 == nil {
+						os.RemoveAll(srcAbs)
+					} else {
+						writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+						return
+					}
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/size":
+		var b struct {
+			Paths []string `json:"paths"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		sizes := map[string]int64{}
+		for _, p := range b.Paths {
+			abs, err := resolveFM(p)
+			if err != nil {
+				continue
+			}
+			sz, _ := core.DirSize(abs)
+			sizes[p] = sz
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"sizes": sizes})
+
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unsupported: " + r.Method + " " + r.URL.Path})
 	}
@@ -239,6 +325,44 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 func isFile(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
+}
+
+// copyPathFM 复制文件或目录(给 fm move/copy 同步端点用)。
+func copyPathFM(src, dst string) error {
+	st, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !st.IsDir() {
+		return copyFileFM(src, dst)
+	}
+	return filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		return copyFileFM(p, target)
+	})
+}
+
+func copyFileFM(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	os.MkdirAll(filepath.Dir(dst), 0o755)
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = copyStream(out, in)
+	return err
 }
 
 func copyStream(dst io.Writer, src io.Reader) (int64, error) {

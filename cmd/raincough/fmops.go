@@ -377,10 +377,19 @@ func (s *server) handleFmOps(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleFmUnzip(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Path     string `json:"path"`
+		Archive  string `json:"archive"`
 		Dest     string `json:"dest"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Path == "" {
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+		return
+	}
+	// 兼容前端契约 {archive, dest, password} 与旧 {path, dest}
+	if b.Path == "" && b.Archive != "" {
+		b.Path = b.Archive
+	}
+	if b.Path == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "path 必填"})
 		return
 	}
