@@ -1,0 +1,19 @@
+# Go 构建产物
+raincough.exe
+*.exe
+.gocache/
+.gotmp/
+go.work.sum
+
+# 运行时数据
+data/
+plugins/
+testdata/
+
+# 前端构建产物
+public/
+web/node_modules/
+
+# 日志与临时文件
+*.log
+.DS_Store
