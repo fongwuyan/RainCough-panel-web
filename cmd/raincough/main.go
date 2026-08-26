@@ -210,6 +210,14 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	// ---- 系统中心(服务/进程/日志/防火墙) ----
 	mux.HandleFunc("/api/sysfunc/", s.handleSysCenter)
+
+	// ---- 旧前端兼容端点 ----
+	mux.HandleFunc("/api/disks", s.handleDisks)
+	mux.HandleFunc("/api/storage", s.handleStorage)
+	mux.HandleFunc("/api/terminal/ws_token", s.handleWsToken)
+	mux.HandleFunc("/api/sys/processes/kill", s.handleSysProcessesKill)
+	mux.HandleFunc("/api/tasks/purge", s.handleTasksPurge)
+	mux.HandleFunc("/api/scheduler/actions", s.handleSchedulerActions)
 	mux.HandleFunc("/api/scheduler/jobs/", s.handleSchedulerJob)
 
 	// ---- 插件 ----
