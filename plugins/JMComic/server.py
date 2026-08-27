@@ -72,6 +72,25 @@ def _save():
     _ns_set("downloads", _downloads)
 
 
+# ---- 官方 jmcomic 库(旧插件同款, 自动更新 API 域名) ----
+_jm = None
+_jm_err = None
+
+
+def _get_jm():
+    global _jm, _jm_err
+    if _jm is not None or _jm_err:
+        return _jm, _jm_err
+    try:
+        from jmcomic import JmOption
+        opt = JmOption.default()
+        opt.client.impl = 'api'
+        _jm = opt.new_jm_client()
+    except Exception as e:
+        _jm_err = "jmcomic 库不可用: " + str(e)
+    return _jm, _jm_err
+
+
 def _http(url, timeout=30):
     req = urllib.request.Request(url, headers={"User-Agent": "raincough-jmcomic/2.0",
                                                "Accept": "application/json"})
@@ -83,43 +102,78 @@ def _http(url, timeout=30):
 
 
 def search(keyword, page=1, mode="normal"):
-    """经 JM 网关搜索。网关不可达时返回明确错误(前端提示配置)。"""
-    url = JM_API + "/api/comics/search?keyword=" + urllib.parse.quote(keyword) + \
-          "&page=%d" % page
-    data = _http(url)
-    if "error" in data and isinstance(data.get("error"), str):
-        return {"ok": False, "error": data["error"], "gateway": JM_API}
-    comics = data.get("data", {}).get("comics", []) if isinstance(data, dict) else []
-    out = []
-    for c in comics:
-        out.append({
-            "aid": str(c.get("id") or c.get("aid") or ""),
-            "title": c.get("title") or c.get("name") or "",
-            "author": c.get("author") or "",
-            "cover": c.get("cover") or c.get("cover_url") or "",
-            "tags": c.get("tags") or [],
-        })
-    return {"ok": True, "items": out, "page": page}
+    """经官方 jmcomic 库搜索(自动域名更新, 同旧插件)。"""
+    client, err = _get_jm()
+    if err or client is None:
+        return {"ok": False, "error": err or "客户端不可用"}
+    try:
+        if mode == "author":
+            result = client.search_author(search_query=keyword, page=page)
+        elif mode == "tag":
+            result = client.search_tag(search_query=keyword, page=page)
+        else:
+            result = client.search_site(search_query=keyword, page=page)
+        items = []
+        for aid, name in (result or []):
+            items.append({"aid": str(aid), "title": name, "author": "", "cover": ""})
+        return {"ok": True, "items": items, "page": page, "mode": mode}
+    except Exception as e:
+        return {"ok": False, "error": "搜索失败: " + str(e)}
 
 
 def meta(aid):
-    url = JM_API + "/api/comic/" + urllib.parse.quote(aid) + "/meta"
-    data = _http(url)
-    if "error" in data and isinstance(data.get("error"), str):
-        return {"ok": False, "error": data["error"]}
-    return {"ok": True, "meta": data.get("data", data)}
+    """专辑详情: 标题/作者/封面(经官方库)。"""
+    client, err = _get_jm()
+    if err or client is None:
+        return {"ok": False, "error": err or "客户端不可用"}
+    try:
+        detail = client.get_album_detail(aid)
+        return {"ok": True, "meta": {
+            "aid": str(aid),
+            "title": getattr(detail, "title", "") or "",
+            "author": getattr(detail, "author", "") or "",
+            "authors": list(detail.authors) if getattr(detail, "authors", None) else [],
+            "tags": list(detail.tags) if getattr(detail, "tags", None) else [],
+            "series": getattr(detail, "series", "") or "",
+        }}
+    except Exception as e:
+        return {"ok": False, "error": "详情失败: " + str(e)}
 
 
 def album(aid, page=1):
-    url = JM_API + "/api/comic/" + urllib.parse.quote(aid) + "/album?page=%d" % page
-    data = _http(url)
-    return {"ok": True, "album": data.get("data", data)}
+    """章节(页码→图片列表)。"""
+    client, err = _get_jm()
+    if err or client is None:
+        return {"ok": False, "error": err or "客户端不可用"}
+    try:
+        detail = client.get_album_detail(aid)
+        pages = []
+        if hasattr(detail, "pages") and detail.pages:
+            for p in detail.pages:
+                pages.append(str(getattr(p, "page", "")) or str(getattr(p, "index", "")))
+        return {"ok": True, "album": {"title": getattr(detail, "title", ""), "pages": pages}}
+    except Exception as e:
+        return {"ok": False, "error": "章节失败: " + str(e)}
 
 
 def chapter(aid, cid):
-    url = JM_API + "/api/comic/" + urllib.parse.quote(aid) + "/chapter/" + urllib.parse.quote(cid)
-    data = _http(url)
-    return {"ok": True, "chapter": data.get("data", data)}
+    """章节图片列表(经官方库, 返回图片 URL)。"""
+    client, err = _get_jm()
+    if err or client is None:
+        return {"ok": False, "error": err or "客户端不可用"}
+    try:
+        photo = client.get_photo_detail(cid)
+        urls = []
+        if hasattr(photo, "image_urls") and photo.image_urls:
+            urls = list(photo.image_urls)
+        elif hasattr(photo, "images") and photo.images:
+            urls = list(photo.images)
+        return {"ok": True, "chapter": {
+            "cid": str(cid), "title": getattr(photo, "title", ""),
+            "images": urls,
+        }}
+    except Exception as e:
+        return {"ok": False, "error": "图片失败: " + str(e)}
 
 
 def add_library(aid, title, cover, tags):
