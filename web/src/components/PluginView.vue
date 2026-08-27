@@ -35,38 +35,55 @@ let mountFn = null            // 卸载函数(插件 mount 返回)
 let mountEl = null
 
 const isMapFallback = computed(() => mode.value === 'map')
-const comp = computed(() => MAP[name.value] || GenericPlugin)
+const comp = computed(() => MAP[name.value.toLowerCase()] || GenericPlugin)
 
 async function loadPluginFrontend() {
   mode.value = 'loading'
   perr.value = ''
   mountFn = null
+  const tryLoad = async (n) => {
+    await import(/* @vite-ignore */ '/api/plugins/' + n + '/assets/plugin.js')
+    const reg = window.__rcPlugin_ && window.__rcPlugin_[n]
+    if (reg && typeof reg.mount === 'function') return reg
+    return null
+  }
+  let firstErr = ''
   try {
-    // 动态加载插件的独立前端产物(插件完全自包含, 含 Vue runtime)
-    await import(/* @vite-ignore */ '/api/plugins/' + name.value + '/assets/plugin.js')
-    const reg = window.__rcPlugin_ && window.__rcPlugin_[name.value]
-    if (reg && typeof reg.mount === 'function') {
+    // 先按原始名(JMComic), 失败按小写(jmcomic) — 网关资产大小写敏感
+    let reg = null
+    try {
+      reg = await tryLoad(name.value)
+    } catch (e) { firstErr = String((e && e.message) || e) }
+    if (!reg && name.value.toLowerCase() !== name.value) {
+      try { reg = await tryLoad(name.value.toLowerCase()) } catch (e) {}
+    }
+    if (reg) {
       mode.value = 'plugin'
       await nextTick()
       if (mountEl) {
         // ctx 仅提供环境信息与可选请求器; Vue 已内联在插件产物中, 不注入
-        mountFn = reg.mount(mountEl, {
-          plugin: { name: name.value },
-          api: {
-            get: (p) => fetch('/api/plugins/' + name.value + p).then((r) => r.json()),
-            post: (p, body) => fetch('/api/plugins/' + name.value + p, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body || {}),
-            }).then((r) => r.json()),
-          },
-        })
+        try {
+          mountFn = reg.mount(mountEl, {
+            plugin: { name: name.value },
+            api: {
+              get: (p) => fetch('/api/plugins/' + name.value + p).then((r) => r.json()),
+              post: (p, body) => fetch('/api/plugins/' + name.value + p, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body || {}),
+              }).then((r) => r.json()),
+            },
+          })
+        } catch (e) {
+          perr.value = '挂载失败: ' + String((e && e.message) || e)
+        }
       }
       return
     }
   } catch (e) {
-    // 插件无独立前端(404 或未构建) → 回退内置
+    if (!firstErr) firstErr = String((e && e.message) || e)
   }
-  mode.value = MAP[name.value] ? 'map' : 'generic'
+  if (firstErr) perr.value = '加载插件前端失败: ' + firstErr
+  mode.value = MAP[name.value.toLowerCase()] ? 'map' : 'generic'
 }
 
 onMounted(loadPluginFrontend)
