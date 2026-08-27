@@ -416,6 +416,39 @@ def _download_dir():
     return base
 
 
+# 图片直连被 Cloudflare 拒 → 面板代理下载(带 UA/Referer) + 本地缓存
+_IMG_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+
+
+def proxy_image(url):
+    """下载 CDN 图片(带 UA/Referer), 返回 (bytes, ctype) 或 None。"""
+    import urllib.request
+    req = urllib.request.Request(url, headers={
+        "User-Agent": _IMG_UA,
+        "Referer": "https://18comic.vip/",
+        "Accept": "image/avif,image/webp,image/*,*/*;q=0.8",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = r.read()
+            ctype = r.headers.get("Content-Type", "image/jpeg")
+            if not data or len(data) < 100:  # CF 挑战页通常是 HTML
+                return None, ctype
+            head = data[:32]
+            if head.lstrip().startswith(b"<") or b"cf-mitigated" in head.lower() or b"challenge" in head[:128].lower():
+                return None, ctype
+            return data, ctype
+    except Exception:
+        return None, "image/jpeg"
+
+
+def _img_cache_dir(aid, cid):
+    d = os.path.join(_download_dir(), str(aid), str(cid))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 def _sum_pages(album):
     total = 0
     try:
@@ -468,6 +501,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def _bin(self, code, ctype, data):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _body(self):
         ln = int(self.headers.get("Content-Length") or 0)
@@ -538,32 +579,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p.startswith("/cover/"):
                 return self._json(200, {"ok": True, "url": ""})
             if p.startswith("/image/"):
-                # /image/<aid>/<cid>/<file> → 302 到官方 CDN 图
+                # /image/<aid>/<cid>/<file> → 面板代理下载(带UA, 落盘缓存)后回传二进制
                 parts = p[len("/image/"):].split("/")
                 if len(parts) >= 3:
-                    aid, cid, fname = parts[0], parts[1], parts[2]
+                    aid, cid, fname = parts[0], parts[1], "/".join(parts[2:])
+                    # 本地缓存优先
+                    local = os.path.join(_img_cache_dir(aid, cid), fname)
+                    if os.path.isfile(local):
+                        with open(local, "rb") as f:
+                            return self._bin(200, _guess_mime(fname), f.read())
+                    # 无缓存: 从章节缓存/即时拉取取该文件名 URL → 代理下载
+                    url = None
                     with _img_cache_lock:
                         urls = _img_cache.get((aid, cid), [])
                     for u in urls:
-                        if u.split("/")[-1] == fname:
-                            self.send_response(302)
-                            self.send_header("Location", u)
-                            self.send_header("Content-Length", "0")
-                            self.end_headers()
-                            return
-                    # 未缓存: 即时拉一张
-                    try:
-                        ch = chapter_images(aid, cid)
-                        urls = (ch.get("chapter") or {}).get("urls", [])
-                        for u in urls:
-                            if u.split("/")[-1] == fname:
-                                self.send_response(302)
-                                self.send_header("Location", u)
-                                self.send_header("Content-Length", "0")
-                                self.end_headers()
-                                return
-                    except Exception:
-                        pass
+                        if (u.split("/")[-1] or "") == fname:
+                            url = u
+                            break
+                    if url is None:
+                        try:
+                            ch = chapter_images(aid, cid)
+                            urls = (ch.get("chapter") or {}).get("urls", [])
+                            for u in urls:
+                                if (u.split("/")[-1] or "") == fname:
+                                    url = u
+                                    break
+                        except Exception:
+                            pass
+                    if url:
+                        data, ctype = proxy_image(url)
+                        if data:
+                            try:
+                                with open(local, "wb") as f:
+                                    f.write(data)
+                            except Exception:
+                                pass
+                            return self._bin(200, ctype, data)
                 return self._json(404, {"error": "image not found"})
             return self._json(404, {"error": "not found: " + p})
         except Exception as e:
@@ -616,6 +667,12 @@ def main():
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print("jmcomic ready on %d" % PORT, file=os.sys.stderr)
     srv.serve_forever()
+
+
+def _guess_mime(filename):
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    return {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+            "webp": "image/webp", "gif": "image/gif", "avif": "image/avif"}.get(ext, "image/jpeg")
 
 
 if __name__ == "__main__":
