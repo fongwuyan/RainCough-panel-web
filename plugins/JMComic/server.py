@@ -805,7 +805,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return 400, {'error': '缺少漫画ID'}
         cache = _load_cache(ALBUM_CACHE_FILE)
         entry = cache.get(aid)
-        if entry and time.time() - entry.get('fetched', 0) < 6 * 3600:
+        if entry and entry.get('_v') == 2 and time.time() - entry.get('fetched', 0) < 6 * 3600:
             return 200, entry['data']
         local = album_from_local(aid)
         if local:
@@ -848,7 +848,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     for r in (detail.related_list or [])
                 ],
             }
-            cache[aid] = {'data': data, 'fetched': int(time.time())}
+            cache[aid] = {'data': data, 'fetched': int(time.time()), '_v': 2}
             _save_cache(ALBUM_CACHE_FILE, cache)
             return 200, data
         except Exception as e:
@@ -874,7 +874,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return 200, {'id': cid, 'name': '', 'page_arr': files, 'total': len(files)}
         pcache = _load_cache(PHOTO_CACHE_FILE)
         entry = pcache.get(cid)
-        if entry:
+        if entry and entry.get('_v') == 2:
             return 200, entry
         try:
             photo = jm().get_photo_detail(cid)
@@ -890,6 +890,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 'total': len(photo.page_arr),
             }
             pcache[cid] = data
+            pcache.setdefault(cid, {})
+            pcache[cid]['_v'] = 2
             _save_cache(PHOTO_CACHE_FILE, pcache)
             return 200, data
         except Exception as e:
