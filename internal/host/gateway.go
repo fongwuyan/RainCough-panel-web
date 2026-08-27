@@ -19,9 +19,10 @@ func ProxyRequest(child *Child, w http.ResponseWriter, r *http.Request, subpath 
 		})
 		return
 	}
-	// 目标: http://127.0.0.1:<port>/<subpath>
+	// 目标: http://127.0.0.1:<port>/<subpath> (透传原始 query 参数)
 	u := url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", child.port),
-		Path: "/" + strings.TrimLeft(subpath, "/")}
+		Path:     "/" + strings.TrimLeft(subpath, "/"),
+		RawQuery: r.URL.RawQuery}
 	target := u.String()
 
 	var body io.Reader
