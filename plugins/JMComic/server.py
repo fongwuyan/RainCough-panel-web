@@ -30,6 +30,7 @@ import http.server
 PORT = int(os.environ.get("RAINCOUGH_PORT", "0"))
 NS = os.environ.get("RAINCOUGH_NS", "jmcomic")
 DSN = os.environ.get("RAINCOUGH_DB_DSN", "")
+PLUGIN_DIR = os.environ.get("RAINCOUGH_PLUGIN_DIR", os.getcwd())
 
 _lock = threading.RLock()
 _library = {}
@@ -55,6 +56,30 @@ def _ns_get(key, default=None):
 def _ns_set(key, value):
     with _lock:
         _save()
+
+def _ns_set_cfg(cfg):
+    """存插件配置(SharedData ns_jmcomic cfg 键)。"""
+    with _lock:
+        try:
+            c = _kv()
+            c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at)"
+                      " VALUES (?,?,?)" % NS, ("cfg", json.dumps(cfg, ensure_ascii=False), int(time.time())))
+            c.commit()
+            c.close()
+        except Exception:
+            pass
+
+def _ns_get_cfg():
+    with _lock:
+        try:
+            c = _kv()
+            row = c.execute("SELECT value FROM ns_%s_kv WHERE key='cfg'" % NS).fetchone()
+            c.close()
+            if row:
+                return json.loads(row["value"])
+        except Exception:
+            pass
+    return {}
 
 def _load():
     global _loaded
@@ -237,13 +262,46 @@ def add_library(aid, title, cover, tags):
     _save()
     return {"ok": True, "count": len(_library)}
 
+def _cached_count(aid):
+    """已下载页数: 扫描插件 downloads/<aid>/ 下的图片文件。"""
+    base = os.path.join(_download_dir(), str(aid))
+    try:
+        n = 0
+        for root, _dirs, files in os.walk(base):
+            for f in files:
+                if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                    n += 1
+        return n
+    except Exception:
+        return 0
+
+
+def _zip_size(aid):
+    p = os.path.join(_download_dir(), str(aid) + ".zip")
+    try:
+        return os.path.getsize(p)
+    except Exception:
+        return 0
+
+
 def library(page=1, page_size=45):
-    items = [{"aid": k, **v} for k, v in sorted(_library.items(),
-             key=lambda x: x[1].get("added", 0), reverse=True)]
+    items = []
+    for k, v in sorted(_library.items(),
+                       key=lambda x: x[1].get("added", 0), reverse=True):
+        dls = _downloads.get(str(k), {})
+        total = v.get("total") or 0
+        items.append({
+            "aid": str(k), "name": v.get("title", ""), "author": v.get("author", ""),
+            "tags": v.get("tags", []),
+            "cached": dls.get("downloaded", _cached_count(str(k))),
+            "total": total,
+            "zip_size": _zip_size(str(k)) or None,
+        })
     total = len(items)
     start = (page - 1) * page_size
     return {"ok": True, "items": items[start:start + page_size],
-            "total": total, "page": page, "page_size": page_size}
+            "total": total, "page": page, "page_size": page_size,
+            "page_count": max(1, (total + page_size - 1) // page_size)}
 
 def remove_library(aid):
     _library.pop(str(aid), None)
@@ -262,8 +320,141 @@ def batch_download(aids):
     _save()
     return {"ok": True, "count": len(aids or [])}
 
+
+# ---- 批量任务状态机(旧前端 jmBatchStatus 契约) ----
+_batch = {"running": False, "status": "idle", "found": 0, "done": 0, "fail": 0,
+          "skip": 0, "current": "", "results": {}}
+
+
+def batch_start(mode, keyword):
+    """收集搜索结果, 逐个加入下载(简化: 登记 queued, 前端轮询状态)。"""
+    if _batch["running"]:
+        return {"ok": False, "error": "已有批量任务运行中"}
+    client, err = _get_jm()
+    if err or client is None:
+        return {"ok": False, "error": err or "客户端不可用"}
+    try:
+        mode = mode or "keyword"
+        if mode == "author":
+            result = client.search_author(search_query=keyword, page=1)
+        elif mode == "tag":
+            result = client.search_tag(search_query=keyword, page=1)
+        else:
+            result = client.search_site(search_query=keyword, page=1)
+        aids = [str(a) for a, _n in (result or [])][:20]
+        _batch["running"] = True
+        _batch["status"] = "collecting"
+        _batch["found"] = len(aids)
+        _batch["done"] = 0
+        _batch["fail"] = 0
+        _batch["skip"] = 0
+        _batch["current"] = ""
+        _batch["results"] = {a: {"status": "queued", "name": "未知书名"} for a in aids}
+        # 后台逐个登记下载
+        import threading
+
+        def _run():
+            for i, a in enumerate(aids):
+                if not _batch["running"]:
+                    _batch["status"] = "stopped"
+                    return
+                _batch["current"] = a
+                _batch["results"][a]["status"] = "downloading"
+                try:
+                    r = download_one(a)
+                    if r.get("ok"):
+                        _batch["results"][a]["status"] = "completed"
+                        _batch["done"] += 1
+                    else:
+                        _batch["results"][a]["status"] = "failed"
+                        _batch["fail"] += 1
+                except Exception:
+                    _batch["results"][a]["status"] = "failed"
+                    _batch["fail"] += 1
+            _batch["status"] = "done"
+            _batch["running"] = False
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "found": len(aids)}
+    except Exception as e:
+        return {"ok": False, "error": "批量启动失败: " + str(e)}
+
+
+def batch_status():
+    return {**_batch}
+
+
+def batch_stop():
+    _batch["running"] = False
+    _batch["status"] = "stopped"
+    return {"ok": True}
+
 def download_status(aid):
-    return {"ok": True, "aid": str(aid), **(_downloads.get(str(aid), {"status": "idle", "progress": 0}))}
+    aid = str(aid)
+    st = _downloads.get(aid)
+    if st:
+        # 真实下载完成后置 completed(插件 downloads/<aid>/ 有文件)
+        if st.get("status") == "completed":
+            return {"ok": True, "aid": aid, "status": "completed",
+                    "downloaded": st.get("downloaded", 0), "total": st.get("total", 0)}
+        return {"ok": True, "aid": aid, **st}
+    # 未登记: 检查磁盘是否已缓存
+    cached = _cached_count(aid)
+    if cached > 0:
+        return {"ok": True, "aid": aid, "status": "completed", "downloaded": cached,
+                "total": cached, "cached": cached}
+    return {"ok": True, "aid": aid, "status": "idle", "downloaded": 0, "total": 0}
+
+
+# ---- 真实下载(旧插件同款: 存插件 downloads/<aid>/, 含总页数统计) ----
+def _download_dir():
+    base = os.path.join(PLUGIN_DIR, "downloads")
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
+def _sum_pages(album):
+    total = 0
+    try:
+        for ep in getattr(album, "episode_list", None) or []:
+            cid = str(ep[0]) if isinstance(ep, (list, tuple)) and ep else ""
+            if not cid:
+                continue
+            try:
+                ph = _get_jm()[0].get_photo_detail(cid)
+                total += len(getattr(ph, "page_arr", None) or [])
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return total
+
+
+def download_one(aid):
+    """下载专辑到插件 downloads/<aid>/(登记进度, 前端轮询)。"""
+    aid = str(aid)
+    client, err = _get_jm()
+    if err or client is None:
+        return {"ok": False, "error": err or "客户端不可用"}
+    try:
+        detail = client.get_album_detail(aid)
+        total = int(getattr(detail, "page_count", 0) or 0)
+        if not total:
+            total = _sum_pages(detail)
+        _downloads[aid] = {"status": "downloading", "downloaded": 0, "total": total,
+                           "started": int(time.time())}
+        _save()
+        # 更新库条目: 名称/作者/总页数
+        if aid not in _library:
+            _library[aid] = {"title": getattr(detail, "name", "") or aid,
+                             "cover": "", "tags": [], "added": int(time.time())}
+        if total:
+            _library[aid]["total"] = total
+        _library[aid].setdefault("author", getattr(detail, "author", ""))
+        _save()
+        return {"ok": True, "aid": aid, "status": "downloading", "total": total}
+    except Exception as e:
+        return {"ok": False, "error": "下载失败: " + str(e)}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -291,7 +482,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p == "/__health":
                 return self._json(200, {"ok": True, "gateway": "jmcomic-lib"})
             if p == "/config":
-                return self._json(200, {"gateway": "jmcomic-lib"})
+                cfg = _ns_get_cfg()
+                return self._json(200, {"gateway": "jmcomic-lib", **cfg})
+            if p == "/info":
+                return self._json(200, {
+                    "name": "JMComic", "label": "JMComic", "version": "2.0.0",
+                    "lang": "python", "description": "禁漫天堂搜索/阅读/下载管理",
+                })
             if p.startswith("/search"):
                 return self._json(200, search(q.get("keyword", ""), int(q.get("page") or 1), q.get("mode", "normal")))
             if p.startswith("/meta/"):
@@ -323,6 +520,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(200, ch)
             if p.startswith("/download_zip/"):
                 return self._json(200, download_status(p[len("/download_zip/"):]))
+            if p == "/download/batch":
+                return self._json(200, batch_status())
+            if p == "/download/batch/stop":
+                return self._json(200, batch_stop())
             if p.startswith("/download/"):
                 return self._json(200, download_status(p[len("/download/"):].split("/")[0]))
             if p == "/download":
@@ -372,13 +573,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             data = {}
         try:
-            if p == "/download":
-                aid = str(data.get("aid") or "")
+            if p == "/download" or p.startswith("/download/"):
+                aid = str(data.get("aid") or p[len("/download/"):].split("/")[0] or "")
                 if aid:
-                    return self._json(200, start_download(aid))
+                    return self._json(200, download_one(aid))
                 return self._json(400, {"error": "缺少 aid"})
             if p == "/download/batch":
-                return self._json(200, batch_download(data.get("aids") or []))
+                # 旧前端: {mode, keyword} → 收集+批量下载
+                return self._json(200, batch_start(str(data.get("mode") or "keyword"),
+                                                    str(data.get("keyword") or "")))
+            if p == "/download/batch/stop":
+                return self._json(200, batch_stop())
+            if p == "/config":
+                # 存配置(仅存储路径等, 简化: 持久化到 SharedData)
+                cfg = {"storage_paths": data.get("storage_paths") or [],
+                       "active_path": data.get("active_path") or ""}
+                try:
+                    _ns_set_cfg(cfg)
+                except Exception:
+                    pass
+                return self._json(200, cfg)
             if p == "/library":
                 return self._json(200, add_library(str(data.get("aid") or ""),
                                                    str(data.get("title") or ""),
