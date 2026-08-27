@@ -821,13 +821,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             save_library(lib)
             chapters = []
             for ep in detail.episode_list:
-                cid = str(ep[1])
+                # 当前 jmcomic 库实测: episode_list 元素 = (cid, index, name)
+                # (旧插件代码用 ep[1], 那是旧库顺序; 现在必须用 ep[0])
+                cid = str(ep[0])
                 if cid == '1' and len(detail.episode_list) == 1:
                     cid = str(detail.album_id)
                 chapters.append({
                     'aid': str(detail.album_id),
                     'cid': cid,
-                    'name': ep[2],
+                    'name': ep[2] if len(ep) > 2 else '',
                 })
             data = {
                 'id': str(detail.album_id),
@@ -1018,7 +1020,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             client = jm()
             album = client.get_album_detail(aid)
-            photo_id = str(album.episode_list[0][1])
+            # 当前库顺序: episode_list[0] = (cid, index, name)
+            photo_id = str(album.episode_list[0][0])
             if photo_id == '1' and len(album.episode_list) == 1:
                 photo_id = str(album.album_id)
             photo = client.get_photo_detail(photo_id)
