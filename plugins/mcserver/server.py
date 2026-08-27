@@ -1875,18 +1875,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _rt_cores(self):
         out = []
         for c in CORES:
-            try:
-                d = _core_versions(c)
-            except Exception:
-                continue
-            if not d:
+            data = None
+            cached = _CORE_CACHE.get(c)
+            if cached and time.time() - cached[0] < _CORE_TTL:
+                data = cached[1]
+            if not data:
+                # 无缓存: 不阻塞网络(先返回占位, 前端可刷新/安装时再取)
+                out.append({'id': c, 'name': CORE_LABELS.get(c, c),
+                            'version_count': 0, 'latest': '', 'versions': [],
+                            'loading': True})
                 continue
             out.append({
                 'id': c,
                 'name': CORE_LABELS.get(c, c),
-                'version_count': len(d['versions']),
-                'latest': d['latest'],
-                'versions': d['versions'][:200],
+                'version_count': len(data['versions']),
+                'latest': data.get('latest', ''),
+                'versions': data['versions'][:200],
+                'loading': False,
             })
         return 200, {'cores': out}
 
