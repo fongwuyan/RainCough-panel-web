@@ -919,7 +919,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True})
             if p == "/info":
                 return self._json(*self._rt_info())
-            if p == "/docconvert/check":
+            if p == "/docconvert/check" or p == "/check":
                 return self._json(*self._rt_doc_check())
             if p.startswith("/file/"):
                 r = self._rt_file(p[len('/file/'):])
@@ -935,7 +935,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             p = self.path.split('?')[0]
             if p == "/docconvert/convert":
                 return self._json(*self._rt_doc_convert())
-            if p == "/networktools/download":
+            if p == "/networktools/download" or p == "/download":
                 return self._json(*self._rt_nt_download())
             if p == "/networktools/split":
                 return self._json(*self._rt_nt_split())
