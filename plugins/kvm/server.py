@@ -638,16 +638,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     for fn in sorted(os.listdir(IMAGE_DIR)):
                         items.append({'name': fn})
                 except Exception:
-                    return _err(r.get('error') or '无法列出镜像')
+                    # 无池且不可读: 返回 200 空数组(前端显示空, 不 500)
+                    return 200, []
         except Exception:
             try:
                 for fn in sorted(os.listdir(IMAGE_DIR)):
                     items.append({'name': fn})
             except Exception:
-                return _err('镜像列表失败')
+                return 200, []
         for it in items:
             it['size'] = sizes.get(it['name'], 0)
-        return 200, items
+        return 200, items  # 前端 kvImages 期望纯数组
 
     # ---- 路由: GET /storage ----
     def _rt_storage(self):
