@@ -416,31 +416,47 @@ def _download_dir():
     return base
 
 
-# 图片直连被 Cloudflare 拒 → 面板代理下载(带 UA/Referer) + 本地缓存
-_IMG_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-           "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
-
-
-def proxy_image(url):
-    """下载 CDN 图片(带 UA/Referer), 返回 (bytes, ctype) 或 None。"""
-    import urllib.request
-    req = urllib.request.Request(url, headers={
-        "User-Agent": _IMG_UA,
-        "Referer": "https://18comic.vip/",
-        "Accept": "image/avif,image/webp,image/*,*/*;q=0.8",
-    })
+# 图片经官方库下载(内部处理 CF 挑战 + 混淆解码), 落盘缓存
+def proxy_image_lib(aid, cid, fname):
+    """用官方库下载+解码一张图, 存到本地缓存。返回本地路径或 None。"""
+    client, err = _get_jm()
+    if err or client is None:
+        return None
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            data = r.read()
-            ctype = r.headers.get("Content-Type", "image/jpeg")
-            if not data or len(data) < 100:  # CF 挑战页通常是 HTML
-                return None, ctype
-            head = data[:32]
-            if head.lstrip().startswith(b"<") or b"cf-mitigated" in head.lower() or b"challenge" in head[:128].lower():
-                return None, ctype
-            return data, ctype
+        photo = client.get_photo_detail(cid)
+        urls = []
+        page_arr = getattr(photo, "page_arr", None)
+        if page_arr:
+            for i in range(1, len(page_arr) + 1):
+                try:
+                    urls.append(_img_url(str(photo.get_img_data_original(i))))
+                except Exception:
+                    continue
+        with _img_cache_lock:
+            _img_cache[(str(aid), str(cid))] = urls
+        url = None
+        for u in urls:
+            if (u.split("/")[-1] or "") == fname:
+                url = u
+                break
+        if not url:
+            return None
+        scramble = getattr(photo, "scramble_id", None)
+        local_dir = _img_cache_dir(aid, cid)
+        local = os.path.join(local_dir, fname)
+        try:
+            client.download_image(url, local, scramble, decode_image=True)
+        except Exception:
+            # 不带解码再试
+            try:
+                client.download_image(url, local, scramble, decode_image=False)
+            except Exception:
+                return None
+        if os.path.isfile(local) and os.path.getsize(local) > 100:
+            return local
+        return None
     except Exception:
-        return None, "image/jpeg"
+        return None
 
 
 def _img_cache_dir(aid, cid):
@@ -579,42 +595,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p.startswith("/cover/"):
                 return self._json(200, {"ok": True, "url": ""})
             if p.startswith("/image/"):
-                # /image/<aid>/<cid>/<file> → 面板代理下载(带UA, 落盘缓存)后回传二进制
+                # /image/<aid>/<cid>/<file> → 官方库下载+解码(带CF处理), 落盘缓存后回传
                 parts = p[len("/image/"):].split("/")
                 if len(parts) >= 3:
                     aid, cid, fname = parts[0], parts[1], "/".join(parts[2:])
-                    # 本地缓存优先
                     local = os.path.join(_img_cache_dir(aid, cid), fname)
-                    if os.path.isfile(local):
+                    if not os.path.isfile(local):
+                        local = proxy_image_lib(aid, cid, fname) or ""
+                    if local and os.path.isfile(local):
                         with open(local, "rb") as f:
                             return self._bin(200, _guess_mime(fname), f.read())
-                    # 无缓存: 从章节缓存/即时拉取取该文件名 URL → 代理下载
-                    url = None
-                    with _img_cache_lock:
-                        urls = _img_cache.get((aid, cid), [])
-                    for u in urls:
-                        if (u.split("/")[-1] or "") == fname:
-                            url = u
-                            break
-                    if url is None:
-                        try:
-                            ch = chapter_images(aid, cid)
-                            urls = (ch.get("chapter") or {}).get("urls", [])
-                            for u in urls:
-                                if (u.split("/")[-1] or "") == fname:
-                                    url = u
-                                    break
-                        except Exception:
-                            pass
-                    if url:
-                        data, ctype = proxy_image(url)
-                        if data:
-                            try:
-                                with open(local, "wb") as f:
-                                    f.write(data)
-                            except Exception:
-                                pass
-                            return self._bin(200, ctype, data)
                 return self._json(404, {"error": "image not found"})
             return self._json(404, {"error": "not found: " + p})
         except Exception as e:
