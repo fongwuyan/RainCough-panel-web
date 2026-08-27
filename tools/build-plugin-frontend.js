@@ -1,7 +1,8 @@
 // 插件前端统一构建: 把 plugins/<name>/frontend/*.js 编译为 assets/plugin.js
 // 用法: node tools/build-plugin-frontend.js [插件名...]
 // 产物: plugins/<name>/assets/plugin.js (IIFE, window.__rcPlugin_<name>)
-// Vue 为 external, 运行时由主面板注入(见 PluginView.vue)
+// Vue 直接打包进产物 —— 插件完全自包含, 不依赖主系统注入运行时。
+// (主面板 web/node_modules 提供 esbuild 与 vue 源码)
 
 const fs = require('fs')
 const path = require('path')
@@ -11,6 +12,9 @@ const PLUGINS = path.join(ROOT, 'plugins')
 
 // 从主面板 web/node_modules 解析 esbuild, 避免插件方再装依赖
 const esbuild = require(path.join(ROOT, 'web', 'node_modules', 'esbuild'))
+
+// 打包 vue 进产物: 把 import 'vue' 解析到主面板内的 vue ESM(浏览器版)
+const VUE_ESM = path.join(ROOT, 'web', 'node_modules', 'vue', 'dist', 'vue.esm-browser.js')
 
 async function buildPlugin(name) {
   const dir = path.join(PLUGINS, name)
@@ -29,8 +33,13 @@ async function buildPlugin(name) {
       outfile: outFile,
       bundle: true,
       format: 'iife',
-      // Vue external: 运行时不打包 vue(由面板注入)
-      external: ['vue'],
+      // Vue 内联打包: 插件产物自包含(可用主面板 vue 的 ESM 作为依赖来源)
+      plugins: [{
+        name: 'vue-inline',
+        setup(build) {
+          build.onResolve({ filter: /^vue$/ }, () => ({ path: VUE_ESM }))
+        },
+      }],
       target: 'es2020',
       minify: false,
     })

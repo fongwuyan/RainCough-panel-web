@@ -1,12 +1,12 @@
 // mcserver 插件 Vue3 前端(独立构建, esbuild IIFE)
 // 契约: window.__rcPlugin_mcserver = { mount(container, ctx) }
+import { createApp, h } from 'vue'
+
 export function register(g) {
   g.__rcPlugin_mcserver = {
     name: 'mcserver',
     mount: function (container, ctx) {
-      const { Vue } = ctx
-      const { createApp, h } = Vue
-
+      
       const App = {
         data() {
           return { instances: [], newName: '', newDir: '', newPort: 25565, err: '', console: null, polling: false }

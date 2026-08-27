@@ -1,12 +1,12 @@
 // JMComic 插件 Vue3 前端(独立构建, esbuild IIFE)
 // 契约: window.__rcPlugin_JMComic = { mount(container, ctx) }
+import { createApp, h } from 'vue'
+
 export function register(g) {
   g.__rcPlugin_JMComic = {
     name: 'JMComic',
     mount: function (container, ctx) {
-      const { Vue } = ctx
-      const { createApp, h } = Vue
-
+      
       const App = {
         data() {
           return { keyword: '', albums: [], library: [], loading: false, err: '', view: null, meta: null }

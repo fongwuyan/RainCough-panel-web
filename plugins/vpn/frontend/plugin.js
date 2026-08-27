@@ -1,12 +1,12 @@
 // vpn 插件 Vue3 前端(独立构建, esbuild IIFE)
 // 契约: window.__rcPlugin_vpn = { mount(container, ctx) }
+import { createApp, h } from 'vue'
+
 export function register(g) {
   g.__rcPlugin_vpn = {
     name: 'vpn',
     mount: function (container, ctx) {
-      const { Vue } = ctx
-      const { createApp, h } = Vue
-
+      
       const App = {
         data() {
           return { subs: [], nodes: [], status: { active: '', connected: false }, newName: '', newUrl: '', err: '' }

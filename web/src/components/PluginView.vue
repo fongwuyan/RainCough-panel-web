@@ -37,24 +37,20 @@ let mountEl = null
 const isMapFallback = computed(() => mode.value === 'map')
 const comp = computed(() => MAP[name.value] || GenericPlugin)
 
-// ctx.Vue: 把主面板的 Vue 运行时注入插件(external 由 esbuild 保留, 此处注入)
-import * as VueExports from 'vue'
-
 async function loadPluginFrontend() {
   mode.value = 'loading'
   perr.value = ''
   mountFn = null
   try {
-    // 动态加载插件的独立前端产物
+    // 动态加载插件的独立前端产物(插件完全自包含, 含 Vue runtime)
     await import(/* @vite-ignore */ '/api/plugins/' + name.value + '/assets/plugin.js')
     const reg = window.__rcPlugin_ && window.__rcPlugin_[name.value]
     if (reg && typeof reg.mount === 'function') {
       mode.value = 'plugin'
       await nextTick()
       if (mountEl) {
-        // ctx: {Vue: 主运行时, plugin: 插件信息, api: 请求器}
+        // ctx 仅提供环境信息与可选请求器; Vue 已内联在插件产物中, 不注入
         mountFn = reg.mount(mountEl, {
-          Vue: VueExports,
           plugin: { name: name.value },
           api: {
             get: (p) => fetch('/api/plugins/' + name.value + p).then((r) => r.json()),

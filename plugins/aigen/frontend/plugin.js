@@ -1,12 +1,12 @@
-// aigen 插件 Vue3 前端组件(独立构建, esbuild IIFE)
-// 契约: window.__rcPlugin_aigen = { mount(container, ctx) }; ctx.Vue 由面板注入
+// aigen 插件 Vue3 前端组件(独立构建, 完全自包含, Vue 已内联打包)
+// 契约: window.__rcPlugin_aigen = { mount(container, ctx) }
+import { createApp, h } from 'vue'
+
 export function register(g) {
   g.__rcPlugin_aigen = {
     name: 'aigen',
     mount: function (container, ctx) {
-      const { Vue } = ctx
-      const { createApp, h } = Vue
-
+      
       const App = {
         data() {
           return {

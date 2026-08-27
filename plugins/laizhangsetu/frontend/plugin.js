@@ -1,12 +1,12 @@
 // laizhangsetu 插件 Vue3 前端(独立构建, esbuild IIFE)
 // 契约: window.__rcPlugin_laizhangsetu = { mount(container, ctx) }
+import { createApp, h } from 'vue'
+
 export function register(g) {
   g.__rcPlugin_laizhangsetu = {
     name: 'laizhangsetu',
     mount: function (container, ctx) {
-      const { Vue } = ctx
-      const { createApp, h } = Vue
-
+      
       const App = {
         data() {
           return { tags: '', r18: false, num: 1, items: [], history: [], loading: false, err: '' }

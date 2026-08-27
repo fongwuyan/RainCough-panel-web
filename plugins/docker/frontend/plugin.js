@@ -1,12 +1,12 @@
 // docker 插件 Vue3 前端(独立构建, esbuild IIFE)
 // 契约: window.__rcPlugin_docker = { mount(container, ctx) }
+import { createApp, h } from 'vue'
+
 export function register(g) {
   g.__rcPlugin_docker = {
     name: 'docker',
     mount: function (container, ctx) {
-      const { Vue } = ctx
-      const { createApp, h } = Vue
-
+      
       const App = {
         data() {
           return { containers: [], info: null, showAll: false, loading: false, err: '' }

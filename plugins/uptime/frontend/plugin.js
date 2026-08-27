@@ -1,13 +1,12 @@
-// uptime 插件 Vue3 前端组件(独立构建, esbuild IIFE)
+// uptime 插件 Vue3 前端组件(独立构建, 完全自包含)
+// Vue 打包进产物(构建工具内联 vue), 不依赖主系统注入
 // 导出约定: window.__rcPlugin_uptime = { mount(container, ctx) }
-// ctx = { Vue }; Vue 由主面板注入(external), 避免插件自带运行时
+import { createApp, h } from 'vue'
+
 export function register(g) {
   g.__rcPlugin_uptime = {
     name: 'uptime',
     mount: function (container, ctx) {
-      const { Vue } = ctx
-      const { createApp, h } = Vue
-
       const App = {
         data() {
           return { targets: [], loading: true, newUrl: '', newName: '' }
