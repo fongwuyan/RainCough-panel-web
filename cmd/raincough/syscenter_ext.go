@@ -206,9 +206,18 @@ func (s *server) sysfPwr(w http.ResponseWriter, r *http.Request) {
 			Action  string `json:"action"`
 			Minutes int    `json:"minutes"`
 		}
-		json.NewDecoder(r.Body).Decode(&b)
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		// 安全: 不提供明确 action/minutes 绝不下发关机指令
+		if b.Action != "reboot" && b.Action != "shutdown" && b.Action != "poweroff" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "action 必填(reboot/shutdown)"})
+			return
+		}
 		if b.Minutes <= 0 {
-			b.Minutes = 1
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "minutes 必填(>0)"})
+			return
 		}
 		when := "+" + fmt.Sprint(b.Minutes)
 		var out string

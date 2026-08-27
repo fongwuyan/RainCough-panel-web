@@ -53,6 +53,33 @@ ENDPOINTS = [
     "POST /api/terminal/resize",
 ]
 
+# 危险执行端点: 测试绝不打(防止误触发关机/重启/升级/删除等副作用)
+DANGEROUS = {
+    "POST /api/sysfunc/pwr/plan",      # 会安排关机! 空参数曾误触发宿主重启
+    "POST /api/sysfunc/pwr/cancel",
+    "POST /api/sysfunc/health/restart",  # 重启面板服务
+    "POST /api/sysfunc/updates/run",     # apt upgrade
+    "POST /api/sysfunc/updates/refresh",  # apt update
+    "POST /api/sysfunc/clean/do",        # 清理磁盘
+    "POST /api/sysfunc/kernels/remove",  # 删内核
+    "POST /api/sysfunc/snapshot/create", # 建快照
+    "POST /api/sysfunc/cron/save",       # 改 crontab
+    "POST /api/sysfunc/ssh/keys/save",
+    "POST /api/sysfunc/service/action",  # 启停服务
+    "POST /api/sysfunc/logrotate/save",
+    "POST /api/sysfunc/time/sync",
+    "POST /api/disks/unmount",           # 卸载磁盘
+    "POST /api/store/plugin/remove",
+    "POST /api/store/plugin/install",
+    "POST /api/store/project/install",
+    "POST /api/fm/delete", "POST /api/fm/move", "POST /api/fm/copy",
+    "POST /api/fm/rename", "POST /api/fm/save", "POST /api/fm/unzip",
+    "POST /api/envpkg/uninstall", "POST /api/envpkg/install",
+    "POST /api/envpkg/run", "POST /api/envpkg/start", "POST /api/envpkg/stop",
+    "POST /api/tasks/purge",
+    "POST /api/sys/processes/kill",
+}
+
 PLUGIN_ROUTES = {
     "jmcomic": ["/config", "/library", "/info", "/search"],  # search GET 会真实搜索(慢, 不测)
     "aigen": ["/ping", "/models", "/gallery", "/config", "/info"],
@@ -92,6 +119,8 @@ def probe(method, path, label):
 def main():
     fails, warns = [], []
     for ep in ENDPOINTS:
+        if ep in DANGEROUS:
+            continue  # 危险端点不自动探测
         mtd, pth = ep.split(" ", 1)
         res = probe(mtd, pth, ep)
         if res and res.startswith("F"):
