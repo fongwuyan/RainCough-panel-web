@@ -82,7 +82,11 @@ async function loadPluginFrontend() {
   } catch (e) {
     if (!firstErr) firstErr = String((e && e.message) || e)
   }
-  if (firstErr) perr.value = '加载插件前端失败: ' + firstErr
+  // 回退: 有内置组件(MAP)则静默回退(无独立前端是正常情况, 不报错);
+  // 仅当连内置组件都没有时才提示加载失败
+  if (!MAP[name.value.toLowerCase()] && firstErr) {
+    perr.value = '加载插件前端失败: ' + firstErr
+  }
   mode.value = MAP[name.value.toLowerCase()] ? 'map' : 'generic'
 }
 
