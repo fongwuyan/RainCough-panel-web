@@ -227,28 +227,18 @@ def chapter_images(aid, cid):
         return {"ok": False, "error": err or "客户端不可用"}
     try:
         photo = client.get_photo_detail(cid)
+        page_arr = getattr(photo, "page_arr", None) or []
+        # 旧插件形态: CDN/media/photos/{cid}/{page_arr元素} (带扩展名, 非 get_img_data_original 短 URL)
+        cdn_domains = ["cdn-msp.jmapiproxy1.cc", "cdn-msp.jmapiproxy2.cc"]
         urls = []
-        page_arr = getattr(photo, "page_arr", None)
-        if page_arr:
-            for i in range(1, len(page_arr) + 1):
-                try:
-                    u = _img_url(str(photo.get_img_data_original(i)))
-                    urls.append(u)
-                except Exception:
-                    try:
-                        urls.append(_img_url(str(photo.get_img_data_original(i, False))))
-                    except Exception:
-                        continue
-        elif hasattr(photo, "image_urls") and photo.image_urls:
+        for fname in page_arr:
+            base = "https://" + cdn_domains[0] + "/media/photos/%s/%s" % (cid, fname)
+            urls.append(base)
+        if not urls and hasattr(photo, "image_urls"):
             urls = [_img_url(u) for u in photo.image_urls]
-        elif hasattr(photo, "images") and photo.images:
-            urls = [_img_url(u) for u in photo.images]
         with _img_cache_lock:
             _img_cache[(str(aid), str(cid))] = urls
-        files = []
-        for u in urls:
-            name = (u.split("/")[-1] or "") or ("page_%d.jpg" % len(files))
-            files.append(name)
+        files = page_arr
         return {"ok": True, "chapter": {
             "cid": str(cid), "aid": str(aid),
             "title": getattr(photo, "title", "") or "",
@@ -416,47 +406,26 @@ def _download_dir():
     return base
 
 
-# 图片经官方库下载(内部处理 CF 挑战 + 混淆解码), 落盘缓存
-def proxy_image_lib(aid, cid, fname):
-    """用官方库下载+解码一张图, 存到本地缓存。返回本地路径或 None。"""
-    client, err = _get_jm()
-    if err or client is None:
-        return None
-    try:
-        photo = client.get_photo_detail(cid)
-        urls = []
-        page_arr = getattr(photo, "page_arr", None)
-        if page_arr:
-            for i in range(1, len(page_arr) + 1):
-                try:
-                    urls.append(_img_url(str(photo.get_img_data_original(i))))
-                except Exception:
-                    continue
-        with _img_cache_lock:
-            _img_cache[(str(aid), str(cid))] = urls
-        url = None
-        for u in urls:
-            if (u.split("/")[-1] or "") == fname:
-                url = u
-                break
-        if not url:
-            return None
-        scramble = getattr(photo, "scramble_id", None)
-        local_dir = _img_cache_dir(aid, cid)
-        local = os.path.join(local_dir, fname)
+# 旧插件形态图下载: CDN/media/photos/{cid}/{fname} + requests(带UA/Referer), 落盘缓存
+def proxy_old_form(aid, cid, fname):
+    import requests
+    domains = ["cdn-msp.jmapiproxy1.cc", "cdn-msp.jmapiproxy2.cc"]
+    for d in domains:
+        url = "https://%s/media/photos/%s/%s" % (d, cid, fname)
         try:
-            client.download_image(url, local, scramble, decode_image=True)
+            r = requests.get(url, timeout=25, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://18comic.vip/",
+            })
+            if r.status_code == 200 and r.content and not r.content[:4].lstrip().startswith(b"<"):
+                local_dir = _img_cache_dir(aid, cid)
+                local = os.path.join(local_dir, fname)
+                with open(local, "wb") as f:
+                    f.write(r.content)
+                return local
         except Exception:
-            # 不带解码再试
-            try:
-                client.download_image(url, local, scramble, decode_image=False)
-            except Exception:
-                return None
-        if os.path.isfile(local) and os.path.getsize(local) > 100:
-            return local
-        return None
-    except Exception:
-        return None
+            continue
+    return None
 
 
 def _img_cache_dir(aid, cid):
@@ -595,13 +564,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p.startswith("/cover/"):
                 return self._json(200, {"ok": True, "url": ""})
             if p.startswith("/image/"):
-                # /image/<aid>/<cid>/<file> → 官方库下载+解码(带CF处理), 落盘缓存后回传
+                # /image/<aid>/<cid>/<file> → 旧插件形态下载(cdn/media/photos/cid/fname) + 落盘缓存
                 parts = p[len("/image/"):].split("/")
                 if len(parts) >= 3:
                     aid, cid, fname = parts[0], parts[1], "/".join(parts[2:])
                     local = os.path.join(_img_cache_dir(aid, cid), fname)
                     if not os.path.isfile(local):
-                        local = proxy_image_lib(aid, cid, fname) or ""
+                        local = proxy_old_form(aid, cid, fname) or ""
                     if local and os.path.isfile(local):
                         with open(local, "rb") as f:
                             return self._bin(200, _guess_mime(fname), f.read())
