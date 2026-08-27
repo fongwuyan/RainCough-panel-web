@@ -618,26 +618,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- 路由: GET /images ----
     def _rt_images(self):
-        r = _sudo_run(['bash', '-c', 'ls -1 "%s"' % IMAGE_DIR], timeout=20)
-        if not r['ok']:
-            return _err(r['error'])
+        # 免 sudo: 优先 virsh vol-list(f 用户在 libvirt 组), 失败兜底 os.listdir
         items = []
-        for line in r['out'].splitlines():
-            line = line.strip()
-            if not line or line in ('.', '..'):
-                continue
-            items.append({'name': line})
-        # attach sizes
-        rs = _sudo_run(['bash', '-c', 'du -sb %s/* 2>/dev/null' % IMAGE_DIR], timeout=30)
         sizes = {}
-        if rs['ok']:
-            for line in rs['out'].splitlines():
-                parts = line.split()
-                if len(parts) >= 2:
-                    try:
-                        sizes[os.path.basename(parts[1])] = int(parts[0])
-                    except Exception:
-                        pass
+        try:
+            r = _virsh(['vol-list', '--pool', 'default', '--details'], timeout=20)
+            if r.get('ok'):
+                for line in (r.get('out') or '').splitlines():
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[0].strip() not in ('Name', 'Path', '-------------------------------------'):
+                        items.append({'name': parts[0]})
+                        try:
+                            sizes[parts[0]] = float(parts[2]) * 1024 * 1024 * 1024  # GiB -> B
+                        except Exception:
+                            pass
+            else:
+                # 池不可用: 直接列目录
+                try:
+                    for fn in sorted(os.listdir(IMAGE_DIR)):
+                        items.append({'name': fn})
+                except Exception:
+                    return _err(r.get('error') or '无法列出镜像')
+        except Exception:
+            try:
+                for fn in sorted(os.listdir(IMAGE_DIR)):
+                    items.append({'name': fn})
+            except Exception:
+                return _err('镜像列表失败')
         for it in items:
             it['size'] = sizes.get(it['name'], 0)
         return 200, items
