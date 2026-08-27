@@ -223,7 +223,7 @@ export function register(g) {
 
           // —— ③ 抓取条目展示 ——
           const en = this.feedEntries
-          const entryNodes = (en && (en.entries || [])).map((e, i) => {
+          const entryNodes = ((en && (en.entries || [])) || []).map((e, i) => {
             const sum = this.stripHtml(e.summary)
             return h('div', { key: e.link || i, class: 'card', style: 'padding:8px 10px;' }, [
               h('div', { class: 'flex', style: 'gap:8px;justify-content:space-between;align-items:flex-start;' }, [
