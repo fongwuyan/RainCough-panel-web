@@ -1172,6 +1172,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             return self._json(500, {'error': str(e)})
 
+    def do_DELETE(self):
+        try:
+            p = self.path.split('?')[0]
+            if p.startswith("/library/"):
+                return self._json(*self._rt_library_delete(_tail('/library/', p)))
+            return self._json(404, {'error': 'not found'})
+        except Exception as e:
+            return self._json(500, {'error': str(e)})
+
     def log_message(self, *a):
         pass
 
