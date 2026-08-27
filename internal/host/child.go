@@ -36,6 +36,9 @@ func (c *Child) Alive() bool {
 		c.proc.ProcessState == nil
 }
 
+// Name 返回插件名(真实注册名, 可能含大小写如 JMComic)。
+func (c *Child) Name() string { return c.name }
+
 // Port 返回监听端口。
 func (c *Child) Port() int { return c.port }
 

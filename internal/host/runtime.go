@@ -173,6 +173,21 @@ func (h *PluginHost) Get(name string) *Child {
 	return h.children[name]
 }
 
+// Find 按名返回子进程(大小写不敏感, 兼容小写路径访问大写插件如 JMComic)。
+func (h *PluginHost) Find(name string) *Child {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if c := h.children[name]; c != nil {
+		return c
+	}
+	for n, c := range h.children {
+		if strings.EqualFold(n, name) {
+			return c
+		}
+	}
+	return nil
+}
+
 // List 返回注册表条目(与 /api/plugins 一致)。
 func (h *PluginHost) List() []map[string]interface{} {
 	h.mu.Lock()

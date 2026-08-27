@@ -325,7 +325,7 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// DELETE 带 subpath: 代理给插件子进程(插件自有 DELETE 路由)
-		child := s.host.Get(name)
+		child := s.hostFind(name)
 		if child == nil {
 			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未加载: " + name})
 			return
@@ -339,7 +339,7 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// 网关代理
-		child := s.host.Get(name)
+		child := s.hostFind(name)
 		if child == nil {
 			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未加载: " + name})
 			return
@@ -351,13 +351,20 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// hostFind 按插件名查找(大小写不敏感, 兼容旧前端用小写路径访问大写插件如 JMComic)。
+func (s *server) hostFind(name string) *host.Child {
+	return s.host.Find(name)
+}
+
 // servePluginAsset 提供插件前端构建产物(远程组件挂载)。
 func (s *server) servePluginAsset(w http.ResponseWriter, r *http.Request, name, file string) {
-	child := s.host.Get(name)
+	child := s.hostFind(name)
 	if child == nil {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未加载"})
 		return
 	}
+	// 用真实插件目录(大小写不敏感找到的 child 名)
+	name = child.Name()
 	// 安全: 仅允许 assets/ 下的文件, 拒绝路径穿越
 	clean := filepath.Clean(file)
 	if strings.Contains(clean, "..") || strings.HasPrefix(clean, "../") {
