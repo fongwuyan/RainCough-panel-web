@@ -148,20 +148,38 @@ def album_detail(aid):
     try:
         detail = client.get_album_detail(aid)
         chapters = []
-        if hasattr(detail, "chapter_list") and detail.chapter_list:
-            for ch in detail.chapter_list:
-                chapters.append({
-                    "cid": str(getattr(ch, "id", "") or getattr(ch, "cid", "")),
-                    "title": getattr(ch, "title", "") or "",
-                    "index": getattr(ch, "index", 0),
-                })
+        ep_list = getattr(detail, "episode_list", None)
+        if ep_list:
+            for item in ep_list:
+                # episode_list 元素: (cid, index, title?) 或 (cid, index)
+                cid = ""
+                idx = 0
+                title = ""
+                if isinstance(item, (list, tuple)):
+                    cid = str(item[0]) if len(item) > 0 else ""
+                    try:
+                        idx = int(item[1]) if len(item) > 1 else 0
+                    except Exception:
+                        idx = 0
+                    if len(item) > 2:
+                        title = str(item[2])
+                elif isinstance(item, dict):
+                    cid = str(item.get("id") or item.get("cid") or "")
+                    idx = item.get("index", 0)
+                    title = item.get("title", "")
+                if cid:
+                    chapters.append({"cid": cid, "title": title, "index": idx})
+        if not chapters and getattr(detail, "count", 0):
+            # 兜底: 用 album_id 作为唯一章节(cid 即 aid, 后端 chapter 解车号)
+            chapters = [{"cid": str(aid), "title": getattr(detail, "name", "") or "", "index": 1}]
         return {"ok": True, "album": {
             "id": str(aid), "aid": str(aid),
-            "name": getattr(detail, "title", "") or "",
-            "title": getattr(detail, "title", "") or "",
+            "name": getattr(detail, "name", "") or getattr(detail, "title", "") or "",
+            "title": getattr(detail, "title", "") or getattr(detail, "name", "") or "",
             "author": getattr(detail, "author", "") or "",
             "tags": list(detail.tags) if getattr(detail, "tags", None) else [],
             "chapters": chapters,
+            "count": getattr(detail, "count", 0),
         }}
     except Exception as e:
         return {"ok": False, "error": "专辑详情失败: " + str(e)}
@@ -178,7 +196,18 @@ def chapter_images(aid, cid):
     try:
         photo = client.get_photo_detail(cid)
         urls = []
-        if hasattr(photo, "image_urls") and photo.image_urls:
+        page_arr = getattr(photo, "page_arr", None)
+        if page_arr:
+            for i in range(1, len(page_arr) + 1):
+                try:
+                    u = _img_url(str(photo.get_img_data_original(i)))
+                    urls.append(u)
+                except Exception:
+                    try:
+                        urls.append(_img_url(str(photo.get_img_data_original(i, False))))
+                    except Exception:
+                        continue
+        elif hasattr(photo, "image_urls") and photo.image_urls:
             urls = [_img_url(u) for u in photo.image_urls]
         elif hasattr(photo, "images") and photo.images:
             urls = [_img_url(u) for u in photo.images]
@@ -186,7 +215,7 @@ def chapter_images(aid, cid):
             _img_cache[(str(aid), str(cid))] = urls
         files = []
         for u in urls:
-            name = u.split("/")[-1] or ("page_%d.jpg" % len(files))
+            name = (u.split("/")[-1] or "") or ("page_%d.jpg" % len(files))
             files.append(name)
         return {"ok": True, "chapter": {
             "cid": str(cid), "aid": str(aid),
