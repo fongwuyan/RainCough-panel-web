@@ -1,490 +1,722 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""JMComic v2 插件子进程 — 完整实现旧面板 jmcomic API 契约(提取复用)。
+"""JMComic 插件子进程 — 完整复用旧插件后端(plugin.py 全量迁移)。
 
-数据: library/downloads 存 SharedData namespace; 漫画数据经官方 jmcomic 库
-(自动更新 API 域名, 与旧插件同款)。
-契约对照旧面板 api.js:
-  /search?keyword=&page= -> {ok, items:[{aid,title,author,cover,tags}], page}
-  /meta/<aid>            -> {ok, meta:{aid,title,author,tags}}
-  /album/<aid>           -> {ok, album:{id,name,author,tags,chapters:[{cid,...}]}}
-  /chapter/<aid>/<cid>   -> {ok, chapter:{cid,title,images:[url]}}
-  /cover/<aid>           -> 封面图(二进制)
-  /image/<aid>/<cid>/<file> -> 章节图(二进制, file 形如 xxx-n.webp)
-  /library?page=         -> {ok, items:[{aid,title,cover,tags,added}], total, page, page_size}
-  POST /library {aid,title,cover,tags} -> 收藏
-  DELETE /library/<aid>  -> 移除
-  POST /download {aid}   -> 入队
-  POST /download/batch {aids} -> 批量入队
-  GET  /download/<aid>   -> 下载状态
-  GET  /download_zip/<aid> -> 打包下载(简化: 返回状态)
-  GET  /config           -> {gateway}
+数据: 磁盘目录(插件目录下 downloads/ img/ metadata 等, 与旧插件一致)
+上游: 官方 jmcomic 库(自动域名) + 旧形态 CDN 图 URL + JmImageTool 解码
+路由契约与旧面板 api.js 完全一致(search/meta/album/chapter/download/batch/library/cover/image/zip/config/info)。
 """
 import os
+import re
 import json
 import time
-import sqlite3
+import shutil
 import threading
 import http.server
+from concurrent.futures import ThreadPoolExecutor
+
 
 PORT = int(os.environ.get("RAINCOUGH_PORT", "0"))
-NS = os.environ.get("RAINCOUGH_NS", "jmcomic")
-DSN = os.environ.get("RAINCOUGH_DB_DSN", "")
 PLUGIN_DIR = os.environ.get("RAINCOUGH_PLUGIN_DIR", os.getcwd())
 
-_lock = threading.RLock()
-_library = {}
-_downloads = {}
-_loaded = False
+DATA_FILE = os.path.join(PLUGIN_DIR, 'data.json')
+DOWNLOADS_DIR = os.path.join(PLUGIN_DIR, 'downloads')
+LIBRARY_FILE = os.path.join(DOWNLOADS_DIR, 'library.json')
+IMG_DIR = os.path.join(PLUGIN_DIR, 'img')
+METADATA_FILE = os.path.join(PLUGIN_DIR, 'metadata.json')
+ALBUM_CACHE_FILE = os.path.join(PLUGIN_DIR, 'album_cache.json')
+PHOTO_CACHE_FILE = os.path.join(PLUGIN_DIR, 'photo_cache.json')
 
-# ---- SharedData kv ----
-def _kv():
-    if DSN.startswith("sqlite:///"):
-        c = sqlite3.connect(DSN[len("sqlite:///"):], check_same_thread=False)
-        c.row_factory = sqlite3.Row
-        c.execute("CREATE TABLE IF NOT EXISTS ns_%s_kv (key TEXT PRIMARY KEY,"
-                  " value TEXT NOT NULL, updated_at INTEGER)" % NS)
-        return c
-    raise RuntimeError("仅支持 sqlite DSN")
+for _d in (DOWNLOADS_DIR, IMG_DIR):
+    try:
+        os.makedirs(_d, exist_ok=True)
+    except Exception:
+        pass
 
-def _ns_get(key, default=None):
-    with _lock:
-        if not _loaded:
-            _load()
-        return _library.get(key, default)
 
-def _ns_set(key, value):
-    with _lock:
-        _save()
-
-def _ns_set_cfg(cfg):
-    """存插件配置(SharedData ns_jmcomic cfg 键)。"""
-    with _lock:
-        try:
-            c = _kv()
-            c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at)"
-                      " VALUES (?,?,?)" % NS, ("cfg", json.dumps(cfg, ensure_ascii=False), int(time.time())))
-            c.commit()
-            c.close()
-        except Exception:
-            pass
-
-def _ns_get_cfg():
-    with _lock:
-        try:
-            c = _kv()
-            row = c.execute("SELECT value FROM ns_%s_kv WHERE key='cfg'" % NS).fetchone()
-            c.close()
-            if row:
-                return json.loads(row["value"])
-        except Exception:
-            pass
+# ---- 缓存 IO(旧插件原样) ----
+def _load_cache(path):
+    try:
+        if os.path.isfile(path):
+            return json.load(open(path, 'r', encoding='utf-8'))
+    except Exception:
+        pass
     return {}
 
-def _load():
-    global _loaded
-    with _lock:
+
+def _save_cache(path, cache):
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+DEFAULT_CONFIG = {'show_info': True, 'storage_paths': [DOWNLOADS_DIR],
+                  'active_path': DOWNLOADS_DIR, 'auto_switch_full': True,
+                  'full_threshold_mb': 1024}
+
+
+def load_config():
+    if os.path.isfile(DATA_FILE):
         try:
-            c = _kv()
-            for row in c.execute("SELECT key,value FROM ns_%s_kv" % NS):
-                k = row["key"]
-                v = json.loads(row["value"])
-                if k.startswith("lib:"):
-                    _library[k[4:]] = v
-                elif k.startswith("dl:"):
-                    _downloads[k[3:]] = v
-            c.close()
+            cfg = json.load(open(DATA_FILE, 'r', encoding='utf-8'))
         except Exception:
-            pass
-        _loaded = True
+            cfg = {}
+    else:
+        cfg = {}
+    merged = dict(DEFAULT_CONFIG)
+    merged.update(cfg)
+    paths = merged.get('storage_paths') or []
+    if DOWNLOADS_DIR not in paths:
+        paths.insert(0, DOWNLOADS_DIR)
+    merged['storage_paths'] = paths
+    if merged.get('active_path') not in paths:
+        merged['active_path'] = paths[0]
+    return merged
 
-def _save():
-    global _loaded
-    with _lock:
-        try:
-            c = _kv()
-            for aid, v in _library.items():
-                c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at)"
-                          " VALUES (?,?,?)" % NS, ("lib:" + aid, json.dumps(v, ensure_ascii=False), int(time.time())))
-            for aid, v in _downloads.items():
-                c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at)"
-                          " VALUES (?,?,?)" % NS, ("dl:" + aid, json.dumps(v, ensure_ascii=False), int(time.time())))
-            c.commit()
-            c.close()
-        except Exception:
-            pass
 
-# ---- 官方 jmcomic 库(自动域名) ----
-_jm = None
-_jm_err = None
+def save_config(cfg):
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
 
-def _get_jm():
-    global _jm, _jm_err
-    if _jm is not None or _jm_err:
-        return _jm, _jm_err
+
+def storage_paths():
+    return load_config().get('storage_paths', [DOWNLOADS_DIR])
+
+
+def _dir_writable(path):
     try:
-        from jmcomic import JmOption
-        opt = JmOption.default()
-        opt.client.impl = 'api'
-        client = opt.new_jm_client()
-        if client is not None:
-            _jm = client
-        else:
-            _jm_err = "客户端创建失败"
-    except Exception as e:
-        _jm_err = "jmcomic 库不可用: " + str(e)
-    return _jm, _jm_err
+        if not os.path.isdir(path):
+            return False
+        probe = os.path.join(path, '.wtest')
+        with open(probe, 'w') as f:
+            f.write('1')
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
 
-def _img_url(url):
-    """图片 URL 归一化: 确保 https。"""
-    if not url:
-        return ""
-    if url.startswith("//"):
-        url = "https:" + url
-    elif url.startswith("http://"):
-        url = url.replace("http://", "https://", 1)
-    return url
 
-# ---- 搜索(旧契约) ----
-def search(keyword, page=1, mode="normal"):
-    client, err = _get_jm()
-    if err or client is None:
-        return {"ok": False, "error": err or "客户端不可用"}
+def active_dir():
+    cfg = load_config()
+    ap = cfg.get('active_path')
+    if ap in storage_paths() and _dir_writable(ap):
+        return ap
+    for p in storage_paths():
+        if _dir_writable(p):
+            return p
+    return storage_paths()[0]
+
+
+def _dir_free_mb(path):
     try:
-        if mode == "author":
-            result = client.search_author(search_query=keyword, page=page)
-        elif mode == "tag":
-            result = client.search_tag(search_query=keyword, page=page)
-        else:
-            result = client.search_site(search_query=keyword, page=page)
-        items = []
-        for aid, name in (result or []):
-            items.append({"id": str(aid), "aid": str(aid), "name": name, "title": name,
-                          "author": "", "cover": "", "tags": []})
-        return {"ok": True, "items": items, "page": page, "page_count": max(1, page)}
-    except Exception as e:
-        return {"ok": False, "error": "搜索失败: " + str(e)}
-
-# ---- 专辑详情(旧契约: 顶层 {id, name, author, ..., chapters}) ----
-def album_detail(aid):
-    client, err = _get_jm()
-    if err or client is None:
-        return {"error": err or "客户端不可用"}
-    try:
-        detail = client.get_album_detail(aid)
-        chapters = []
-        ep_list = getattr(detail, "episode_list", None)
-        if ep_list:
-            for item in ep_list:
-                # 实测: episode_list 元素 = (cid, index, name)
-                cid = ""
-                idx = 0
-                name = ""
-                if isinstance(item, (list, tuple)):
-                    cid = str(item[0]) if len(item) > 0 else ""
-                    try:
-                        idx = int(item[1]) if len(item) > 1 else 0
-                    except Exception:
-                        idx = 0
-                    if len(item) > 2:
-                        name = str(item[2])
-                elif isinstance(item, dict):
-                    cid = str(item.get("id") or item.get("cid") or "")
-                    idx = item.get("index", 0)
-                    name = item.get("name") or item.get("title") or ""
-                if cid:
-                    chapters.append({"cid": cid, "name": name, "index": idx})
-        # 单章专辑 cid=1 时用 album_id(旧插件同款兜底)
-        if len(chapters) == 1 and chapters[0]["cid"] == "1":
-            chapters[0]["cid"] = str(aid)
-            chapters[0]["name"] = chapters[0]["name"] or (getattr(detail, "name", "") or aid)
-        return {
-            "id": str(aid), "aid": str(aid),
-            "name": getattr(detail, "name", "") or getattr(detail, "title", "") or "",
-            "title": getattr(detail, "title", "") or getattr(detail, "name", "") or "",
-            "author": getattr(detail, "author", "") or "",
-            "authors": list(detail.authors) if getattr(detail, "authors", None) else [],
-            "tags": list(detail.tags) if getattr(detail, "tags", None) else [],
-            "likes": getattr(detail, "likes", 0) or 0,
-            "views": getattr(detail, "views", 0) or 0,
-            "comment_count": getattr(detail, "comment_count", 0) or 0,
-            "description": getattr(detail, "description", "") or "",
-            "page_count": getattr(detail, "page_count", 0) or 0,
-            "chapters": chapters,
-            "related": [
-                {"id": str(r.get("id", "")) if isinstance(r, dict) else str(r),
-                 "name": (r.get("name", "") if isinstance(r, dict) else "") or ""}
-                for r in (getattr(detail, "related_list", None) or [])
-            ],
-        }
-    except Exception as e:
-        return {"error": "专辑详情失败: " + str(e)}
-
-# 章节图片 URL 缓存(供 image 重定向 + 前端 direct_url)
-_img_cache = {}   # (aid,cid) -> [urls]
-_img_cache_lock = threading.Lock()
-
-
-def chapter_images(aid, cid):
-    client, err = _get_jm()
-    if err or client is None:
-        return {"error": err or "客户端不可用"}
-    try:
-        photo = client.get_photo_detail(cid)
-        page_arr = getattr(photo, "page_arr", None) or []
-        # 旧插件形态: CDN/media/photos/{cid}/{page_arr元素} (带扩展名, 非 get_img_data_original 短 URL)
-        cdn_domains = ["cdn-msp.jmapiproxy1.cc", "cdn-msp.jmapiproxy2.cc"]
-        urls = []
-        for fname in page_arr:
-            base = "https://" + cdn_domains[0] + "/media/photos/%s/%s" % (cid, fname)
-            urls.append(base)
-        if not urls and hasattr(photo, "image_urls"):
-            urls = [_img_url(u) for u in photo.image_urls]
-        with _img_cache_lock:
-            _img_cache[(str(aid), str(cid))] = urls
-        return {
-            "cid": str(cid), "aid": str(aid),
-            "name": getattr(photo, "name", "") or "",
-            "scramble_id": str(getattr(photo, "scramble_id", "") or ""),
-            "page_arr": page_arr,
-            "urls": urls,
-            "direct_urls": urls,
-            "total": len(page_arr),
-        }
-    except Exception as e:
-        return {"error": "章节失败: " + str(e)}
-
-# ---- 本地库 ----
-def add_library(aid, title, cover, tags):
-    _library[str(aid)] = {"title": title or str(aid), "cover": cover or "",
-                          "tags": tags or [], "added": int(time.time())}
-    _save()
-    return {"ok": True, "count": len(_library)}
-
-def _cached_count(aid):
-    """已下载页数: 扫描插件 downloads/<aid>/ 下的图片文件。"""
-    base = os.path.join(_download_dir(), str(aid))
-    try:
-        n = 0
-        for root, _dirs, files in os.walk(base):
-            for f in files:
-                if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
-                    n += 1
-        return n
+        return shutil.disk_usage(path).free // (1024 * 1024)
     except Exception:
         return 0
 
 
-def _zip_size(aid):
-    p = os.path.join(_download_dir(), str(aid) + ".zip")
-    try:
-        return os.path.getsize(p)
-    except Exception:
-        return 0
+def pick_dir():
+    cfg = load_config()
+    paths = storage_paths()
+    if not cfg.get('auto_switch_full', True):
+        return active_dir()
+    threshold = int(cfg.get('full_threshold_mb') or 1024)
+    active = active_dir()
+    idx = paths.index(active) if active in paths else 0
+    n = len(paths)
+    for i in range(n):
+        cand = paths[(idx + i) % n]
+        if _dir_writable(cand) and _dir_free_mb(cand) >= threshold:
+            if cand != active:
+                cfg['active_path'] = cand
+                save_config(cfg)
+            return cand
+    return active
 
 
-def library(page=1, page_size=45):
-    items = []
-    for k, v in sorted(_library.items(),
-                       key=lambda x: x[1].get("added", 0), reverse=True):
-        dls = _downloads.get(str(k), {})
-        total = v.get("total") or 0
-        items.append({
-            "aid": str(k), "name": v.get("title", ""), "author": v.get("author", ""),
-            "tags": v.get("tags", []),
-            "cached": dls.get("downloaded", _cached_count(str(k))),
-            "total": total,
-            "zip_size": _zip_size(str(k)) or None,
-        })
-    total = len(items)
-    start = (page - 1) * page_size
-    return {"ok": True, "items": items[start:start + page_size],
-            "total": total, "page": page, "page_size": page_size,
-            "page_count": max(1, (total + page_size - 1) // page_size)}
-
-def remove_library(aid):
-    _library.pop(str(aid), None)
-    _save()
-    return {"ok": True}
-
-# ---- 下载登记 ----
-def start_download(aid):
-    _downloads[str(aid)] = {"status": "queued", "progress": 0, "started": int(time.time())}
-    _save()
-    return {"ok": True, "aid": str(aid), "status": "queued"}
-
-def batch_download(aids):
-    for a in (aids or []):
-        _downloads[str(a)] = {"status": "queued", "progress": 0, "started": int(time.time())}
-    _save()
-    return {"ok": True, "count": len(aids or [])}
+# ---- 官方 jmcomic 库 ----
+def get_client():
+    from jmcomic import JmOption
+    opt = JmOption.default()
+    opt.client.impl = 'api'
+    return opt.new_jm_client()
 
 
-# ---- 批量任务状态机(旧前端 jmBatchStatus 契约) ----
-_batch = {"running": False, "status": "idle", "found": 0, "done": 0, "fail": 0,
-          "skip": 0, "current": "", "results": {}}
+_jm_client = None
 
 
-def batch_start(mode, keyword):
-    """收集搜索结果, 逐个加入下载(简化: 登记 queued, 前端轮询状态)。"""
-    if _batch["running"]:
-        return {"ok": False, "error": "已有批量任务运行中"}
-    client, err = _get_jm()
-    if err or client is None:
-        return {"ok": False, "error": err or "客户端不可用"}
-    try:
-        mode = mode or "keyword"
-        if mode == "author":
-            result = client.search_author(search_query=keyword, page=1)
-        elif mode == "tag":
-            result = client.search_tag(search_query=keyword, page=1)
-        else:
-            result = client.search_site(search_query=keyword, page=1)
-        aids = [str(a) for a, _n in (result or [])][:20]
-        _batch["running"] = True
-        _batch["status"] = "collecting"
-        _batch["found"] = len(aids)
-        _batch["done"] = 0
-        _batch["fail"] = 0
-        _batch["skip"] = 0
-        _batch["current"] = ""
-        _batch["results"] = {a: {"status": "queued", "name": "未知书名"} for a in aids}
-        # 后台逐个登记下载
-        import threading
-
-        def _run():
-            for i, a in enumerate(aids):
-                if not _batch["running"]:
-                    _batch["status"] = "stopped"
-                    return
-                _batch["current"] = a
-                _batch["results"][a]["status"] = "downloading"
-                try:
-                    r = download_one(a)
-                    if r.get("ok"):
-                        _batch["results"][a]["status"] = "completed"
-                        _batch["done"] += 1
-                    else:
-                        _batch["results"][a]["status"] = "failed"
-                        _batch["fail"] += 1
-                except Exception:
-                    _batch["results"][a]["status"] = "failed"
-                    _batch["fail"] += 1
-            _batch["status"] = "done"
-            _batch["running"] = False
-
-        threading.Thread(target=_run, daemon=True).start()
-        return {"ok": True, "found": len(aids)}
-    except Exception as e:
-        return {"ok": False, "error": "批量启动失败: " + str(e)}
+def jm():
+    global _jm_client
+    if _jm_client is None:
+        _jm_client = get_client()
+    return _jm_client
 
 
-def batch_status():
-    return {**_batch}
-
-
-def batch_stop():
-    _batch["running"] = False
-    _batch["status"] = "stopped"
-    return {"ok": True}
-
-def download_status(aid):
-    aid = str(aid)
-    st = _downloads.get(aid)
-    if st:
-        # 真实下载完成后置 completed(插件 downloads/<aid>/ 有文件)
-        if st.get("status") == "completed":
-            return {"ok": True, "aid": aid, "status": "completed",
-                    "downloaded": st.get("downloaded", 0), "total": st.get("total", 0)}
-        return {"ok": True, "aid": aid, **st}
-    # 未登记: 检查磁盘是否已缓存
-    cached = _cached_count(aid)
-    if cached > 0:
-        return {"ok": True, "aid": aid, "status": "completed", "downloaded": cached,
-                "total": cached, "cached": cached}
-    return {"ok": True, "aid": aid, "status": "idle", "downloaded": 0, "total": 0}
-
-
-# ---- 真实下载(旧插件同款: 存插件 downloads/<aid>/, 含总页数统计) ----
-def _download_dir():
-    base = os.path.join(PLUGIN_DIR, "downloads")
-    os.makedirs(base, exist_ok=True)
-    return base
-
-
-# 旧插件形态图下载: CDN/media/photos/{cid}/{fname} + requests(带UA/Referer), 落盘缓存
-def proxy_old_form(aid, cid, fname):
-    import requests
-    domains = ["cdn-msp.jmapiproxy1.cc", "cdn-msp.jmapiproxy2.cc"]
-    for d in domains:
-        url = "https://%s/media/photos/%s/%s" % (d, cid, fname)
-        try:
-            r = requests.get(url, timeout=25, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://18comic.vip/",
-            })
-            if r.status_code == 200 and r.content and not r.content[:4].lstrip().startswith(b"<"):
-                local_dir = _img_cache_dir(aid, cid)
-                local = os.path.join(local_dir, fname)
-                with open(local, "wb") as f:
-                    f.write(r.content)
-                return local
-        except Exception:
-            continue
-    return None
-
-
-def _img_cache_dir(aid, cid):
-    d = os.path.join(_download_dir(), str(aid), str(cid))
+# ---- 本地库(磁盘 JSON, 旧插件原样) ----
+def album_dir(aid):
+    for base in storage_paths():
+        d = os.path.join(base, str(aid))
+        if os.path.isdir(d):
+            return d
+    d = os.path.join(active_dir(), str(aid))
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def _sum_pages(album):
-    total = 0
-    try:
-        for ep in getattr(album, "episode_list", None) or []:
-            cid = str(ep[0]) if isinstance(ep, (list, tuple)) and ep else ""
-            if not cid:
-                continue
+def load_library():
+    merged = {}
+    for base in storage_paths():
+        p = os.path.join(base, 'library.json')
+        if os.path.isfile(p):
             try:
-                ph = _get_jm()[0].get_photo_detail(cid)
-                total += len(getattr(ph, "page_arr", None) or [])
+                data = json.load(open(p, 'r', encoding='utf-8'))
+                if isinstance(data, dict):
+                    merged.update(data)
             except Exception:
                 pass
+    return merged
+
+
+def save_library(lib):
+    for base in storage_paths():
+        if not _dir_writable(base):
+            continue
+        try:
+            with open(os.path.join(base, 'library.json'), 'w', encoding='utf-8') as f:
+                json.dump(lib, f, ensure_ascii=False, indent=2)
+            return
+        except Exception:
+            continue
+
+
+def rebuild_library():
+    lib = load_library()
+    for aid in list(lib.keys()):
+        total = 0
+        cached = 0
+        for base in storage_paths():
+            d = os.path.join(base, str(aid))
+            if os.path.isdir(d):
+                for root, dirs, files in os.walk(d):
+                    for f in files:
+                        if f.lower().endswith(('.webp', '.jpg', '.jpeg', '.png', '.gif')):
+                            total += 1
+                cached += total
+                break
+        if cached == 0:
+            del lib[aid]
+        else:
+            lib[aid]['cached'] = cached
+            lib[aid]['total'] = total
+    save_library(lib)
+    return lib
+
+
+def find_local_image(aid, filename):
+    for base in storage_paths():
+        p = os.path.join(base, aid, filename)
+        if os.path.isfile(p):
+            return p
+        d = os.path.join(base, aid)
+        if os.path.isdir(d):
+            for root, dirs, files in os.walk(d):
+                if filename in files:
+                    return os.path.join(root, filename)
+    return None
+
+
+_library_cache = {'ts': 0, 'data': None}
+
+
+def _sorted_library():
+    now = time.time()
+    if _library_cache['data'] is not None and now - _library_cache['ts'] < 5:
+        return _library_cache['data']
+    lib = rebuild_library()
+    items = sorted([{**v, 'aid': k} for k, v in lib.items()], key=lambda x: x.get('updated', 0), reverse=True)
+    for item in items:
+        for base in storage_paths():
+            zp = os.path.join(base, f'{item["aid"]}.zip')
+            if os.path.isfile(zp):
+                item['zip_size'] = os.path.getsize(zp)
+                item['zip_base'] = base
+                break
+    cached_meta = load_metadata()
+    for item in items:
+        m = cached_meta.get(item['aid'])
+        if m and m.get('tags'):
+            item['tags'] = m.get('tags', [])
+    _library_cache['data'] = items
+    _library_cache['ts'] = now
+    return items
+
+
+def is_complete_download(aid):
+    aid = str(aid)
+    for base in storage_paths():
+        if os.path.isfile(os.path.join(base, aid, '.complete')):
+            return True
+        if os.path.isfile(os.path.join(base, f'{aid}.zip')):
+            return True
+    return False
+
+
+def album_from_local(aid):
+    aid = str(aid)
+    if not is_complete_download(aid):
+        return None
+    lib = load_library().get(aid, {})
+    meta = load_metadata().get(aid, {})
+    name = lib.get('name') or meta.get('name') or ''
+    author = lib.get('author') or meta.get('author') or ''
+    chapters = []
+    base = album_dir(aid)
+    if os.path.isdir(base):
+        for d in sorted(os.listdir(base)):
+            sub = os.path.join(base, d)
+            if not os.path.isdir(sub) or d.startswith('.'):
+                continue
+            files = [f for f in os.listdir(sub)
+                     if f.lower().endswith(('.webp', '.jpg', '.jpeg', '.png', '.gif'))]
+            if files:
+                chapters.append({'aid': aid, 'cid': d, 'name': name or f'章节 {d}'})
+    if not chapters:
+        return None
+    if len(chapters) > 1:
+        for i, ch in enumerate(chapters, 1):
+            ch['name'] = f'第{i}话'
+    return {
+        'id': aid, 'name': name, 'author': author,
+        'authors': [author] if author else [],
+        'description': '', 'tags': meta.get('tags', []),
+        'likes': 0, 'views': 0, 'comment_count': 0, 'page_count': 0,
+        'chapters': chapters, 'related': [],
+    }
+
+
+def scan_cached_files(aid):
+    total = 0
+    for base in storage_paths():
+        d = os.path.join(base, aid)
+        if os.path.isdir(d):
+            for root, dirs, files in os.walk(d):
+                for f in files:
+                    if f.lower().endswith(('.webp', '.jpg', '.jpeg', '.png', '.gif')):
+                        total += 1
+    return total
+
+
+def fetch_total_pages(client, album):
+    total = 0
+    try:
+        for photo in album:
+            client.check_photo(photo)
+            total += len(photo.page_arr or [])
     except Exception:
         pass
     return total
 
 
-def download_one(aid):
-    """下载专辑到插件 downloads/<aid>/(登记进度, 前端轮询)。"""
-    aid = str(aid)
-    client, err = _get_jm()
-    if err or client is None:
-        return {"ok": False, "error": err or "客户端不可用"}
+def load_metadata():
+    if os.path.isfile(METADATA_FILE):
+        try:
+            return json.load(open(METADATA_FILE, 'r', encoding='utf-8'))
+        except Exception:
+            pass
+    return {}
+
+
+def save_metadata(meta):
+    os.makedirs(os.path.dirname(METADATA_FILE), exist_ok=True)
+    with open(METADATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+
+_meta_lock = threading.Lock()
+
+
+def get_album_meta(client, aid):
+    with _meta_lock:
+        meta = load_metadata()
+        if aid in meta:
+            return meta[aid]
     try:
-        detail = client.get_album_detail(aid)
-        total = int(getattr(detail, "page_count", 0) or 0)
-        if not total:
-            total = _sum_pages(detail)
-        _downloads[aid] = {"status": "downloading", "downloaded": 0, "total": total,
-                           "started": int(time.time())}
-        _save()
-        # 更新库条目: 名称/作者/总页数
-        if aid not in _library:
-            _library[aid] = {"title": getattr(detail, "name", "") or aid,
-                             "cover": "", "tags": [], "added": int(time.time())}
-        if total:
-            _library[aid]["total"] = total
-        _library[aid].setdefault("author", getattr(detail, "author", ""))
-        _save()
-        return {"ok": True, "aid": aid, "status": "downloading", "total": total}
-    except Exception as e:
-        return {"ok": False, "error": "下载失败: " + str(e)}
+        album = client.get_album_detail(aid)
+        entry = {
+            'name': album.name, 'author': album.author,
+            'tags': list(album.tags) if album.tags else [],
+            'updated': int(time.time()),
+        }
+    except Exception:
+        entry = {'name': '', 'author': '', 'tags': []}
+    with _meta_lock:
+        meta = load_metadata()
+        if aid not in meta:
+            meta[aid] = entry
+            save_metadata(meta)
+    return entry
 
 
+CDN_DOMAINS = [
+    'cdn-msp.jmapiproxy2.cc',
+    'cdn-msp.jmapiproxy1.cc',
+    'www.cdnhjk.net',
+]
+
+
+def _download_image(aid, cid, filename, local_path):
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    import requests
+    for domain in CDN_DOMAINS:
+        try:
+            url = f'https://{domain}/media/photos/{cid}/{filename}'
+            r = requests.get(url, timeout=30,
+                             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                                      'Referer': 'https://18comic.vip/'})
+            r.raise_for_status()
+            with open(local_path, 'wb') as f:
+                f.write(r.content)
+            return r.content
+        except Exception:
+            continue
+    return None
+
+
+_scramble_cache = {}
+_SCRAMBLE_FILE = os.path.join(IMG_DIR, 'scramble.json')
+
+
+def _load_scramble_cache():
+    try:
+        if os.path.isfile(_SCRAMBLE_FILE):
+            c = json.load(open(_SCRAMBLE_FILE, 'r', encoding='utf-8'))
+            _scramble_cache.update({str(k): str(v) for k, v in c.items()})
+    except Exception:
+        pass
+    try:
+        pc = _load_cache(PHOTO_CACHE_FILE)
+        for cid, v in pc.items():
+            if v.get('scramble_id'):
+                _scramble_cache.setdefault(str(cid), str(v['scramble_id']))
+    except Exception:
+        pass
+
+
+_load_scramble_cache()
+
+_cdn_lock = threading.BoundedSemaphore(4)
+
+
+def _persist_scramble():
+    try:
+        with open(_SCRAMBLE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(_scramble_cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def get_scramble_id(cid):
+    if cid not in _scramble_cache:
+        try:
+            photo = jm().get_photo_detail(cid)
+            _scramble_cache[cid] = str(photo.scramble_id)
+            _persist_scramble()
+        except Exception:
+            return None
+    return _scramble_cache[cid]
+
+
+def decode_jm_image(data, scramble_id, photo_id, filename, save_path):
+    """Decode scrambled JM image and save. Gif saved raw."""
+    ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
+    if ext == 'gif' or not scramble_id:
+        with open(save_path, 'wb') as f:
+            f.write(data)
+        return
+    from jmcomic import JmImageTool
+    num = JmImageTool.get_num(scramble_id, photo_id, os.path.splitext(filename)[0])
+    img_src = JmImageTool.open_image(data)
+    JmImageTool.decode_and_save(num, img_src, save_path)
+
+
+def download_one(aid):
+    """Download a single album to the selected storage dir (resumable). Returns bool."""
+    aid = str(aid)
+    base = pick_dir()
+    os.makedirs(base, exist_ok=True)
+    tmp = os.path.join(base, f'_tmp_{aid}')
+    tmp_album = os.path.join(tmp, aid)
+    dst = os.path.join(base, aid)
+    ok = False
+    try:
+        detail = jm().get_album_detail(aid)
+        lib = load_library()
+        entry = lib.get(aid, {})
+        if detail.page_count:
+            entry['total'] = detail.page_count
+        else:
+            entry['total'] = fetch_total_pages(jm(), detail) or entry.get('total') or 0
+        entry['name'] = entry.get('name') or detail.name
+        entry['author'] = entry.get('author') or detail.author
+        entry['updated'] = int(time.time())
+        lib[aid] = entry
+        save_library(lib)
+    except Exception:
+        pass
+    try:
+        import zipfile
+        from jmcomic import JmOption
+        from jmcomic.jm_option import DirRule
+        opt = JmOption.default()
+        opt.dir_rule = DirRule('Bd_Aid', tmp)
+        opt.download_album(aid)
+        if not os.path.isdir(tmp_album):
+            return False
+        dest = os.path.join(dst, aid)
+        if os.path.isdir(dst) and not is_complete_download(aid):
+            shutil.rmtree(dst, ignore_errors=True)
+        os.makedirs(dst, exist_ok=True)
+        shutil.move(tmp_album, dest)
+        zip_path = os.path.join(base, f'{aid}.zip')
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(dst):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    arcname = os.path.relpath(fp, base)
+                    zf.write(fp, arcname)
+        try:
+            open(os.path.join(dst, '.complete'), 'w').close()
+        except Exception:
+            pass
+        total = scan_cached_files(aid)
+        lib = load_library()
+        entry = lib.get(aid, {})
+        entry['total'] = total
+        entry['cached'] = total
+        entry['updated'] = int(time.time())
+        lib[aid] = entry
+        save_library(lib)
+        ok = True
+        return True
+    except Exception:
+        return False
+    finally:
+        if ok and os.path.isdir(tmp):
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class DownloadManager:
+    """Single worker queue for single/batch downloads, sequential, resumable."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._queue = []
+        self._tasks = {}
+        self._current = None
+        self._worker = None
+        self._batch = {
+            'running': False, 'stop': False, 'mode': '', 'keyword': '',
+            'status': 'idle', 'found': 0, 'current': None, 'results': {},
+            'done': 0, 'fail': 0, 'skip': 0, 'error': '',
+        }
+
+    def _ensure_worker_locked(self):
+        if self._worker is None or not self._worker.is_alive():
+            self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+            self._worker.start()
+
+    def enqueue(self, aid):
+        aid = str(aid)
+        with self._lock:
+            if is_complete_download(aid):
+                return 'cached'
+            t = self._tasks.get(aid)
+            if t and t['status'] in ('queued', 'downloading'):
+                return 'queued'
+            self._tasks[aid] = {'status': 'queued', 'name': ''}
+            self._queue.append(aid)
+            self._ensure_worker_locked()
+        return 'queued'
+
+    def status(self, aid):
+        with self._lock:
+            t = self._tasks.get(str(aid))
+            return dict(t) if t else None
+
+    def start_batch(self, mode, keyword):
+        with self._lock:
+            if self._batch['running']:
+                return False, '已有批量下载任务进行中'
+            self._batch = {
+                'running': True, 'stop': False, 'mode': mode, 'keyword': keyword,
+                'status': 'collecting', 'found': 0, 'current': None, 'results': {},
+                'done': 0, 'fail': 0, 'skip': 0, 'error': '',
+            }
+        threading.Thread(target=self._collect, args=(mode, keyword), daemon=True).start()
+        return True, '开始批量下载'
+
+    def stop_batch(self):
+        with self._lock:
+            if not self._batch['running']:
+                return False
+            self._batch['stop'] = True
+            self._queue.clear()
+            for r in self._batch['results'].values():
+                if r['status'] == 'queued':
+                    r['status'] = 'skipped'
+                    self._batch['skip'] += 1
+        return True
+
+    def batch_status(self):
+        with self._lock:
+            b = dict(self._batch)
+            b['results'] = dict(self._batch['results'])
+            b['current'] = self._current
+            return b
+
+    def _collect(self, mode, keyword):
+        try:
+            client = jm()
+            page = 1
+            while True:
+                with self._lock:
+                    if self._batch['stop']:
+                        break
+                if mode == 'author':
+                    result = client.search_author(search_query=keyword, page=page)
+                elif mode == 'tag':
+                    result = client.search_tag(search_query=keyword, page=page)
+                else:
+                    result = client.search_site(search_query=keyword, page=page)
+                items = [(str(aid), name) for aid, name in result]
+                if not items:
+                    break
+                page_count = getattr(result, 'page_count', 1) or 1
+                with self._lock:
+                    if self._batch['stop']:
+                        break
+                    for aid, name in items:
+                        if aid in self._batch['results']:
+                            continue
+                        if is_complete_download(aid):
+                            self._batch['results'][aid] = {'name': name, 'status': 'skipped'}
+                            self._batch['skip'] += 1
+                            continue
+                        self._batch['results'][aid] = {'name': name, 'status': 'queued'}
+                        self._batch['found'] += 1
+                        self._tasks.setdefault(aid, {'status': 'queued', 'name': name})
+                        self._queue.append(aid)
+                    self._ensure_worker_locked()
+                if page >= page_count:
+                    break
+                page += 1
+        except Exception as e:
+            with self._lock:
+                self._batch['error'] = str(e)
+        finally:
+            with self._lock:
+                if self._batch['running'] and self._batch['status'] == 'collecting':
+                    self._batch['status'] = 'downloading'
+
+    def _worker_loop(self):
+        while True:
+            with self._lock:
+                if self._batch['stop']:
+                    self._batch['stop'] = False
+                    self._batch['running'] = False
+                    self._batch['status'] = 'stopped'
+                    self._queue.clear()
+                if not self._queue:
+                    if self._batch['running'] and self._batch['status'] == 'collecting':
+                        time.sleep(0.3)
+                        continue
+                    if self._batch['running'] and self._batch['status'] == 'downloading':
+                        self._batch['running'] = False
+                        self._batch['status'] = 'done'
+                    self._current = None
+                    break
+                aid = self._queue.pop(0)
+                self._current = aid
+                t = self._tasks.get(aid)
+                if t:
+                    t['status'] = 'downloading'
+                if aid in self._batch['results']:
+                    self._batch['results'][aid]['status'] = 'downloading'
+            ok = download_one(aid)
+            with self._lock:
+                self._current = None
+                t = self._tasks.get(aid)
+                if t:
+                    t['status'] = 'completed' if ok else 'failed'
+                if aid in self._batch['results']:
+                    self._batch['results'][aid]['status'] = 'completed' if ok else 'failed'
+                    if ok:
+                        self._batch['done'] += 1
+                    else:
+                        self._batch['fail'] += 1
+
+
+_manager = DownloadManager()
+
+
+# ---- 搜索辅助(旧插件原样: 多标签求交集) ----
+def _search_tag_all(client, tag, max_pages=8):
+    aids = {}
+    for pg in range(1, max_pages + 1):
+        try:
+            result = client.search_tag(search_query=tag, page=pg)
+        except Exception:
+            break
+        if not result:
+            break
+        for aid, name in result:
+            aids[str(aid)] = name
+        if pg >= getattr(result, 'page_count', 1):
+            break
+    return aids
+
+
+def _search_tags_intersection(client, tags, page, per=45):
+    results = [None] * len(tags)
+    with ThreadPoolExecutor(max_workers=min(len(tags), 4)) as ex:
+        futs = {ex.submit(_search_tag_all, client, t): i for i, t in enumerate(tags)}
+        for f in futs:
+            results[futs[f]] = f.result()
+    if any(not r for r in results):
+        return [], 0, 1
+    inter = set(results[0])
+    for r in results[1:]:
+        inter &= set(r)
+    order = [aid for aid in results[0] if aid in inter]
+    total = len(order)
+    page_count = max(1, -(-total // per))
+    start = (page - 1) * per
+    ids = order[start:start + per]
+    items = [{'id': aid, 'name': results[0].get(aid, '')} for aid in ids]
+    return items, total, page_count
+
+
+def _tail(prefix, path):
+    idx = path.find(prefix)
+    if idx < 0:
+        return ''
+    return path[idx + len(prefix):].lstrip('/')
+
+
+def _guess_mime(filename):
+    ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
+    return {
+        'webp': 'image/webp', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+        'png': 'image/png', 'gif': 'image/gif',
+    }.get(ext, 'image/webp')
+
+
+# ---- HTTP 分发(替代 Flask/Plugin 壳, 逻辑与路由与旧插件一致) ----
 class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "jmcomic/2.0"
+
     def _json(self, code, obj):
         raw = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
@@ -493,11 +725,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _bin(self, code, ctype, data):
-        self.send_response(code)
+    def _file(self, path, ctype, as_attach=False):
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+        except Exception:
+            self._json(404, {'error': '文件不存在'})
+            return
+        self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "public, max-age=3600")
+        self.send_header("Cache-Control", "public, max-age=0")
+        if as_attach:
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % os.path.basename(path))
         self.end_headers()
         self.wfile.write(data)
 
@@ -510,149 +750,424 @@ class Handler(http.server.BaseHTTPRequestHandler):
         q = parse_qs(urlparse(self.path).query)
         return {k: v[0] for k, v in q.items()}
 
-    def do_GET(self):
-        p = self.path
-        q = self._q()
+    # ---- 路由: /search ----
+    def _rt_search(self, q):
+        keyword = (q.get('keyword', '') or '').strip()
+        page = int(q.get('page') or 1)
+        mode = q.get('mode', 'keyword')
+        if not keyword:
+            return 400, {'error': '请输入搜索关键词'}
         try:
-            if p == "/__health":
-                return self._json(200, {"ok": True, "gateway": "jmcomic-lib"})
-            if p == "/config":
-                cfg = _ns_get_cfg()
-                return self._json(200, {"gateway": "jmcomic-lib", **cfg})
-            if p == "/info":
-                return self._json(200, {
-                    "name": "JMComic", "label": "JMComic", "version": "2.0.0",
-                    "lang": "python", "description": "禁漫天堂搜索/阅读/下载管理",
-                })
-            if p.startswith("/search"):
-                return self._json(200, search(q.get("keyword", ""), int(q.get("page") or 1), q.get("mode", "normal")))
-            if p.startswith("/meta/"):
-                # 旧 store enrichMeta 读 m.author/m.tags → 平铺 (id, author, tags)
-                aid = p[len("/meta/"):].split("/")[0]
-                ad = album_detail(aid)
-                if "error" in ad:
-                    return self._json(200, {"id": aid, "author": "", "tags": [], "error": ad.get("error", "")})
-                return self._json(200, {"id": aid, "aid": aid, "name": ad.get("name", ""),
-                                        "author": ad.get("author", ""), "tags": ad.get("tags", [])})
-            if p.startswith("/album/"):
-                return self._json(200, album_detail(p[len("/album/"):].split("/")[0]))
-            if p.startswith("/chapter/"):
-                parts = p[len("/chapter/"):].split("/")
-                ch = chapter_images(parts[0], parts[1] if len(parts) > 1 else "")
-                if "error" not in ch:
-                    # 顶层直出: {id, name, scramble_id, page_arr, total}(旧契约)
-                    return self._json(200, {
-                        "id": ch.get("cid", ""), "cid": ch.get("cid", ""), "aid": ch.get("aid", ""),
-                        "name": ch.get("name", ""), "title": ch.get("name", ""),
-                        "scramble_id": ch.get("scramble_id", ""),
-                        "page_arr": ch.get("page_arr", []),
-                        "files": ch.get("page_arr", []),
-                        "total": ch.get("total", len(ch.get("page_arr", []))),
-                        "urls": ch.get("urls", []), "direct_urls": ch.get("urls", []),
-                    })
-                return self._json(200, ch)
-            if p.startswith("/download_zip/"):
-                return self._json(200, download_status(p[len("/download_zip/"):]))
-            if p == "/download/batch":
-                return self._json(200, batch_status())
-            if p == "/download/batch/stop":
-                return self._json(200, batch_stop())
-            if p.startswith("/download/"):
-                return self._json(200, download_status(p[len("/download/"):].split("/")[0]))
-            if p == "/download":
-                return self._json(200, download_status(q.get("aid", "")))
-            if p.startswith("/library/"):
-                return self._json(200, remove_library(p[len("/library/"):]))
-            if p == "/library":
-                return self._json(200, library(int(q.get("page") or 1), int(q.get("page_size") or 45)))
-            if p.startswith("/cover/"):
-                # 封面: 缓存 img/{aid}.{ext} → 无则取首图下载+解码
-                aid = p[len("/cover/"):].split("/")[0]
-                if not aid or not aid.isdigit():
-                    return self._bin(404, "image/jpeg", b"")
-                img_dir = os.path.join(PLUGIN_DIR, "img")
-                os.makedirs(img_dir, exist_ok=True)
-                cover_path = None
-                for ext in ("jpg", "jpeg", "webp", "png", "gif"):
-                    q = os.path.join(img_dir, "%s.%s" % (aid, ext))
-                    if os.path.isfile(q):
-                        cover_path = q
-                        break
-                if not cover_path:
-                    try:
-                        ad = album_detail(aid)
-                        if "error" not in ad and ad.get("chapters"):
-                            cid0 = ad["chapters"][0]["cid"]
-                            ch = chapter_images(aid, cid0)
-                            if "error" not in ch and ch.get("page_arr"):
-                                fname = ch["page_arr"][0]
-                                ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "webp"
-                                local = os.path.join(img_dir, "%s.%s" % (aid, ext))
-                                got = proxy_old_form(aid, cid0, fname)
-                                if got:
-                                    try:
-                                        import shutil
-                                        shutil.copyfile(got, local)
-                                        cover_path = local
-                                    except Exception:
-                                        cover_path = got
-                    except Exception:
-                        pass
-                if cover_path and os.path.isfile(cover_path):
-                    with open(cover_path, "rb") as f:
-                        return self._bin(200, _guess_mime(os.path.basename(cover_path)), f.read())
-                return self._bin(404, "image/jpeg", b"")
-            if p.startswith("/image/"):
-                # /image/<aid>/<cid>/<file> → 旧插件形态下载(cdn/media/photos/cid/fname) + 落盘缓存
-                parts = p[len("/image/"):].split("/")
-                if len(parts) >= 3:
-                    aid, cid, fname = parts[0], parts[1], "/".join(parts[2:])
-                    local = os.path.join(_img_cache_dir(aid, cid), fname)
-                    if not os.path.isfile(local):
-                        local = proxy_old_form(aid, cid, fname) or ""
-                    if local and os.path.isfile(local):
-                        with open(local, "rb") as f:
-                            return self._bin(200, _guess_mime(fname), f.read())
-                return self._json(404, {"error": "image not found"})
-            return self._json(404, {"error": "not found: " + p})
+            client = jm()
+            if mode == 'tag' and len([t for t in re.split(r'[,，\s]+', keyword) if t]) > 1:
+                tags = [t for t in re.split(r'[,，\s]+', keyword) if t]
+                items, total, page_count = _search_tags_intersection(client, tags, page)
+                cached_meta = load_metadata()
+                for item in items:
+                    m = cached_meta.get(item['id'])
+                    if m:
+                        item['author'] = m.get('author', '')
+                        item['tags'] = m.get('tags', [])
+                return 200, {'items': items, 'total': total, 'page_count': page_count}
+            if mode == 'author':
+                result = client.search_author(search_query=keyword, page=page)
+            elif mode == 'tag':
+                result = client.search_tag(search_query=keyword, page=page)
+            elif mode == 'work':
+                result = client.search_work(search_query=keyword, page=page)
+            else:
+                result = client.search_site(search_query=keyword, page=page)
+            items = [{'id': str(aid), 'name': name} for aid, name in result]
+            cached_meta = load_metadata()
+            for item in items:
+                m = cached_meta.get(item['id'])
+                if m:
+                    item['author'] = m.get('author', '')
+                    item['tags'] = m.get('tags', [])
+            total = getattr(result, 'total', 0)
+            page_count = getattr(result, 'page_count', 1)
+            return 200, {'items': items, 'total': total, 'page_count': page_count}
         except Exception as e:
-            return self._json(500, {"error": str(e)})
+            return 502, {'error': '搜索失败: %s' % str(e)}
+
+    # ---- 路由: /meta/<aid> ----
+    def _rt_meta(self, aid):
+        if not aid or not aid.isdigit():
+            return 400, {'error': '缺少漫画ID'}
+        try:
+            return 200, get_album_meta(jm(), aid)
+        except Exception as e:
+            return 502, {'error': '获取信息失败: %s' % str(e)}
+
+    # ---- 路由: /album/<aid> ----
+    def _rt_album(self, aid):
+        if not aid or not aid.isdigit():
+            return 400, {'error': '缺少漫画ID'}
+        cache = _load_cache(ALBUM_CACHE_FILE)
+        entry = cache.get(aid)
+        if entry and time.time() - entry.get('fetched', 0) < 6 * 3600:
+            return 200, entry['data']
+        local = album_from_local(aid)
+        if local:
+            return 200, local
+        try:
+            detail = jm().get_album_detail(aid)
+            lib = load_library()
+            if aid not in lib:
+                lib[aid] = {}
+            lib[aid]['name'] = detail.name
+            lib[aid]['author'] = detail.author
+            lib[aid]['updated'] = int(time.time())
+            save_library(lib)
+            chapters = []
+            for ep in detail.episode_list:
+                cid = str(ep[1])
+                if cid == '1' and len(detail.episode_list) == 1:
+                    cid = str(detail.album_id)
+                chapters.append({
+                    'aid': str(detail.album_id),
+                    'cid': cid,
+                    'name': ep[2],
+                })
+            data = {
+                'id': str(detail.album_id),
+                'name': detail.name,
+                'author': detail.author,
+                'authors': list(detail.authors) if detail.authors else [],
+                'description': detail.description or '',
+                'tags': list(detail.tags) if detail.tags else [],
+                'likes': detail.likes,
+                'views': detail.views,
+                'comment_count': detail.comment_count,
+                'page_count': detail.page_count,
+                'chapters': chapters,
+                'related': [
+                    {'id': str(r.get('id', '')), 'name': r.get('name', ''), 'author': r.get('author', '')}
+                    for r in (detail.related_list or [])
+                ],
+            }
+            cache[aid] = {'data': data, 'fetched': int(time.time())}
+            _save_cache(ALBUM_CACHE_FILE, cache)
+            return 200, data
+        except Exception as e:
+            return 502, {'error': '获取漫画详情失败: %s' % str(e)}
+
+    # ---- 路由: /chapter/[aid/]cid ----
+    def _rt_chapter(self, rest):
+        parts = rest.split('/')
+        if len(parts) == 1:
+            aid, cid = None, parts[0]
+        elif len(parts) == 2:
+            aid, cid = parts
+        else:
+            return 400, {'error': '参数错误: /chapter/[aid/]cid'}
+        if not cid or not cid.isdigit():
+            return 400, {'error': '缺少章节ID'}
+        if aid and aid.isdigit() and is_complete_download(aid):
+            d = os.path.join(album_dir(aid), cid)
+            if os.path.isdir(d):
+                files = sorted(f for f in os.listdir(d)
+                               if f.lower().endswith(('.webp', '.jpg', '.jpeg', '.png', '.gif')))
+                if files:
+                    return 200, {'id': cid, 'name': '', 'page_arr': files, 'total': len(files)}
+        pcache = _load_cache(PHOTO_CACHE_FILE)
+        entry = pcache.get(cid)
+        if entry:
+            return 200, entry
+        try:
+            photo = jm().get_photo_detail(cid)
+            _scramble_cache[str(photo.photo_id)] = str(photo.scramble_id)
+            _persist_scramble()
+            data = {
+                'id': str(photo.photo_id),
+                'name': photo.name,
+                'author': photo.author,
+                'tags': list(photo.tags) if photo.tags else [],
+                'scramble_id': str(photo.scramble_id),
+                'page_arr': list(photo.page_arr),
+                'total': len(photo.page_arr),
+            }
+            pcache[cid] = data
+            _save_cache(PHOTO_CACHE_FILE, pcache)
+            return 200, data
+        except Exception as e:
+            return 502, {'error': '获取章节失败: %s' % str(e)}
+
+    # ---- 路由: /download/<aid> POST/GET ----
+    def _rt_download_post(self, aid):
+        if not aid or not aid.isdigit():
+            return 400, {'error': '缺少漫画ID'}
+        result = _manager.enqueue(aid)
+        if result == 'cached':
+            return 200, {'message': '本子 %s 已缓存' % aid, 'status': 'cached'}
+        if result == 'queued':
+            return 200, {'message': '本子 %s 已在下载队列中' % aid, 'status': 'queued'}
+        return 200, {'message': '开始下载 %s' % aid, 'status': 'downloading'}
+
+    def _rt_download_get(self, aid):
+        if not aid or not aid.isdigit():
+            return 400, {'error': '缺少漫画ID'}
+        cached = scan_cached_files(aid)
+        tmp = None
+        tmp_count = 0
+        for base in storage_paths():
+            p = os.path.join(base, f'_tmp_{aid}')
+            if os.path.isdir(p):
+                tmp = p
+                break
+        if tmp and os.path.isdir(tmp):
+            for root, dirs, files in os.walk(tmp):
+                for f in files:
+                    if f.lower().endswith(('.webp', '.jpg', '.jpeg', '.png', '.gif')):
+                        tmp_count += 1
+        downloaded = cached + tmp_count
+        lib = load_library()
+        entry = lib.get(aid, {})
+        total = entry.get('total') or 0
+        if total and downloaded > total:
+            downloaded = total
+        task = _manager.status(aid)
+        if task and task['status'] in ('queued', 'downloading'):
+            status = 'downloading'
+        elif task and task['status'] == 'failed':
+            status = 'failed'
+        elif cached >= total and total > 0:
+            status = 'completed'
+        elif downloaded > 0:
+            status = 'downloading'
+        else:
+            status = 'not_found'
+        return 200, {'aid': aid, 'total': total, 'downloaded': downloaded, 'cached': cached, 'status': status}
+
+    # ---- 路由: /download/batch + /download/batch/stop ----
+    def _rt_batch(self, body, is_post):
+        if is_post:
+            mode = body.get('mode', 'keyword')
+            keyword = (body.get('keyword') or '').strip()
+            if mode not in ('keyword', 'author', 'tag'):
+                return 400, {'error': '不支持的批量模式'}
+            if not keyword:
+                return 400, {'error': '请输入批量搜索关键词'}
+            ok, msg = _manager.start_batch(mode, keyword)
+            if not ok:
+                return 409, {'error': msg}
+            return 200, {'message': msg, 'mode': mode, 'keyword': keyword}
+        return 200, _manager.batch_status()
+
+    def _rt_batch_stop(self):
+        ok = _manager.stop_batch()
+        if not ok:
+            return 409, {'error': '当前没有批量下载任务'}
+        return 200, {'message': '已停止批量下载'}
+
+    # ---- 路由: /download_zip/<aid> ----
+    def _rt_zip(self, aid):
+        if not aid or not aid.isdigit():
+            return 400, {'error': '缺少漫画ID'}
+        zip_path = None
+        for base in storage_paths():
+            p = os.path.join(base, f'{aid}.zip')
+            if os.path.isfile(p):
+                zip_path = p
+                break
+        if zip_path:
+            self._file(zip_path, 'application/zip', as_attach=True)
+            return None
+        return 404, {'error': 'ZIP 文件不存在'}
+
+    # ---- 路由: /image/<aid>/<cid>/<filename> ----
+    def _rt_image(self, rest):
+        parts = rest.split('/')
+        if len(parts) < 3:
+            return 400, {'error': '参数不足: aid/cid/filename'}
+        aid, cid, filename = parts[0], parts[1], '/'.join(parts[2:])
+        local_path = find_local_image(aid, filename)
+        if local_path:
+            self._file(local_path, _guess_mime(filename))
+            return None
+        local_path = os.path.join(active_dir(), aid, cid, filename)
+        with _cdn_lock:
+            p = find_local_image(aid, filename)
+            if p:
+                self._file(p, _guess_mime(filename))
+                return None
+            data = _download_image(aid, cid, filename, local_path)
+            if data:
+                decode_jm_image(data, get_scramble_id(cid), cid, filename, local_path)
+                self._file(local_path, _guess_mime(filename))
+                return None
+        return 502, {'error': '图片加载失败'}
+
+    # ---- 路由: /cover/<aid> ----
+    def _rt_cover(self, aid):
+        if not aid or not aid.isdigit():
+            return 400, {'error': '缺少漫画ID'}
+
+        def _find_cover():
+            for ext in ('jpg', 'jpeg', 'webp', 'png', 'gif'):
+                p = os.path.join(IMG_DIR, f'{aid}.{ext}')
+                if os.path.isfile(p):
+                    return p
+            return None
+
+        p = _find_cover()
+        if p:
+            ext = os.path.splitext(p)[1][1:] or 'webp'
+            self._file(p, _guess_mime('x.' + ext))
+            return None
+        try:
+            client = jm()
+            album = client.get_album_detail(aid)
+            photo_id = str(album.episode_list[0][1])
+            if photo_id == '1' and len(album.episode_list) == 1:
+                photo_id = str(album.album_id)
+            photo = client.get_photo_detail(photo_id)
+            if not photo.page_arr:
+                return 404, {'error': '该漫画无图片'}
+            filename = photo.page_arr[0]
+            ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else 'jpg'
+            save_path = os.path.join(IMG_DIR, f'{aid}.{ext}')
+            with _cdn_lock:
+                p = _find_cover()
+                if p:
+                    ext2 = os.path.splitext(p)[1][1:] or 'webp'
+                    self._file(p, _guess_mime('x.' + ext2))
+                    return None
+                data = _download_image(aid, photo_id, filename, save_path)
+                if not data:
+                    return 502, {'error': '封面下载失败'}
+                decode_jm_image(data, photo.scramble_id, photo_id, filename, save_path)
+            ext2 = os.path.splitext(save_path)[1][1:] or 'webp'
+            self._file(save_path, _guess_mime('x.' + ext2))
+            return None
+        except Exception as e:
+            return 502, {'error': '获取封面失败: %s' % str(e)}
+
+    # ---- 路由: /library GET / DELETE ----
+    def _rt_library_get(self, q):
+        page = max(int(q.get('page') or 1), 1)
+        page_size = max(int(q.get('page_size') or 45), 1)
+        items = _sorted_library()
+        total = len(items)
+        start = (page - 1) * page_size
+        paged = items[start:start + page_size]
+        return 200, {
+            'items': paged, 'total': total, 'page': page,
+            'page_size': page_size, 'page_count': (total + page_size - 1) // page_size,
+        }
+
+    def _rt_library_delete(self, aid):
+        for base in storage_paths():
+            d = os.path.join(base, aid)
+            if os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+            zip_path = os.path.join(base, f'{aid}.zip')
+            if os.path.isfile(zip_path):
+                os.remove(zip_path)
+        lib = load_library()
+        if aid in lib:
+            del lib[aid]
+            save_library(lib)
+        return 200, {'message': '已删除 %s' % aid}
+
+    # ---- 路由: /config GET/POST, /info ----
+    def _rt_config(self, body, is_post):
+        if is_post:
+            new_cfg = body or {}
+            cfg = load_config()
+            if 'storage_paths' in new_cfg:
+                paths = [p for p in new_cfg['storage_paths'] if isinstance(p, str) and p.strip()]
+                if DOWNLOADS_DIR not in paths:
+                    paths.insert(0, DOWNLOADS_DIR)
+                cfg['storage_paths'] = paths
+                if new_cfg.get('active_path') not in paths:
+                    cfg['active_path'] = paths[0]
+                else:
+                    cfg['active_path'] = new_cfg['active_path']
+                if 'auto_switch_full' in new_cfg:
+                    cfg['auto_switch_full'] = bool(new_cfg['auto_switch_full'])
+                if 'full_threshold_mb' in new_cfg:
+                    cfg['full_threshold_mb'] = max(0, int(new_cfg['full_threshold_mb'] or 0))
+            else:
+                cfg.update(new_cfg)
+            save_config(cfg)
+            return 200, {'message': '设置已保存', 'config': load_config()}
+        return 200, load_config()
+
+    def _rt_info(self):
+        return 200, {'name': 'jmcomic', 'label': 'JMComic', 'version': '2.0.0',
+                     'lang': 'python', 'description': '禁漫天堂搜索与漫画阅读'}
+
+    # ---- 分发 ----
+    def do_GET(self):
+        try:
+            p = self.path.split('?')[0]
+            q = self._q()
+            if p == "/__health":
+                return self._json(200, {"ok": True})
+            if p == "/info":
+                return self._json(*self._rt_info())
+            if p == "/search":
+                return self._json(*self._rt_search(q))
+            if p.startswith("/meta/"):
+                return self._json(*self._rt_meta(_tail('/meta/', p)))
+            if p.startswith("/album/"):
+                return self._json(*self._rt_album(_tail('/album/', p)))
+            if p.startswith("/chapter/"):
+                return self._json(*self._rt_chapter(_tail('/chapter/', p)))
+            if p.startswith("/download_zip/"):
+                r = self._rt_zip(_tail('/download_zip/', p))
+                if r:
+                    return self._json(*r)
+                return
+            if p == "/download/batch":
+                return self._json(*self._rt_batch({}, False))
+            if p == "/download/batch/stop":
+                return self._json(200, {'error': 'method not allowed'})
+            if p.startswith("/download/"):
+                return self._json(*self._rt_download_get(_tail('/download/', p)))
+            if p == "/download":
+                return self._json(*self._rt_download_get(q.get('aid', '')))
+            if p == "/library":
+                return self._json(*self._rt_library_get(q))
+            if p.startswith("/library/"):
+                return self._json(*self._rt_library_delete(_tail('/library/', p)))
+            if p.startswith("/cover/"):
+                r = self._rt_cover(_tail('/cover/', p))
+                if r:
+                    return self._json(*r)
+                return
+            if p.startswith("/image/"):
+                r = self._rt_image(_tail('/image/', p))
+                if r:
+                    return self._json(*r)
+                return
+            if p == "/config":
+                return self._json(*self._rt_config({}, False))
+            return self._json(404, {'error': 'not found'})
+        except Exception as e:
+            return self._json(500, {'error': str(e)})
 
     def do_POST(self):
-        p = self.path
         try:
-            data = json.loads(self._body() or b"{}")
-        except Exception:
-            data = {}
-        try:
-            if p == "/download" or p.startswith("/download/"):
-                aid = str(data.get("aid") or p[len("/download/"):].split("/")[0] or "")
-                if aid:
-                    return self._json(200, download_one(aid))
-                return self._json(400, {"error": "缺少 aid"})
+            p = self.path.split('?')[0]
+            try:
+                body = json.loads(self._body() or b'{}')
+            except Exception:
+                body = {}
             if p == "/download/batch":
-                # 旧前端: {mode, keyword} → 收集+批量下载
-                return self._json(200, batch_start(str(data.get("mode") or "keyword"),
-                                                    str(data.get("keyword") or "")))
+                return self._json(*self._rt_batch(body, True))
             if p == "/download/batch/stop":
-                return self._json(200, batch_stop())
+                return self._json(*self._rt_batch_stop())
+            if p.startswith("/download/"):
+                return self._json(*self._rt_download_post(_tail('/download/', p)))
+            if p == "/download":
+                return self._json(*self._rt_download_post(body.get('aid', '')))
             if p == "/config":
-                # 存配置(仅存储路径等, 简化: 持久化到 SharedData)
-                cfg = {"storage_paths": data.get("storage_paths") or [],
-                       "active_path": data.get("active_path") or ""}
-                try:
-                    _ns_set_cfg(cfg)
-                except Exception:
-                    pass
-                return self._json(200, cfg)
-            if p == "/library":
-                return self._json(200, add_library(str(data.get("aid") or ""),
-                                                   str(data.get("title") or ""),
-                                                   str(data.get("cover") or ""),
-                                                   data.get("tags") or []))
-            return self._json(404, {"error": "not found"})
+                return self._json(*self._rt_config(body, True))
+            return self._json(404, {'error': 'not found'})
         except Exception as e:
-            return self._json(500, {"error": str(e)})
+            return self._json(500, {'error': str(e)})
 
     def log_message(self, *a):
         pass
@@ -661,16 +1176,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     if PORT <= 0:
         raise SystemExit("RAINCOUGH_PORT 未设置")
-    _load()
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print("jmcomic ready on %d" % PORT, file=os.sys.stderr)
     srv.serve_forever()
-
-
-def _guess_mime(filename):
-    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    return {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-            "webp": "image/webp", "gif": "image/gif", "avif": "image/avif"}.get(ext, "image/jpeg")
 
 
 if __name__ == "__main__":
