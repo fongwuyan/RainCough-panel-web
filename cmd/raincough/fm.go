@@ -129,6 +129,10 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 		if b.Path != "" && b.NewName != "" {
 			b.Old, b.New = b.Path, b.NewName
 		}
+		if b.Old == "" || b.New == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "path/old 与 new_name/new 必填"})
+			return
+		}
 		oldAbs, err := resolveFM(b.Old)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
