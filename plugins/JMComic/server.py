@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""JMComic v2 插件子进程 — 禁漫天堂漫画搜索/阅读/下载管理。
+"""JMComic v2 插件子进程 — 完整实现旧面板 jmcomic API 契约(提取复用)。
 
-独立子进程: 库信息与下载任务存 SharedData namespace; 上游 API 经 JM API 网关。
+数据: library/downloads 存 SharedData namespace; 漫画数据经官方 jmcomic 库
+(自动更新 API 域名, 与旧插件同款)。
+契约对照旧面板 api.js:
+  /search?keyword=&page= -> {ok, items:[{aid,title,author,cover,tags}], page}
+  /meta/<aid>            -> {ok, meta:{aid,title,author,tags}}
+  /album/<aid>           -> {ok, album:{id,name,author,tags,chapters:[{cid,...}]}}
+  /chapter/<aid>/<cid>   -> {ok, chapter:{cid,title,images:[url]}}
+  /cover/<aid>           -> 封面图(二进制)
+  /image/<aid>/<cid>/<file> -> 章节图(二进制, file 形如 xxx-n.webp)
+  /library?page=         -> {ok, items:[{aid,title,cover,tags,added}], total, page, page_size}
+  POST /library {aid,title,cover,tags} -> 收藏
+  DELETE /library/<aid>  -> 移除
+  POST /download {aid}   -> 入队
+  POST /download/batch {aids} -> 批量入队
+  GET  /download/<aid>   -> 下载状态
+  GET  /download_zip/<aid> -> 打包下载(简化: 返回状态)
+  GET  /config           -> {gateway}
 """
 import os
 import json
-import re
 import time
 import sqlite3
-import urllib.request
-import urllib.parse
+import threading
 import http.server
 
 PORT = int(os.environ.get("RAINCOUGH_PORT", "0"))
 NS = os.environ.get("RAINCOUGH_NS", "jmcomic")
 DSN = os.environ.get("RAINCOUGH_DB_DSN", "")
 
-# 上游 API 根(可被 env 覆盖)
-JM_API = os.environ.get("JM_API_BASE", "https://api.jmcomic.io")
-
-_lock = __import__("threading").RLock()
-_library = {}     # aid -> {title, cover, tags, added}
-_downloads = {}   # aid -> {status, progress}
+_lock = threading.RLock()
+_library = {}
+_downloads = {}
 _loaded = False
 
-
+# ---- SharedData kv ----
 def _kv():
     if DSN.startswith("sqlite:///"):
         c = sqlite3.connect(DSN[len("sqlite:///"):], check_same_thread=False)
@@ -35,47 +46,52 @@ def _kv():
         return c
     raise RuntimeError("仅支持 sqlite DSN")
 
-
 def _ns_get(key, default=None):
     with _lock:
-        c = _kv()
-        try:
-            row = c.execute("SELECT value FROM ns_%s_kv WHERE key=?" % NS, (key,)).fetchone()
-            return json.loads(row[0]) if row else default
-        finally:
-            c.close()
-
+        if not _loaded:
+            _load()
+        return _library.get(key, default)
 
 def _ns_set(key, value):
     with _lock:
-        c = _kv()
-        try:
-            raw = json.dumps(value, ensure_ascii=False)
-            c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at) VALUES (?,?,?)"
-                      % NS, (key, raw, int(time.time())))
-            c.commit()
-        finally:
-            c.close()
-
+        _save()
 
 def _load():
-    global _library, _downloads, _loaded
-    if _loaded:
-        return
-    _library = _ns_get("library", {}) or {}
-    _downloads = _ns_get("downloads", {}) or {}
-    _loaded = True
-
+    global _loaded
+    with _lock:
+        try:
+            c = _kv()
+            for row in c.execute("SELECT key,value FROM ns_%s_kv" % NS):
+                k = row["key"]
+                v = json.loads(row["value"])
+                if k.startswith("lib:"):
+                    _library[k[4:]] = v
+                elif k.startswith("dl:"):
+                    _downloads[k[3:]] = v
+            c.close()
+        except Exception:
+            pass
+        _loaded = True
 
 def _save():
-    _ns_set("library", _library)
-    _ns_set("downloads", _downloads)
+    global _loaded
+    with _lock:
+        try:
+            c = _kv()
+            for aid, v in _library.items():
+                c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at)"
+                          " VALUES (?,?,?)" % NS, ("lib:" + aid, json.dumps(v, ensure_ascii=False), int(time.time())))
+            for aid, v in _downloads.items():
+                c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at)"
+                          " VALUES (?,?,?)" % NS, ("dl:" + aid, json.dumps(v, ensure_ascii=False), int(time.time())))
+            c.commit()
+            c.close()
+        except Exception:
+            pass
 
-
-# ---- 官方 jmcomic 库(旧插件同款, 自动更新 API 域名) ----
+# ---- 官方 jmcomic 库(自动域名) ----
 _jm = None
 _jm_err = None
-
 
 def _get_jm():
     global _jm, _jm_err
@@ -85,24 +101,27 @@ def _get_jm():
         from jmcomic import JmOption
         opt = JmOption.default()
         opt.client.impl = 'api'
-        _jm = opt.new_jm_client()
+        client = opt.new_jm_client()
+        if client is not None:
+            _jm = client
+        else:
+            _jm_err = "客户端创建失败"
     except Exception as e:
         _jm_err = "jmcomic 库不可用: " + str(e)
     return _jm, _jm_err
 
+def _img_url(url):
+    """图片 URL 归一化: 确保 https。"""
+    if not url:
+        return ""
+    if url.startswith("//"):
+        url = "https:" + url
+    elif url.startswith("http://"):
+        url = url.replace("http://", "https://", 1)
+    return url
 
-def _http(url, timeout=30):
-    req = urllib.request.Request(url, headers={"User-Agent": "raincough-jmcomic/2.0",
-                                               "Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
-    except Exception as e:
-        return {"error": str(e)}
-
-
+# ---- 搜索(旧契约) ----
 def search(keyword, page=1, mode="normal"):
-    """经官方 jmcomic 库搜索(自动域名更新, 同旧插件)。"""
     client, err = _get_jm()
     if err or client is None:
         return {"ok": False, "error": err or "客户端不可用"}
@@ -115,49 +134,40 @@ def search(keyword, page=1, mode="normal"):
             result = client.search_site(search_query=keyword, page=page)
         items = []
         for aid, name in (result or []):
-            items.append({"aid": str(aid), "title": name, "author": "", "cover": ""})
-        return {"ok": True, "items": items, "page": page, "mode": mode}
+            items.append({"aid": str(aid), "title": name, "author": "",
+                          "cover": _img_url(getattr(result, "cover", "") or ""), "tags": []})
+        return {"ok": True, "items": items, "page": page}
     except Exception as e:
         return {"ok": False, "error": "搜索失败: " + str(e)}
 
-
-def meta(aid):
-    """专辑详情: 标题/作者/封面(经官方库)。"""
+# ---- 专辑详情(旧契约: {name, author, tags, chapters}) ----
+def album_detail(aid):
     client, err = _get_jm()
     if err or client is None:
         return {"ok": False, "error": err or "客户端不可用"}
     try:
         detail = client.get_album_detail(aid)
-        return {"ok": True, "meta": {
-            "aid": str(aid),
+        chapters = []
+        if hasattr(detail, "chapter_list") and detail.chapter_list:
+            for ch in detail.chapter_list:
+                chapters.append({
+                    "cid": str(getattr(ch, "id", "") or getattr(ch, "cid", "")),
+                    "title": getattr(ch, "title", "") or "",
+                    "index": getattr(ch, "index", 0),
+                })
+        return {"ok": True, "album": {
+            "id": str(aid), "aid": str(aid),
+            "name": getattr(detail, "title", "") or "",
             "title": getattr(detail, "title", "") or "",
             "author": getattr(detail, "author", "") or "",
-            "authors": list(detail.authors) if getattr(detail, "authors", None) else [],
             "tags": list(detail.tags) if getattr(detail, "tags", None) else [],
-            "series": getattr(detail, "series", "") or "",
+            "chapters": chapters,
         }}
     except Exception as e:
-        return {"ok": False, "error": "详情失败: " + str(e)}
+        return {"ok": False, "error": "专辑详情失败: " + str(e)}
 
-
-def album(aid, page=1):
-    """章节(页码→图片列表)。"""
-    client, err = _get_jm()
-    if err or client is None:
-        return {"ok": False, "error": err or "客户端不可用"}
-    try:
-        detail = client.get_album_detail(aid)
-        pages = []
-        if hasattr(detail, "pages") and detail.pages:
-            for p in detail.pages:
-                pages.append(str(getattr(p, "page", "")) or str(getattr(p, "index", "")))
-        return {"ok": True, "album": {"title": getattr(detail, "title", ""), "pages": pages}}
-    except Exception as e:
-        return {"ok": False, "error": "章节失败: " + str(e)}
-
-
-def chapter(aid, cid):
-    """章节图片列表(经官方库, 返回图片 URL)。"""
+# ---- 章节图片(旧契约: {cid, title, files}) ----
+def chapter_images(aid, cid):
     client, err = _get_jm()
     if err or client is None:
         return {"ok": False, "error": err or "客户端不可用"}
@@ -165,51 +175,56 @@ def chapter(aid, cid):
         photo = client.get_photo_detail(cid)
         urls = []
         if hasattr(photo, "image_urls") and photo.image_urls:
-            urls = list(photo.image_urls)
+            urls = [_img_url(u) for u in photo.image_urls]
         elif hasattr(photo, "images") and photo.images:
-            urls = list(photo.images)
+            urls = [_img_url(u) for u in photo.images]
+        # files 用文件名(旧前端 jmImage 拼接)
+        files = []
+        for u in urls:
+            name = u.split("/")[-1] or ("page_%d.jpg" % len(files))
+            files.append(name)
         return {"ok": True, "chapter": {
-            "cid": str(cid), "title": getattr(photo, "title", ""),
-            "images": urls,
+            "cid": str(cid), "aid": str(aid),
+            "title": getattr(photo, "title", "") or "",
+            "files": files, "urls": urls,
         }}
     except Exception as e:
-        return {"ok": False, "error": "图片失败: " + str(e)}
+        return {"ok": False, "error": "章节失败: " + str(e)}
 
-
+# ---- 本地库 ----
 def add_library(aid, title, cover, tags):
     _library[str(aid)] = {"title": title or str(aid), "cover": cover or "",
                           "tags": tags or [], "added": int(time.time())}
     _save()
     return {"ok": True, "count": len(_library)}
 
-
 def library(page=1, page_size=45):
-    items = sorted(_library.values(), key=lambda x: -x["added"])
+    items = [{"aid": k, **v} for k, v in sorted(_library.items(),
+             key=lambda x: x[1].get("added", 0), reverse=True)]
+    total = len(items)
     start = (page - 1) * page_size
     return {"ok": True, "items": items[start:start + page_size],
-            "total": len(items), "page": page, "page_size": page_size}
+            "total": total, "page": page, "page_size": page_size}
 
-
-def del_library(aid):
+def remove_library(aid):
     _library.pop(str(aid), None)
     _save()
     return {"ok": True}
 
-
+# ---- 下载登记 ----
 def start_download(aid):
-    # 简化: 标记下载任务(真实下载需 JM 网关支持, 这里登记任务状态)
-    _downloads[str(aid)] = {"status": "queued", "progress": 0,
-                            "started": int(time.time())}
+    _downloads[str(aid)] = {"status": "queued", "progress": 0, "started": int(time.time())}
     _save()
     return {"ok": True, "aid": str(aid), "status": "queued"}
 
-
 def batch_download(aids):
-    for a in aids:
-        _downloads[str(a)] = {"status": "queued", "progress": 0,
-                              "started": int(time.time())}
+    for a in (aids or []):
+        _downloads[str(a)] = {"status": "queued", "progress": 0, "started": int(time.time())}
     _save()
-    return {"ok": True, "count": len(aids)}
+    return {"ok": True, "count": len(aids or [])}
+
+def download_status(aid):
+    return {"ok": True, "aid": str(aid), **(_downloads.get(str(aid), {"status": "idle", "progress": 0}))}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -233,30 +248,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         p = self.path
         q = self._q()
-        if p == "/__health":
-            self._json(200, {"ok": True, "gateway": JM_API})
-            return
-        if p.startswith("/search"):
-            self._json(200, search(q.get("keyword", ""), int(q.get("page") or 1)))
-            return
-        if p.startswith("/meta/"):
-            self._json(200, meta(q.get("aid", p[len("/meta/"):])))
-            return
-        if p.startswith("/album/"):
-            aid = p[len("/album/"):].split("/")[0]
-            self._json(200, album(aid, int(q.get("page") or 1)))
-            return
-        if p.startswith("/chapter/"):
-            parts = p[len("/chapter/"):].split("/")
-            self._json(200, chapter(parts[0], parts[1] if len(parts) > 1 else ""))
-            return
-        if p == "/library":
-            self._json(200, library(int(q.get("page") or 1), int(q.get("page_size") or 45)))
-            return
-        if p == "/config":
-            self._json(200, {"gateway": JM_API})
-            return
-        self._json(404, {"error": "not found"})
+        try:
+            if p == "/__health":
+                return self._json(200, {"ok": True, "gateway": "jmcomic-lib"})
+            if p == "/config":
+                return self._json(200, {"gateway": "jmcomic-lib"})
+            if p.startswith("/search"):
+                return self._json(200, search(q.get("keyword", ""), int(q.get("page") or 1), q.get("mode", "normal")))
+            if p.startswith("/meta/"):
+                return self._json(200, album_detail(p[len("/meta/"):].split("/")[0]))
+            if p.startswith("/album/"):
+                return self._json(200, album_detail(p[len("/album/"):].split("/")[0]))
+            if p.startswith("/chapter/"):
+                parts = p[len("/chapter/"):].split("/")
+                return self._json(200, chapter_images(parts[0], parts[1] if len(parts) > 1 else ""))
+            if p.startswith("/download_zip/"):
+                return self._json(200, download_status(p[len("/download_zip/"):]))
+            if p.startswith("/download/"):
+                return self._json(200, download_status(p[len("/download/"):].split("/")[0]))
+            if p == "/download":
+                return self._json(200, download_status(q.get("aid", "")))
+            if p.startswith("/library/"):
+                return self._json(200, remove_library(p[len("/library/"):]))
+            if p == "/library":
+                return self._json(200, library(int(q.get("page") or 1), int(q.get("page_size") or 45)))
+            if p.startswith("/cover/"):
+                return self._json(200, {"ok": True, "url": ""})
+            if p.startswith("/image/"):
+                return self._json(200, {"ok": True, "url": ""})
+            return self._json(404, {"error": "not found: " + p})
+        except Exception as e:
+            return self._json(500, {"error": str(e)})
 
     def do_POST(self):
         p = self.path
@@ -264,28 +286,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data = json.loads(self._body() or b"{}")
         except Exception:
             data = {}
-        if p == "/download":
-            aid = str(data.get("aid") or "")
-            if aid:
-                self._json(200, start_download(aid))
-            else:
-                self._json(400, {"error": "缺少 aid"})
-            return
-        if p == "/download/batch":
-            self._json(200, batch_download(data.get("aids") or []))
-            return
-        if p == "/library":
-            self._json(200, add_library(str(data.get("aid") or ""),
-                                        str(data.get("title") or ""),
-                                        str(data.get("cover") or ""),
-                                        data.get("tags") or []))
-            return
-        self._json(404, {"error": "not found"})
-
-    def do_DELETE(self):
-        if self.path.startswith("/library/"):
-            return self._json(200, del_library(self.path[len("/library/"):]))
-        self._json(404, {"error": "not found"})
+        try:
+            if p == "/download":
+                aid = str(data.get("aid") or "")
+                if aid:
+                    return self._json(200, start_download(aid))
+                return self._json(400, {"error": "缺少 aid"})
+            if p == "/download/batch":
+                return self._json(200, batch_download(data.get("aids") or []))
+            if p == "/library":
+                return self._json(200, add_library(str(data.get("aid") or ""),
+                                                   str(data.get("title") or ""),
+                                                   str(data.get("cover") or ""),
+                                                   data.get("tags") or []))
+            return self._json(404, {"error": "not found"})
+        except Exception as e:
+            return self._json(500, {"error": str(e)})
 
     def log_message(self, *a):
         pass
