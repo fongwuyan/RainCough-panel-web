@@ -32,7 +32,7 @@ const name = computed(() => String(route.params.name || ''))
 const mode = ref('loading')   // loading | plugin(独立前端) | map(内置回退) | generic
 const perr = ref('')
 let mountFn = null            // 卸载函数(插件 mount 返回)
-let mountEl = null
+const mountEl = ref(null)     // 模板 ref(必须 ref() 声明, script setup 模板 ref 才会绑定)
 
 const isMapFallback = computed(() => mode.value === 'map')
 const comp = computed(() => MAP[name.value.toLowerCase()] || GenericPlugin)
@@ -60,10 +60,10 @@ async function loadPluginFrontend() {
     if (reg) {
       mode.value = 'plugin'
       await nextTick()
-      if (mountEl) {
+      if (mountEl.value) {
         // ctx 仅提供环境信息与可选请求器; Vue 已内联在插件产物中, 不注入
         try {
-          mountFn = reg.mount(mountEl, {
+          mountFn = reg.mount(mountEl.value, {
             plugin: { name: name.value },
             api: {
               get: (p) => fetch('/api/plugins/' + name.value + p).then((r) => r.json()),
