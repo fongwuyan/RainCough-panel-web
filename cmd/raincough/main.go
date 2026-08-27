@@ -377,6 +377,8 @@ func (s *server) servePluginAsset(w http.ResponseWriter, r *http.Request, name, 
 	if ct := mime.TypeByExtension(ext); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
+	// 插件资产频繁更新且无 hash: 禁缓存, 避免浏览器服用旧损坏产物
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	http.ServeFile(w, r, filepath.Join(dir, clean))
 }
 
