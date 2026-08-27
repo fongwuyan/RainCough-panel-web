@@ -207,6 +207,9 @@ def album_detail(aid):
             "title": getattr(detail, "title", "") or getattr(detail, "name", "") or "",
             "author": getattr(detail, "author", "") or "",
             "tags": list(detail.tags) if getattr(detail, "tags", None) else [],
+            "likes": getattr(detail, "likes", 0) or 0,
+            "views": getattr(detail, "views", 0) or 0,
+            "description": getattr(detail, "description", "") or "",
             "chapters": chapters,
             "count": cnt,
         }}
