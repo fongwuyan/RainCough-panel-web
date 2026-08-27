@@ -166,7 +166,11 @@ def album_detail(aid):
     except Exception as e:
         return {"ok": False, "error": "专辑详情失败: " + str(e)}
 
-# ---- 章节图片(旧契约: {cid, title, files}) ----
+# 章节图片 URL 缓存(供 image 重定向 + 前端 direct_url)
+_img_cache = {}   # (aid,cid) -> [urls]
+_img_cache_lock = threading.Lock()
+
+
 def chapter_images(aid, cid):
     client, err = _get_jm()
     if err or client is None:
@@ -178,7 +182,8 @@ def chapter_images(aid, cid):
             urls = [_img_url(u) for u in photo.image_urls]
         elif hasattr(photo, "images") and photo.images:
             urls = [_img_url(u) for u in photo.images]
-        # files 用文件名(旧前端 jmImage 拼接)
+        with _img_cache_lock:
+            _img_cache[(str(aid), str(cid))] = urls
         files = []
         for u in urls:
             name = u.split("/")[-1] or ("page_%d.jpg" % len(files))
@@ -187,6 +192,7 @@ def chapter_images(aid, cid):
             "cid": str(cid), "aid": str(aid),
             "title": getattr(photo, "title", "") or "",
             "files": files, "urls": urls,
+            "direct_urls": urls,
         }}
     except Exception as e:
         return {"ok": False, "error": "章节失败: " + str(e)}
@@ -275,7 +281,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p.startswith("/cover/"):
                 return self._json(200, {"ok": True, "url": ""})
             if p.startswith("/image/"):
-                return self._json(200, {"ok": True, "url": ""})
+                # /image/<aid>/<cid>/<file> → 302 到官方 CDN 图
+                parts = p[len("/image/"):].split("/")
+                if len(parts) >= 3:
+                    aid, cid, fname = parts[0], parts[1], parts[2]
+                    with _img_cache_lock:
+                        urls = _img_cache.get((aid, cid), [])
+                    for u in urls:
+                        if u.split("/")[-1] == fname:
+                            self.send_response(302)
+                            self.send_header("Location", u)
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                            return
+                    # 未缓存: 即时拉一张
+                    try:
+                        ch = chapter_images(aid, cid)
+                        urls = (ch.get("chapter") or {}).get("urls", [])
+                        for u in urls:
+                            if u.split("/")[-1] == fname:
+                                self.send_response(302)
+                                self.send_header("Location", u)
+                                self.send_header("Content-Length", "0")
+                                self.end_headers()
+                                return
+                    except Exception:
+                        pass
+                return self._json(404, {"error": "image not found"})
             return self._json(404, {"error": "not found: " + p})
         except Exception as e:
             return self._json(500, {"error": str(e)})
