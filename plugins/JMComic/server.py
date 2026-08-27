@@ -169,8 +169,12 @@ def album_detail(aid):
                     title = item.get("title", "")
                 if cid:
                     chapters.append({"cid": cid, "title": title, "index": idx})
-        if not chapters and getattr(detail, "count", 0):
-            # 兜底: 用 album_id 作为唯一章节(cid 即 aid, 后端 chapter 解车号)
+        # count 是方法: 转为实际数
+        try:
+            cnt = int(getattr(detail, "count", None)()) if callable(getattr(detail, "count", None)) else int(getattr(detail, "count", 0) or 0)
+        except Exception:
+            cnt = 0
+        if not chapters and cnt:
             chapters = [{"cid": str(aid), "title": getattr(detail, "name", "") or "", "index": 1}]
         return {"ok": True, "album": {
             "id": str(aid), "aid": str(aid),
@@ -179,7 +183,7 @@ def album_detail(aid):
             "author": getattr(detail, "author", "") or "",
             "tags": list(detail.tags) if getattr(detail, "tags", None) else [],
             "chapters": chapters,
-            "count": getattr(detail, "count", 0),
+            "count": cnt,
         }}
     except Exception as e:
         return {"ok": False, "error": "专辑详情失败: " + str(e)}
