@@ -1,108 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""touchgal v2 插件子进程 — Galgame 资源搜索。
+"""touchgal 插件子进程 — 完整复用旧插件后端(plugin.py 全量迁移)。
 
-注意: TouchGal 上行 API 结构随上游变化, 这里封装可配置的搜索引擎端点;
-默认使用 `curl_cffi` 若可用(上游要求浏览器指纹), 否则回退 urllib。
+上游: touchgal.ink 官方 API + animetrace 识图(与旧插件一致, curl_cffi impersonate)
+路由契约与旧面板 api.js 完全一致(search/resource/recognize/recognize-dual)。
 """
-import os
 import json
-import time
-import sqlite3
-import urllib.request
-import urllib.parse
+import concurrent.futures
 import http.server
+from curl_cffi import requests as cr
 
 PORT = int(os.environ.get("RAINCOUGH_PORT", "0"))
-NS = os.environ.get("RAINCOUGH_NS", "touchgal")
-DSN = os.environ.get("RAINCOUGH_DB_DSN", "")
+PLUGIN_DIR = os.environ.get("RAINCOUGH_PLUGIN_DIR", os.getcwd())
 
-# 上游搜索端点(与旧版 touchgal 插件一致, 局域网面板代理时通常经反代)
-SEARCH_URL = os.environ.get("TOUCHGAL_SEARCH_URL",
-                            "https://www.touchgal.io/api/search")
-_lock = __import__("threading").RLock()
-_history = []
-_loaded = False
+TOUCHGAL_API = 'https://www.touchgal.ink/api'
+ANIMETRACE_API = 'https://api.animetrace.com/v1/search'
 
-try:
-    from curl_cffi import requests as crequests
-    _HAS_CURL = True
-except ImportError:
-    _HAS_CURL = False
-
-
-def _kv():
-    if DSN.startswith("sqlite:///"):
-        c = sqlite3.connect(DSN[len("sqlite:///"):], check_same_thread=False)
-        c.row_factory = sqlite3.Row
-        c.execute("CREATE TABLE IF NOT EXISTS ns_%s_kv (key TEXT PRIMARY KEY,"
-                  " value TEXT NOT NULL, updated_at INTEGER)" % NS)
-        return c
-    raise RuntimeError("仅支持 sqlite DSN")
+HEADERS = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/plain, */*',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+    'X-Requested-With': 'kun-fetch',
+    'Origin': 'https://www.touchgal.ink',
+    'Referer': 'https://www.touchgal.ink/'
+}
 
 
-def _ns_get(key, default=None):
-    with _lock:
-        c = _kv()
-        try:
-            row = c.execute("SELECT value FROM ns_%s_kv WHERE key=?" % NS, (key,)).fetchone()
-            return json.loads(row[0]) if row else default
-        finally:
-            c.close()
-
-
-def _ns_set(key, value):
-    with _lock:
-        c = _kv()
-        try:
-            raw = json.dumps(value, ensure_ascii=False)
-            c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at) VALUES (?,?,?)"
-                      % NS, (key, raw, int(time.time())))
-            c.commit()
-        finally:
-            c.close()
-
-
-def search(keyword, limit=10):
-    params = {"keyword": keyword, "limit": limit}
-    query = urllib.parse.urlencode(params)
-    url = SEARCH_URL + "?" + query
-    try:
-        if _HAS_CURL:
-            r = crequests.get(url, timeout=30, impersonate="chrome")
-            data = r.json()
-        else:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read())
-    except Exception as e:
-        return {"ok": False, "error": str(e), "engine": "curl_cffi" if _HAS_CURL else "urllib"}
-    items = data.get("data") or data.get("items") or data.get("results") or []
-    out = []
-    for it in items[:limit]:
-        out.append({
-            "title": it.get("title") or it.get("name") or "",
-            "patch_id": str(it.get("patch_id") or it.get("id") or ""),
-            "author": it.get("author") or "",
-            "desc": it.get("description") or it.get("intro") or "",
-            "url": it.get("url") or "",
-        })
-    if out:
-        history_entry = {"keyword": keyword, "time": int(time.time()), "count": len(out)}
-        _history.insert(0, history_entry)
-        del _history[100:]
-        _ns_set("history", _history)
-    return {"ok": True, "items": out, "engine": "curl_cffi" if _HAS_CURL else "urllib"}
-
-
-def resource(patch_id):
-    # 资源详情(依赖上游结构, 返回 patch id 标识, 由前端拼接下载链接)
-    return {"ok": True, "patch_id": patch_id,
-            "detail_url": SEARCH_URL.replace("/api/search", "/patch/" + str(patch_id))}
-
-
+# ---- HTTP 分发(替代 Flask/Plugin 壳, 逻辑与路由与旧插件一致) ----
 class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "touchgal/2.0"
+
     def _json(self, code, obj):
         raw = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
@@ -115,28 +43,145 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ln = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(ln) if ln else b""
 
+    def _q(self):
+        from urllib.parse import urlparse, parse_qs
+        q = parse_qs(urlparse(self.path).query)
+        return {k: v[0] for k, v in q.items()}
+
+    # ---- 路由: POST /search ----
+    def _rt_search(self, body):
+        try:
+            data = body or {}
+            keyword = data.get('keyword', '')
+            limit = data.get('limit', 15)
+            nsfw = data.get('nsfw', False)
+
+            payload = {
+                'queryString': json.dumps([{'type': 'keyword', 'name': keyword}]),
+                'limit': limit,
+                'page': 1,
+                'selectedType': 'all',
+                'selectedLanguage': 'all',
+                'selectedPlatform': 'all',
+                'sortField': 'resource_update_time',
+                'sortOrder': 'desc',
+                'selectedYears': ['all'],
+                'selectedMonths': ['all'],
+                'minRatingCount': 0,
+                'searchOption': {
+                    'searchInIntroduction': True,
+                    'searchInAlias': True,
+                    'searchInTag': True
+                }
+            }
+
+            cookie = 'kun-patch-setting-store|state|data|kunNsfwEnable=all' if nsfw else 'kun-patch-setting-store|state|data|kunNsfwEnable=sfw'
+            req_headers = {**HEADERS, 'Cookie': cookie}
+
+            r = cr.post(f'{TOUCHGAL_API}/search', json=payload, headers=req_headers, impersonate='chrome120', timeout=30)
+            return 200, r.json()
+        except Exception as e:
+            return 500, {'error': str(e)}
+
+    # ---- 路由: GET /resource ----
+    def _rt_resource(self, q):
+        try:
+            patch_id = q.get('patchId', '')
+            r = cr.get(f'{TOUCHGAL_API}/patch/resource?patchId={patch_id}', headers=HEADERS, impersonate='chrome120', timeout=30)
+            data = r.json()
+            normalized = []
+            for item in data if isinstance(data, list) else []:
+                links = item.get('links', [])
+                first_link = links[0] if links else {}
+                platform_list = item.get('platform', [])
+                if isinstance(platform_list, list):
+                    platform_list = ', '.join(platform_list)
+                language_list = item.get('language', [])
+                if isinstance(language_list, list):
+                    language_list = ', '.join(language_list)
+                normalized.append({
+                    'name': item.get('name', '未知资源'),
+                    'platform': platform_list if platform_list else '未知平台',
+                    'language': language_list if language_list else '未知语言',
+                    'size': first_link.get('size', item.get('size', '未知大小')),
+                    'content': first_link.get('content', ''),
+                    'code': first_link.get('code', '无'),
+                    'password': first_link.get('password', '无'),
+                    'note': item.get('note', '无备注'),
+                })
+            return 200, normalized
+        except Exception as e:
+            return 500, {'error': str(e)}
+
+    # ---- 路由: POST /recognize ----
+    def _rt_recognize(self, body):
+        try:
+            data = body or {}
+            image_url = data.get('imageUrl', '')
+            model = data.get('model', 'pre_stable')
+            params = {'url': image_url, 'is_multi': '1', 'model': model, 'ai_detect': '0'}
+            r = cr.post(ANIMETRACE_API, data=params, impersonate='chrome120', timeout=30)
+            return 200, r.json()
+        except Exception as e:
+            return 500, {'error': str(e)}
+
+    # ---- 路由: POST /recognize-dual ----
+    def _rt_recognize_dual(self, body):
+        try:
+            data = body or {}
+            image_url = data.get('imageUrl', '')
+
+            def do_recognize(model):
+                params = {'url': image_url, 'is_multi': '1', 'model': model, 'ai_detect': '0'}
+                r = cr.post(ANIMETRACE_API, data=params, impersonate='chrome120', timeout=30)
+                return r.json()
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                anime_future = executor.submit(do_recognize, 'pre_stable')
+                gal_future = executor.submit(do_recognize, 'full_game_model_kira')
+                anime_result = anime_future.result()
+                gal_result = gal_future.result()
+            return 200, {'anime': anime_result, 'gal': gal_result}
+        except Exception as e:
+            return 500, {'error': str(e)}
+
+    # ---- 路由: GET /info ----
+    def _rt_info(self):
+        return 200, {'name': 'touchgal', 'label': 'TouchGal 游戏查找', 'version': '2.0.0',
+                     'lang': 'python',
+                     'description': '搜索 Galgame 游戏资源、获取下载链接、图片识别'}
+
+    # ---- 分发 ----
     def do_GET(self):
-        p = self.path
-        if p == "/__health":
-            self._json(200, {"ok": True, "engine": "curl_cffi" if _HAS_CURL else "urllib"})
-            return
-        if p.startswith("/resource"):
-            from urllib.parse import urlparse, parse_qs
-            pid = parse_qs(urlparse(p).query).get("patchId", [""])[0]
-            self._json(200, resource(pid))
-            return
-        self._json(404, {"error": "not found"})
+        try:
+            p = self.path.split('?')[0]
+            q = self._q()
+            if p == "/__health":
+                return self._json(200, {"ok": True})
+            if p == "/info":
+                return self._json(*self._rt_info())
+            if p == "/resource":
+                return self._json(*self._rt_resource(q))
+            return self._json(404, {'error': 'not found'})
+        except Exception as e:
+            return self._json(500, {'error': str(e)})
 
     def do_POST(self):
-        if self.path == "/search":
+        try:
+            p = self.path.split('?')[0]
             try:
-                data = json.loads(self._body() or b"{}")
+                body = json.loads(self._body() or b'{}')
             except Exception:
-                data = {}
-            self._json(200, search(str(data.get("keyword") or ""),
-                                   int(data.get("limit") or 10)))
-            return
-        self._json(404, {"error": "not found"})
+                body = {}
+            if p == "/search":
+                return self._json(*self._rt_search(body))
+            if p == "/recognize":
+                return self._json(*self._rt_recognize(body))
+            if p == "/recognize-dual":
+                return self._json(*self._rt_recognize_dual(body))
+            return self._json(404, {'error': 'not found'})
+        except Exception as e:
+            return self._json(500, {'error': str(e)})
 
     def log_message(self, *a):
         pass
@@ -145,15 +190,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     if PORT <= 0:
         raise SystemExit("RAINCOUGH_PORT 未设置")
-    global _history, _loaded
-    try:
-        _history = _ns_get("history", []) or []
-    except Exception:
-        _history = []
-    _loaded = True
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print("touchgal ready on %d engine=%s" % (
-        PORT, "curl_cffi" if _HAS_CURL else "urllib"), file=os.sys.stderr)
+    print("touchgal ready on %d" % PORT, file=os.sys.stderr)
     srv.serve_forever()
 
 

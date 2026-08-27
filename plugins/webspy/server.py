@@ -1,158 +1,146 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""webspy v2 插件子进程 — 独立运行, 数据经 SharedData namespace。
+"""webspy 插件子进程 — 完整复用旧插件后端(plugin.py 全量迁移)。
 
-功能: 网页搜索 / URL 检测 / RSS 管理 / 正文提取。
+数据: 插件目录下 data/feeds.json 磁盘 JSON(与旧插件一致)
+功能: 搜索(Bing)/链接检测/RSS 管理/正文提取, 内置 OCR 与图像去重工具(保留原逻辑)。
+路由契约与旧面板一致(search/urlcheck/rss/readability/info)。
 """
 import os
+import io
 import re
 import json
 import time
-import sqlite3
-import urllib.request
-import urllib.parse
-import xml.etree.ElementTree as ET
+import shutil
+import hashlib
+import threading
+from datetime import datetime
+import requests
 import http.server
 
+
 PORT = int(os.environ.get("RAINCOUGH_PORT", "0"))
-NS = os.environ.get("RAINCOUGH_NS", "webspy")
-DSN = os.environ.get("RAINCOUGH_DB_DSN", "")
+PLUGIN_DIR = os.environ.get("RAINCOUGH_PLUGIN_DIR", os.getcwd())
+PLUGIN = 'toolbox'
+PLUGIN_ROOT = PLUGIN_DIR
+DATA_DIR = os.path.join(PLUGIN_DIR, 'data')
+FEEDS_FILE = os.path.join(DATA_DIR, 'feeds.json')
 
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
-_lock = __import__("threading").RLock()
-_feeds = {}
-_loaded = False
+OCR_MODEL_DIR = '/opt/touchgal/models/rapidocr_models'
 
+_ocr_engine = None
+_ocr_lock = threading.Lock()
 
-# ---------- 数据层 ----------
-
-def _kv():
-    if DSN.startswith("sqlite:///"):
-        c = sqlite3.connect(DSN[len("sqlite:///"):], check_same_thread=False)
-        c.row_factory = sqlite3.Row
-        return c
-    raise RuntimeError("仅支持 sqlite DSN: " + DSN)
+USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/126.0 Safari/537.36')
 
 
-def _ns_get(key, default=None):
-    with _lock:
-        c = _kv()
-        try:
-            c.execute("CREATE TABLE IF NOT EXISTS ns_%s_kv (key TEXT PRIMARY KEY,"
-                      " value TEXT NOT NULL, updated_at INTEGER)" % NS)
-            row = c.execute("SELECT value FROM ns_%s_kv WHERE key=?" % NS, (key,)).fetchone()
-            return json.loads(row[0]) if row else default
-        finally:
-            c.close()
+def _get_ocr():
+    global _ocr_engine
+    if _ocr_engine is None:
+        with _ocr_lock:
+            if _ocr_engine is None:
+                from rapidocr import RapidOCR
+                from rapidocr.utils.typings import OCRVersion, ModelType
+                params = {
+                    'Global.model_root_dir': OCR_MODEL_DIR,
+                    'Det.ocr_version': OCRVersion.PPOCRV5,
+                    'Det.model_type': ModelType.SERVER,
+                    'Rec.ocr_version': OCRVersion.PPOCRV5,
+                    'Rec.model_type': ModelType.SERVER,
+                    'Cls.ocr_version': OCRVersion.PPOCRV5,
+                    'Cls.model_type': ModelType.MOBILE,
+                }
+                _ocr_engine = RapidOCR(params=params)
+    return _ocr_engine
 
 
-def _ns_set(key, value):
-    with _lock:
-        c = _kv()
-        try:
-            c.execute("CREATE TABLE IF NOT EXISTS ns_%s_kv (key TEXT PRIMARY KEY,"
-                      " value TEXT NOT NULL, updated_at INTEGER)" % NS)
-            raw = json.dumps(value, ensure_ascii=False)
-            c.execute("INSERT OR REPLACE INTO ns_%s_kv (key,value,updated_at) VALUES (?,?,?)"
-                      % NS, (key, raw, int(time.time())))
-            c.commit()
-        finally:
-            c.close()
+def _dhash_from_bytes(data, size=16):
+    from PIL import Image
+    import numpy as np
+    img = Image.open(io.BytesIO(data)).convert('L').resize((size + 1, size), Image.BILINEAR)
+    arr = np.asarray(img, dtype=np.int16)
+    diff = arr[:, 1:] > arr[:, :-1]
+    bits = diff.flatten()
+    h = 0
+    for b in bits[:64]:
+        h = (h << 1) | int(b)
+    return h
 
 
-# ---------- 工具 ----------
-
-def http_get(url, timeout=20, as_bytes=False):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read()
-        if as_bytes:
-            return raw
-        for enc in ("utf-8", "gbk", "latin-1"):
-            try:
-                return raw.decode(enc)
-            except UnicodeDecodeError:
-                continue
-        return raw.decode("utf-8", "replace")
+def _hamming(a, b):
+    return (a ^ b).bit_count()  # 内置 C 实现
 
 
-def strip_html(html):
-    text = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", html, flags=re.I)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
-
-# ---------- 端点实现 ----------
-
-def do_search(q, limit=8):
+def _load_feeds():
+    if not os.path.isfile(FEEDS_FILE):
+        return []
     try:
-        url = "https://www.baidu.com/s?wd=" + urllib.parse.quote(q)
-        html = http_get(url, timeout=15)
+        with open(FEEDS_FILE, encoding='utf-8') as f:
+            return json.load(f)
     except Exception:
         return []
-    # 简单提取 baidu 结果标题+链接(生产应换真正的解析)
+
+
+def _save_feeds(feeds):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(FEEDS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(feeds, f, ensure_ascii=False, indent=2)
+
+
+def _http_get(url, timeout=20):
+    resp = requests.get(url, headers={'User-Agent': USER_AGENT},
+                        timeout=timeout, verify=False)
+    resp.raise_for_status()
+    return resp
+
+
+def _parse_bing(q, limit=10):
+    from urllib.parse import quote
+    url = f'https://www.bing.com/search?q={quote(q)}&count={limit}'
+    try:
+        resp = _http_get(url)
+    except Exception as e:
+        return {'ok': False, 'error': f'搜索失败: {e}'}
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(resp.text, 'html.parser')
     results = []
-    for m in re.finditer(r'<h3[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>', html):
-        link, title = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
-        if link and title:
-            results.append({"title": title, "url": link})
+    for li in soup.select('li.b_algo'):
+        a = li.select_one('h2 a')
+        p = li.select_one('.b_caption p, p')
+        if not a or not a.get('href'):
+            continue
+        results.append({
+            'title': a.get_text(strip=True),
+            'url': a['href'],
+            'snippet': p.get_text(strip=True) if p else '',
+        })
         if len(results) >= limit:
             break
-    return results
+    return {'ok': True, 'results': results}
 
 
-def do_urlcheck(url):
+def _fetch_feed(url, timeout=20):
+    import feedparser
     try:
-        r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=15)
-        code = r.getcode()
-        return {"url": url, "ok": code < 400, "code": code}
-    except urllib.error.HTTPError as e:
-        return {"url": url, "ok": e.code < 400, "code": e.code}
+        resp = _http_get(url, timeout=timeout)
+        return feedparser.parse(resp.content)
     except Exception as e:
-        return {"url": url, "ok": False, "code": -1, "error": str(e)}
+        return {'bozo': 1, 'bozo_exception': str(e), 'entries': [],
+                'feed': {'title': url}}
 
 
-def do_fetch_feed(feed_url, timeout=20):
-    try:
-        raw = http_get(feed_url, timeout=timeout, as_bytes=True)
-    except Exception as e:
-        return {"url": feed_url, "ok": False, "error": str(e)}
-    try:
-        root = ET.fromstring(raw)
-    except Exception:
-        try:
-            root = ET.fromstring(raw.decode("utf-8", "replace"))
-        except Exception as e:
-            return {"url": feed_url, "ok": False, "error": "XML 解析失败: " + str(e)}
-    items = []
-    for item in root.iter("item"):
-        title = item.findtext("title") or ""
-        link = item.findtext("link") or ""
-        desc = strip_html(item.findtext("description") or "")[:300]
-        items.append({"title": title, "url": link, "desc": desc})
-        if len(items) >= 30:
-            break
-    return {"url": feed_url, "ok": True, "items": items}
+def _tail(prefix, path):
+    idx = path.find(prefix)
+    if idx < 0:
+        return ''
+    return path[idx + len(prefix):].lstrip('/')
 
 
-def do_readability(url, timeout=20):
-    try:
-        html = http_get(url, timeout=timeout)
-    except Exception as e:
-        return {"url": url, "ok": False, "error": str(e)}
-    title = ""
-    mt = re.search(r"<title[^>]*>([\s\S]*?)</title>", html, re.I)
-    if mt:
-        title = strip_html(mt.group(1))
-    text = strip_html(html)
-    # 取主体: 简单启发式取最常见段落
-    return {"url": url, "ok": True, "title": title[:200], "text": text[:5000]}
-
-
-# ---------- HTTP ----------
-
+# ---- HTTP 分发(替代 Flask/Plugin 壳, 逻辑与路由与旧插件一致) ----
 class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "webspy/2.0"
+
     def _json(self, code, obj):
         raw = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
@@ -165,57 +153,176 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ln = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(ln) if ln else b""
 
+    def _q(self):
+        from urllib.parse import urlparse, parse_qs
+        q = parse_qs(urlparse(self.path).query)
+        return {k: v[0] for k, v in q.items()}
+
+    # ---- 路由: GET /search ----
+    def _rt_search(self, q):
+        query = (q.get('q') or '').strip()
+        if not query:
+            return 400, {'ok': False, 'error': '搜索关键词不能为空'}
+        try:
+            limit = int(q.get('limit') or 10)
+        except ValueError:
+            limit = 10
+        limit = max(1, min(limit, 20))
+        return 200, _parse_bing(query, limit)
+
+    # ---- 路由: POST /urlcheck ----
+    def _rt_urlcheck(self, body):
+        data = body or {}
+        urls = [u for u in (data.get('urls') or []) if isinstance(u, str) and u.strip()]
+        if not urls:
+            return 400, {'ok': False, 'error': '请提供 URL 列表'}
+        results = []
+        for url in urls[:20]:
+            started = time.time()
+            entry = {'url': url}
+            try:
+                r = requests.get(url, headers={'User-Agent': USER_AGENT},
+                                 timeout=15, allow_redirects=True, verify=False)
+                entry['status'] = r.status_code
+                entry['ok'] = 200 <= r.status_code < 400
+                entry['ms'] = round((time.time() - started) * 1000)
+                entry['final_url'] = r.url
+                entry['size'] = len(r.content)
+            except Exception as e:
+                entry['ok'] = False
+                entry['status'] = 0
+                entry['ms'] = round((time.time() - started) * 1000)
+                entry['error'] = str(e)[:150]
+            results.append(entry)
+        return 200, {'ok': True, 'results': results}
+
+    # ---- 路由: GET /rss/feeds ----
+    def _rt_rss_list(self):
+        feeds = _load_feeds()
+        for f in feeds:
+            f['last_fetched'] = f.get('last_fetched')
+        return 200, {'ok': True, 'feeds': feeds}
+
+    # ---- 路由: POST /rss/feeds ----
+    def _rt_rss_add(self, body):
+        data = body or {}
+        url = str(data.get('url', '')).strip()
+        name = str(data.get('name', '')).strip()
+        if not url:
+            return 400, {'ok': False, 'error': 'RSS 地址不能为空'}
+        parsed = _fetch_feed(url)
+        if parsed.bozo and not parsed.entries:
+            return 400, {'ok': False, 'error': '无法解析该 RSS 地址'}
+        title = (name or parsed.feed.get('title') or url)[:120]
+        feeds = _load_feeds()
+        for f in feeds:
+            if f['url'] == url:
+                return 400, {'ok': False, 'error': '该订阅源已存在'}
+        feeds.append({'url': url, 'name': title, 'added': int(time.time())})
+        _save_feeds(feeds)
+        return 200, {'ok': True, 'feeds': feeds}
+
+    # ---- 路由: POST /rss/feeds/delete ----
+    def _rt_rss_del(self, body):
+        data = body or {}
+        idx = data.get('idx')
+        feeds = _load_feeds()
+        if idx is None or not isinstance(idx, int) or idx < 0 or idx >= len(feeds):
+            return 404, {'ok': False, 'error': '订阅源不存在'}
+        feeds.pop(idx)
+        _save_feeds(feeds)
+        return 200, {'ok': True, 'feeds': feeds}
+
+    # ---- 路由: POST /rss/fetch ----
+    def _rt_rss_fetch(self, body):
+        data = body or {}
+        url = str(data.get('url', '')).strip()
+        limit = 20
+        if not url:
+            return 400, {'ok': False, 'error': 'RSS 地址不能为空'}
+        parsed = _fetch_feed(url)
+        if parsed.bozo and not parsed.entries:
+            return 400, {'ok': False, 'error': '解析失败或源不可达'}
+        entries = []
+        for e in parsed.entries[:limit]:
+            entries.append({
+                'title': e.get('title', ''),
+                'link': e.get('link', ''),
+                'summary': (e.get('summary') or e.get('description') or '')[:500],
+                'published': e.get('published', ''),
+                'published_ts': time.mktime(e.get('published_parsed', time.localtime())),
+            })
+        feeds = _load_feeds()
+        for f in feeds:
+            if f['url'] == url:
+                f['last_fetched'] = int(time.time())
+        _save_feeds(feeds)
+        return 200, {'ok': True, 'feed_title': parsed.feed.get('title', url),
+                     'entries': entries}
+
+    # ---- 路由: POST /readability ----
+    def _rt_readability(self, body):
+        data = body or {}
+        url = str(data.get('url', '')).strip()
+        if not url:
+            return 400, {'ok': False, 'error': 'URL 不能为空'}
+        try:
+            resp = _http_get(url)
+        except Exception as e:
+            return 400, {'ok': False, 'error': f'抓取失败: {e}'}
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe']):
+            tag.decompose()
+        title = soup.title.get_text(strip=True) if soup.title else url
+        body = soup.body if soup.body else soup
+        text = body.get_text(separator='\n', strip=True)
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+        return 200, {'ok': True, 'url': url, 'title': title,
+                     'length': len(text), 'text': text[:50000]}
+
+    # ---- 路由: GET /info ----
+    def _rt_info(self):
+        return 200, {'name': 'webspy', 'label': '采集解析', 'version': '2.0.0',
+                     'lang': 'python', 'description': '搜索/链接检测/RSS/正文提取'}
+
+    # ---- 分发 ----
     def do_GET(self):
-        p = self.path
-        if p == "/__health":
-            self._json(200, {"status": "ok"})
-            return
-        if p.startswith("/search"):
-            q = urllib.parse.parse_qs(urllib.parse.urlparse(p).query).get("q", [""])[0]
-            self._json(200, {"results": do_search(q)})
-            return
-        if p == "/rss/feeds":
-            self._json(200, {"feeds": list(_feeds.values())})
-            return
-        self._json(404, {"error": "not found"})
+        try:
+            p = self.path.split('?')[0]
+            q = self._q()
+            if p == "/__health":
+                return self._json(200, {"ok": True})
+            if p == "/info":
+                return self._json(*self._rt_info())
+            if p == "/search":
+                return self._json(*self._rt_search(q))
+            if p == "/rss/feeds":
+                return self._json(*self._rt_rss_list())
+            return self._json(404, {'error': 'not found'})
+        except Exception as e:
+            return self._json(500, {'error': str(e)})
 
     def do_POST(self):
-        p = self.path
         try:
-            data = json.loads(self._body() or b"{}")
-        except Exception:
-            data = {}
-        if p == "/urlcheck":
-            self._json(200, do_urlcheck(str(data.get("url") or "")))
-            return
-        if p == "/rss/feeds":
-            url = str(data.get("url") or "").strip()
-            name = str(data.get("name") or url) or url
-            if not url:
-                self._json(400, {"error": "url 必填"})
-                return
-            _feeds[name] = {"name": name, "url": url, "added": int(time.time())}
-            _ns_set("feeds", _feeds)
-            self._json(200, _feeds[name])
-            return
-        if p == "/rss/feeds/delete":
-            name = str(data.get("name") or "")
-            _feeds.pop(name, None)
-            _ns_set("feeds", _feeds)
-            self._json(200, {"status": True})
-            return
-        if p == "/rss/fetch":
-            name = str(data.get("name") or "")
-            f = _feeds.get(name)
-            if not f:
-                self._json(404, {"error": "feed 不存在"})
-                return
-            self._json(200, do_fetch_feed(f["url"]))
-            return
-        if p == "/readability":
-            self._json(200, do_readability(str(data.get("url") or "")))
-            return
-        self._json(404, {"error": "not found"})
+            p = self.path.split('?')[0]
+            try:
+                body = json.loads(self._body() or b'{}')
+            except Exception:
+                body = {}
+            if p == "/urlcheck":
+                return self._json(*self._rt_urlcheck(body))
+            if p == "/rss/feeds":
+                return self._json(*self._rt_rss_add(body))
+            if p == "/rss/feeds/delete":
+                return self._json(*self._rt_rss_del(body))
+            if p == "/rss/fetch":
+                return self._json(*self._rt_rss_fetch(body))
+            if p == "/readability":
+                return self._json(*self._rt_readability(body))
+            return self._json(404, {'error': 'not found'})
+        except Exception as e:
+            return self._json(500, {'error': str(e)})
 
     def log_message(self, *a):
         pass
@@ -224,12 +331,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     if PORT <= 0:
         raise SystemExit("RAINCOUGH_PORT 未设置")
-    global _feeds, _loaded
-    try:
-        _feeds = _ns_get("feeds", {}) or {}
-    except Exception:
-        _feeds = {}
-    _loaded = True
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print("webspy ready on %d" % PORT, file=os.sys.stderr)
     srv.serve_forever()
