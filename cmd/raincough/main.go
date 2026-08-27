@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -372,6 +373,10 @@ func (s *server) servePluginAsset(w http.ResponseWriter, r *http.Request, name, 
 		return
 	}
 	dir := filepath.Join(s.cfg.PluginsDir, name, "assets")
+	ext := strings.ToLower(filepath.Ext(clean))
+	if ct := mime.TypeByExtension(ext); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
 	http.ServeFile(w, r, filepath.Join(dir, clean))
 }
 
