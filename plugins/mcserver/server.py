@@ -714,7 +714,7 @@ _UNSUPPORTED = set()
 _UNKNOWN = set()
 
 
-def _http_json(url, timeout=15):
+def _http_json(url, timeout=4):
     req = urllib.request.Request(url, headers={'User-Agent': _UA, 'Accept': 'application/json'})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode('utf-8'))
@@ -1875,15 +1875,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _rt_cores(self):
         out = []
         for c in CORES:
-            d = _core_versions(c)
-            if d:
-                out.append({
-                    'id': c,
-                    'name': CORE_LABELS.get(c, c),
-                    'version_count': len(d['versions']),
-                    'latest': d['latest'],
-                    'versions': d['versions'][:200],
-                })
+            try:
+                d = _core_versions(c)
+            except Exception:
+                continue
+            if not d:
+                continue
+            out.append({
+                'id': c,
+                'name': CORE_LABELS.get(c, c),
+                'version_count': len(d['versions']),
+                'latest': d['latest'],
+                'versions': d['versions'][:200],
+            })
         return 200, {'cores': out}
 
     def _rt_core_install(self, body):
