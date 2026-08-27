@@ -165,21 +165,21 @@ def search(keyword, page=1, mode="normal"):
     except Exception as e:
         return {"ok": False, "error": "搜索失败: " + str(e)}
 
-# ---- 专辑详情(旧契约: {name, author, tags, chapters}) ----
+# ---- 专辑详情(旧契约: 顶层 {id, name, author, ..., chapters}) ----
 def album_detail(aid):
     client, err = _get_jm()
     if err or client is None:
-        return {"ok": False, "error": err or "客户端不可用"}
+        return {"error": err or "客户端不可用"}
     try:
         detail = client.get_album_detail(aid)
         chapters = []
         ep_list = getattr(detail, "episode_list", None)
         if ep_list:
             for item in ep_list:
-                # episode_list 元素: (cid, index, title?) 或 (cid, index)
+                # 实测: episode_list 元素 = (cid, index, name)
                 cid = ""
                 idx = 0
-                title = ""
+                name = ""
                 if isinstance(item, (list, tuple)):
                     cid = str(item[0]) if len(item) > 0 else ""
                     try:
@@ -187,34 +187,38 @@ def album_detail(aid):
                     except Exception:
                         idx = 0
                     if len(item) > 2:
-                        title = str(item[2])
+                        name = str(item[2])
                 elif isinstance(item, dict):
                     cid = str(item.get("id") or item.get("cid") or "")
                     idx = item.get("index", 0)
-                    title = item.get("title", "")
+                    name = item.get("name") or item.get("title") or ""
                 if cid:
-                    chapters.append({"cid": cid, "title": title, "index": idx})
-        # count 是方法: 转为实际数
-        try:
-            cnt = int(getattr(detail, "count", None)()) if callable(getattr(detail, "count", None)) else int(getattr(detail, "count", 0) or 0)
-        except Exception:
-            cnt = 0
-        if not chapters and cnt:
-            chapters = [{"cid": str(aid), "title": getattr(detail, "name", "") or "", "index": 1}]
-        return {"ok": True, "album": {
+                    chapters.append({"cid": cid, "name": name, "index": idx})
+        # 单章专辑 cid=1 时用 album_id(旧插件同款兜底)
+        if len(chapters) == 1 and chapters[0]["cid"] == "1":
+            chapters[0]["cid"] = str(aid)
+            chapters[0]["name"] = chapters[0]["name"] or (getattr(detail, "name", "") or aid)
+        return {
             "id": str(aid), "aid": str(aid),
             "name": getattr(detail, "name", "") or getattr(detail, "title", "") or "",
             "title": getattr(detail, "title", "") or getattr(detail, "name", "") or "",
             "author": getattr(detail, "author", "") or "",
+            "authors": list(detail.authors) if getattr(detail, "authors", None) else [],
             "tags": list(detail.tags) if getattr(detail, "tags", None) else [],
             "likes": getattr(detail, "likes", 0) or 0,
             "views": getattr(detail, "views", 0) or 0,
+            "comment_count": getattr(detail, "comment_count", 0) or 0,
             "description": getattr(detail, "description", "") or "",
+            "page_count": getattr(detail, "page_count", 0) or 0,
             "chapters": chapters,
-            "count": cnt,
-        }}
+            "related": [
+                {"id": str(r.get("id", "")) if isinstance(r, dict) else str(r),
+                 "name": (r.get("name", "") if isinstance(r, dict) else "") or ""}
+                for r in (getattr(detail, "related_list", None) or [])
+            ],
+        }
     except Exception as e:
-        return {"ok": False, "error": "专辑详情失败: " + str(e)}
+        return {"error": "专辑详情失败: " + str(e)}
 
 # 章节图片 URL 缓存(供 image 重定向 + 前端 direct_url)
 _img_cache = {}   # (aid,cid) -> [urls]
@@ -224,7 +228,7 @@ _img_cache_lock = threading.Lock()
 def chapter_images(aid, cid):
     client, err = _get_jm()
     if err or client is None:
-        return {"ok": False, "error": err or "客户端不可用"}
+        return {"error": err or "客户端不可用"}
     try:
         photo = client.get_photo_detail(cid)
         page_arr = getattr(photo, "page_arr", None) or []
@@ -238,15 +242,17 @@ def chapter_images(aid, cid):
             urls = [_img_url(u) for u in photo.image_urls]
         with _img_cache_lock:
             _img_cache[(str(aid), str(cid))] = urls
-        files = page_arr
-        return {"ok": True, "chapter": {
+        return {
             "cid": str(cid), "aid": str(aid),
-            "title": getattr(photo, "title", "") or "",
-            "files": files, "urls": urls,
+            "name": getattr(photo, "name", "") or "",
+            "scramble_id": str(getattr(photo, "scramble_id", "") or ""),
+            "page_arr": page_arr,
+            "urls": urls,
             "direct_urls": urls,
-        }}
+            "total": len(page_arr),
+        }
     except Exception as e:
-        return {"ok": False, "error": "章节失败: " + str(e)}
+        return {"error": "章节失败: " + str(e)}
 
 # ---- 本地库 ----
 def add_library(aid, title, cover, tags):
@@ -524,27 +530,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # 旧 store enrichMeta 读 m.author/m.tags → 平铺 (id, author, tags)
                 aid = p[len("/meta/"):].split("/")[0]
                 ad = album_detail(aid)
-                if not ad.get("ok"):
+                if "error" in ad:
                     return self._json(200, {"id": aid, "author": "", "tags": [], "error": ad.get("error", "")})
-                a = ad["album"]
-                return self._json(200, {"id": aid, "aid": aid, "name": a.get("name", ""),
-                                        "author": a.get("author", ""), "tags": a.get("tags", [])})
+                return self._json(200, {"id": aid, "aid": aid, "name": ad.get("name", ""),
+                                        "author": ad.get("author", ""), "tags": ad.get("tags", [])})
             if p.startswith("/album/"):
                 return self._json(200, album_detail(p[len("/album/"):].split("/")[0]))
             if p.startswith("/chapter/"):
                 parts = p[len("/chapter/"):].split("/")
                 ch = chapter_images(parts[0], parts[1] if len(parts) > 1 else "")
-                if ch.get("ok"):
-                    c = ch["chapter"]
-                    # 旧 store 读 chapterCache[cid].page_arr(文件名数组)
-                    page_arr = []
-                    if c.get("urls"):
-                        page_arr = [u.split("/")[-1] or ("p%d" % (i + 1)) for i, u in enumerate(c["urls"])]
-                    # 顶层直出: {ok, cid, aid, title, page_arr, direct_urls}
+                if "error" not in ch:
+                    # 顶层直出: {id, name, scramble_id, page_arr, total}(旧契约)
                     return self._json(200, {
-                        "ok": True, "cid": str(c.get("cid", "")), "aid": str(parts[0]),
-                        "title": c.get("title", ""), "page_arr": page_arr,
-                        "files": page_arr, "urls": c.get("urls", []), "direct_urls": c.get("urls", []),
+                        "id": ch.get("cid", ""), "cid": ch.get("cid", ""), "aid": ch.get("aid", ""),
+                        "name": ch.get("name", ""), "title": ch.get("name", ""),
+                        "scramble_id": ch.get("scramble_id", ""),
+                        "page_arr": ch.get("page_arr", []),
+                        "files": ch.get("page_arr", []),
+                        "total": ch.get("total", len(ch.get("page_arr", []))),
+                        "urls": ch.get("urls", []), "direct_urls": ch.get("urls", []),
                     })
                 return self._json(200, ch)
             if p.startswith("/download_zip/"):
@@ -562,7 +566,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p == "/library":
                 return self._json(200, library(int(q.get("page") or 1), int(q.get("page_size") or 45)))
             if p.startswith("/cover/"):
-                return self._json(200, {"ok": True, "url": ""})
+                # 封面: 缓存 img/{aid}.{ext} → 无则取首图下载+解码
+                aid = p[len("/cover/"):].split("/")[0]
+                if not aid or not aid.isdigit():
+                    return self._bin(404, "image/jpeg", b"")
+                img_dir = os.path.join(PLUGIN_DIR, "img")
+                os.makedirs(img_dir, exist_ok=True)
+                cover_path = None
+                for ext in ("jpg", "jpeg", "webp", "png", "gif"):
+                    q = os.path.join(img_dir, "%s.%s" % (aid, ext))
+                    if os.path.isfile(q):
+                        cover_path = q
+                        break
+                if not cover_path:
+                    try:
+                        ad = album_detail(aid)
+                        if "error" not in ad and ad.get("chapters"):
+                            cid0 = ad["chapters"][0]["cid"]
+                            ch = chapter_images(aid, cid0)
+                            if "error" not in ch and ch.get("page_arr"):
+                                fname = ch["page_arr"][0]
+                                ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "webp"
+                                local = os.path.join(img_dir, "%s.%s" % (aid, ext))
+                                got = proxy_old_form(aid, cid0, fname)
+                                if got:
+                                    try:
+                                        import shutil
+                                        shutil.copyfile(got, local)
+                                        cover_path = local
+                                    except Exception:
+                                        cover_path = got
+                    except Exception:
+                        pass
+                if cover_path and os.path.isfile(cover_path):
+                    with open(cover_path, "rb") as f:
+                        return self._bin(200, _guess_mime(os.path.basename(cover_path)), f.read())
+                return self._bin(404, "image/jpeg", b"")
             if p.startswith("/image/"):
                 # /image/<aid>/<cid>/<file> → 旧插件形态下载(cdn/media/photos/cid/fname) + 落盘缓存
                 parts = p[len("/image/"):].split("/")
