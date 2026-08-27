@@ -134,9 +134,9 @@ def search(keyword, page=1, mode="normal"):
             result = client.search_site(search_query=keyword, page=page)
         items = []
         for aid, name in (result or []):
-            items.append({"aid": str(aid), "title": name, "author": "",
-                          "cover": _img_url(getattr(result, "cover", "") or ""), "tags": []})
-        return {"ok": True, "items": items, "page": page}
+            items.append({"id": str(aid), "aid": str(aid), "name": name, "title": name,
+                          "author": "", "cover": "", "tags": []})
+        return {"ok": True, "items": items, "page": page, "page_count": max(1, page)}
     except Exception as e:
         return {"ok": False, "error": "搜索失败: " + str(e)}
 
@@ -295,12 +295,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p.startswith("/search"):
                 return self._json(200, search(q.get("keyword", ""), int(q.get("page") or 1), q.get("mode", "normal")))
             if p.startswith("/meta/"):
-                return self._json(200, album_detail(p[len("/meta/"):].split("/")[0]))
+                # 旧 store enrichMeta 读 m.author/m.tags → 平铺 (id, author, tags)
+                aid = p[len("/meta/"):].split("/")[0]
+                ad = album_detail(aid)
+                if not ad.get("ok"):
+                    return self._json(200, {"id": aid, "author": "", "tags": [], "error": ad.get("error", "")})
+                a = ad["album"]
+                return self._json(200, {"id": aid, "aid": aid, "name": a.get("name", ""),
+                                        "author": a.get("author", ""), "tags": a.get("tags", [])})
             if p.startswith("/album/"):
                 return self._json(200, album_detail(p[len("/album/"):].split("/")[0]))
             if p.startswith("/chapter/"):
                 parts = p[len("/chapter/"):].split("/")
-                return self._json(200, chapter_images(parts[0], parts[1] if len(parts) > 1 else ""))
+                ch = chapter_images(parts[0], parts[1] if len(parts) > 1 else "")
+                if ch.get("ok"):
+                    c = ch["chapter"]
+                    # 旧 store 读 chapterCache[cid].page_arr(文件名数组)
+                    page_arr = []
+                    if c.get("urls"):
+                        page_arr = [u.split("/")[-1] or ("p%d" % (i + 1)) for i, u in enumerate(c["urls"])]
+                    # 顶层直出: {ok, cid, aid, title, page_arr, direct_urls}
+                    return self._json(200, {
+                        "ok": True, "cid": str(c.get("cid", "")), "aid": str(parts[0]),
+                        "title": c.get("title", ""), "page_arr": page_arr,
+                        "files": page_arr, "urls": c.get("urls", []), "direct_urls": c.get("urls", []),
+                    })
+                return self._json(200, ch)
             if p.startswith("/download_zip/"):
                 return self._json(200, download_status(p[len("/download_zip/"):]))
             if p.startswith("/download/"):
