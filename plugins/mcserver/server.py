@@ -2016,6 +2016,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ---------- 日志 ----------
     def _rt_logs(self, q):
         inst = self._inst()
+        if not inst:
+            return 200, {'logs': '', 'error': '未选择实例'}
         try:
             lines = int(q.get('lines', 300))
         except (TypeError, ValueError):
