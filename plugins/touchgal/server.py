@@ -5,6 +5,7 @@
 上游: touchgal.ink 官方 API + animetrace 识图(与旧插件一致, curl_cffi impersonate)
 路由契约与旧面板 api.js 完全一致(search/resource/recognize/recognize-dual)。
 """
+import os
 import json
 import concurrent.futures
 import http.server
