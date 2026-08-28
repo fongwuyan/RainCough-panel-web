@@ -41,8 +41,16 @@ async function loadPluginFrontend() {
   mode.value = 'loading'
   perr.value = ''
   mountFn = null
+  // 用 <script> 标签加载(非 ESM import): 产物是 IIFE, script 语义下 register(window) 稳定生效
+  const loadScript = (n) => new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = '/api/plugins/' + n + '/assets/plugin.js'
+    s.onload = () => resolve()
+    s.onerror = () => reject(new Error('加载脚本失败: ' + s.src))
+    document.head.appendChild(s)
+  })
   const tryLoad = async (n) => {
-    await import(/* @vite-ignore */ '/api/plugins/' + n + '/assets/plugin.js')
+    await loadScript(n)
     // 注册键查找: 精确 + 大小写容错(产物可能注册了大写变体)
     let reg = null
     if (window.__rcPlugin_) {
