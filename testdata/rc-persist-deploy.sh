@@ -24,7 +24,7 @@ echo "=== [4/5] 清理旧进程 + 启动 ==="
 for p in $(pgrep -f 'raincough -port'); do kill -9 $p 2>/dev/null; done
 for p in $(pgrep -f 'python3 server.py'); do kill -9 $p 2>/dev/null; done
 sleep 2
-nohup ./raincough -port 3900 > srv.log 2>&1 &
+nohup ./raincough -port 3900 >> srv.log 2>&1 &
 sleep 12
 
 echo "=== [5/5] 验证 ==="

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -98,6 +99,7 @@ func (s *server) handleStorePluginInstall(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusConflict, map[string]interface{}{"error": err.Error()})
 		return
 	}
+	log.Printf("[store] 插件安装: %s (status=%s)", b.Name, status)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "task": "queued"})
 }
 
@@ -118,6 +120,7 @@ func (s *server) handleStorePluginRemove(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
 		return
 	}
+	log.Printf("[store] 插件移除: %s", b.Name)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
 }
 

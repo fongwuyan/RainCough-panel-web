@@ -349,6 +349,8 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未加载: " + name})
 			return
 		}
+		// 使用痕迹: 记录插件 API 调用(供插件健康「系统日志」查看)
+		log.Printf("[trace] plugin=%s method=%s path=/%s", child.Name(), r.Method, sub)
 		host.ProxyRequest(child, w, r, sub)
 		return
 	default:
