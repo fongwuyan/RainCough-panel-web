@@ -183,3 +183,30 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 子选项卡(与其它页面一致) */
+.parent-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border,#2d333b ); margin-bottom: 14px; }
+.parent-tab {
+  padding: 8px 16px; font-size: 13px; cursor: pointer;
+  color: var(--border-strong,#6e7681); border-bottom: 2px solid transparent;
+  background: transparent;
+}
+.parent-tab.on { color: var(--accent,#4da3ff); border-bottom-color: var(--accent,#4da3ff); font-weight: 600; }
+.parent-tab:hover { color: var(--text,#e6edf3); }
+
+/* 统计卡 */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.stat-card { background: var(--surface,#161b22); border: 1px solid var(--border,#2d333b); border-radius: 6px; padding: 14px 16px; }
+.stat-num { font-size: 26px; font-weight: 700; }
+.stat-num.accent { color: var(--accent,#4da3ff); }
+.stat-num.warn { color: #f0b429; }
+.stat-num.muted { color: var(--border-strong,#6e7681); }
+.stat-label { font-size: 12px; color: var(--border-strong,#6e7681); margin-top: 2px; }
+
+/* 元信息键值行 */
+.kv { margin: 4px 0; }
+.kv-row { display: flex; gap: 8px; padding: 3px 0; font-size: 12px; align-items: baseline; }
+.kv-k { color: var(--border-strong,#6e7681); flex-shrink: 0; }
+.kv-v { flex: 1; word-break: break-all; }
+</style>
