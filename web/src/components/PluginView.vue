@@ -58,6 +58,7 @@ async function loadPluginFrontend() {
   }
   let firstErr = ''
   let notRegistered = false
+  let firstDiag = ''
   try {
     // 先按原始名(JMComic), 失败按小写(jmcomic) — 网关资产大小写敏感
     let reg = null
@@ -100,6 +101,7 @@ async function loadPluginFrontend() {
   }
   // 回退: 有内置组件(MAP)则静默回退(无独立前端是正常情况, 不报错);
   // 仅当连内置组件都没有时才提示加载失败; 注册缺失(notRegistered)始终提示(产物缺陷)
+  firstDiag = 'err=' + (firstErr || '-') + ' regKeys=' + (window.__rcPlugin_ ? Object.keys(window.__rcPlugin_).join(',') : 'none')
   if (!MAP[name.value.toLowerCase()] && firstErr) {
     perr.value = '加载插件前端失败: ' + firstErr
   } else if (notRegistered && MAP[name.value.toLowerCase()]) {
@@ -117,6 +119,12 @@ onErrorCaptured((e) => { perr.value = String((e && (e.message || e)) || e) })
 <template>
   <div>
     <div v-if="perr" style="background:#7a1f1f;color:#fff;padding:10px 14px;margin:10px;font-size:12px;font-family:monospace">插件页错误: {{ perr }}</div>
+
+    <!-- 常驻诊断行: 仅回退态显示(方便定位独立前端为何未挂载) -->
+    <div v-if="mode !== 'plugin' && mode !== 'loading'" style="background:#0d1b2a;color:#7fd1ff;padding:8px 14px;margin:10px;font-size:11px;font-family:monospace;border:1px dashed #2d5f7a;border-radius:4px;">
+      [plugin-ctx] name={{ name }} mode={{ mode }}
+      <template v-if="firstDiag"> | {{ firstDiag }}</template>
+    </div>
 
     <!-- 插件独立前端挂载区 -->
     <div v-if="mode === 'plugin'" ref="mountEl" class="plugin-mount"></div>
