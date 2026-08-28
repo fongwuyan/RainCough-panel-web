@@ -41,17 +41,10 @@ async function loadPluginFrontend() {
   mode.value = 'loading'
   perr.value = ''
   mountFn = null
-  // 用 <script> 标签加载(非 ESM import): 产物是 IIFE, script 语义下 register(window) 稳定生效
-  const loadScript = (n) => new Promise((resolve, reject) => {
-    const s = document.createElement('script')
-    s.src = '/api/plugins/' + n + '/assets/plugin.js'
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error('加载脚本失败: ' + s.src))
-    document.head.appendChild(s)
-  })
-  const tryLoad = async (n) => {
-    await loadScript(n)
-    // 注册键查找: 精确 + 大小写容错(产物可能注册了大写变体)
+  // ---- 浏览器适配: 三保险加载插件独立前端 ----
+  // ①new Function 全局执行(fetch+eval, 产物是 IIFE, register(window) 必写全局)
+  // ②<script> 标签加载 ③默认(异常→诊断)
+  const readReg = (n) => {
     let reg = null
     if (window.__rcPlugin_) {
       reg = window.__rcPlugin_[n]
@@ -63,6 +56,40 @@ async function loadPluginFrontend() {
       }
     }
     return (reg && typeof reg.mount === 'function') ? reg : null
+  }
+  const loadFetch = async (n) => {
+    const url = '/api/plugins/' + n + '/assets/plugin.js'
+    const r = await fetch(url, { cache: 'no-store' })
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + url)
+    const code = await r.text()
+    if (!code || code.length < 200) throw new Error('产物为空或异常(' + code.length + 'B)')
+    // 全局作用域执行 IIFE(浏览器适配核心)
+    ;(0, eval)(code)
+    return readReg(n)
+  }
+  const loadScriptEl = (n) => new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = '/api/plugins/' + n + '/assets/plugin.js'
+    s.onload = () => resolve(readReg(n))
+    s.onerror = () => reject(new Error('脚本加载失败: ' + s.src))
+    document.head.appendChild(s)
+  })
+  const tryLoad = async (n) => {
+    try {
+      const reg = await loadFetch(n)
+      if (reg) return reg
+      // fetch 执行成功但未注册 → 换 script 再试
+      const reg2 = await loadScriptEl(n)
+      if (reg2) return reg2
+      return null
+    } catch (e) {
+      // fetch 失败(如 404=无独立前端) → script 兜底
+      try {
+        const reg = await loadScriptEl(n)
+        if (reg) return reg
+      } catch (e2) { throw new Error((e && e.message) || String(e)) }
+      throw e
+    }
   }
   let firstErr = ''
   let notRegistered = false
