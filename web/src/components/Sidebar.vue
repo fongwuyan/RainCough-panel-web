@@ -13,6 +13,7 @@ onMounted(load)
 
 const PAGES = [
   { key: 'ws', label: '工作台', path: '/', desc: '概览与状态' },
+  { key: 'plughealth', label: '插件健康', path: '/plughealth', desc: '加载检测与独立日志' },
   { key: 'fm', label: '文件管理', path: '/plugin/filemanager', desc: '文件系统' },
   { key: 'term', label: '终端', path: '/terminal', desc: 'Shell' },
   { key: 'sysf', label: '系统中心', path: '/sysfunc', desc: '系统功能' },
@@ -51,6 +52,7 @@ function go(path) { router.push(path) }
 
 function isActive(name) {
   if (name === 'workspace') return route.path === '/'
+  if (name === 'plughealth') return route.name === 'plughealth'
   if (name === 'settings') return route.name === 'settings'
   if (name === 'docs') return route.name === 'docs'
   if (name === 'filemanager') return route.name === 'plugin' && route.params.name === 'filemanager'
@@ -110,6 +112,12 @@ function isActive(name) {
       </div>
 
       <div class="sidebar-section-label">系统</div>
+      <div class="plugin-item" :class="{ active: isActive('plughealth') }" @click="go('/plughealth')">
+        <div class="info">
+          <div class="label">插件健康</div>
+          <div class="desc">加载检测与独立日志</div>
+        </div>
+      </div>
       <div class="plugin-item" :class="{ active: isActive('media') }" @click="go('/media')">
         <div class="info">
           <div class="label">媒体中心</div>

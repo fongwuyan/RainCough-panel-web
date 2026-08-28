@@ -39,6 +39,22 @@ func (c *Child) Alive() bool {
 // Name 返回插件名(真实注册名, 可能含大小写如 JMComic)。
 func (c *Child) Name() string { return c.name }
 
+// Label 返回插件显示名。
+func (c *Child) Label() string {
+	if c.manifest != nil {
+		return c.manifest.Label
+	}
+	return c.name
+}
+
+// Version 返回插件版本。
+func (c *Child) Version() string {
+	if c.manifest != nil {
+		return c.manifest.Version
+	}
+	return ""
+}
+
 // Port 返回监听端口。
 func (c *Child) Port() int { return c.port }
 

@@ -173,6 +173,19 @@ func (h *PluginHost) Get(name string) *Child {
 	return h.children[name]
 }
 
+// All 返回全部已加载子进程(供健康检查等只读遍历)。
+func (h *PluginHost) All() []*Child {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]*Child, 0, len(h.children))
+	for _, c := range h.children {
+		if c != nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // Find 按名返回子进程(大小写不敏感, 兼容小写路径访问大写插件如 JMComic)。
 func (h *PluginHost) Find(name string) *Child {
 	h.mu.Lock()

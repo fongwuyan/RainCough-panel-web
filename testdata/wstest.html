@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>wstest</title></head>
+<body>
+<div id="c"></div>
+<script>
+  var p = new URLSearchParams(location.search).get('p') || 'webspy';
+  var x = new XMLHttpRequest();
+  x.open('GET', '/api/plugins/' + p + '/assets/plugin.js', false);
+  var txt = '';
+  try { x.send(); txt = x.responseText || ''; } catch (e) { document.title = 'XHR_ERR:' + e.message; }
+  if (!txt) { if (!document.title) document.title = 'EMPTY_RESP'; }
+  else {
+    try { (0, eval)(txt); } catch (e) { document.title = 'EVAL_ERR:' + e.message; }
+    var reg = window['__rcPlugin_' + p];
+    if (!reg || !reg.mount) { if (!document.title) document.title = 'NO_REG'; }
+    else {
+      var c = document.getElementById('c');
+      try {
+        reg.mount(c, {
+          plugin: { name: p },
+          api: { get: function (q) { return fetch('/api/plugins/' + p + q).then(function (r) { return r.json(); }); }, post: function (q, b) { return fetch('/api/plugins/' + p + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(function (r) { return r.json(); }); } }
+        });
+        document.title = (c.innerHTML && c.innerHTML.length > 5) ? ('MOUNT_OK:' + c.innerHTML.length) : 'MOUNT_EMPTY';
+      } catch (e) { document.title = 'MOUNT_ERR:' + (e.message || e); }
+    }
+  }
+</script>
+</body>
+</html>

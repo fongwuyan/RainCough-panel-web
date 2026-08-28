@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>wstest</title></head>
+<body>
+<pre id="out"></pre>
+<script>
+  var OUT = document.getElementById('out');
+  var P = ['webspy','compress','dltool','filehash','imagetool','ocrqr','texttool','aigen','docker','laizhangsetu','mcserver','uptime','vpn'];
+  var results = [];
+  function log(s) { results.push(s); OUT.textContent = results.join('\n'); document.title = 'RESULTS:' + results.length; }
+  (function next(i) {
+    if (i >= P.length) { log('ALL_DONE'); return; }
+    var p = P[i];
+    var x = new XMLHttpRequest();
+    x.open('GET', '/api/plugins/' + p + '/assets/plugin.js', false);
+    var txt = '';
+    try { x.send(); txt = x.responseText || ''; } catch (e) { log(p + ' => XHR_ERR:' + e.message); next(i+1); return; }
+    if (!txt) { log(p + ' => EMPTY'); next(i+1); return; }
+    try { (0, eval)(txt); } catch (e) { log(p + ' => EVAL_ERR:' + e.message); next(i+1); return; }
+    var reg = window['__rcPlugin_' + p];
+    if (!reg || !reg.mount) { log(p + ' => NO_REG'); next(i+1); return; }
+    var c = document.createElement('div');
+    document.body.appendChild(c);
+    try {
+      reg.mount(c, { plugin:{name:p}, api:{ get:function(q){return Promise.resolve({});}, post:function(q,b){return Promise.resolve({ok:true});} } });
+      log(p + ' => MOUNT_OK:' + c.innerHTML.length);
+    } catch (e) { log(p + ' => MOUNT_ERR:' + (e.message || e)); }
+    next(i+1);
+  })(0);
+</script>
+</body>
+</html>

@@ -195,6 +195,10 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tasks/", s.handleTaskDetail)
 	mux.HandleFunc("/api/scheduler/jobs", s.handleSchedulerJobs)
 
+	// ---- 插件健康 ----
+	mux.HandleFunc("/api/sys/plugins-health", s.handlePluginsHealth)
+	mux.HandleFunc("/api/sys/plugins-health/log", s.handlePluginRuntimeLog)
+
 	// ---- 终端 ----
 	mux.HandleFunc("/api/terminal/open", s.handleTermOpen)
 	mux.HandleFunc("/api/terminal/stream", s.handleTermStream)
@@ -398,6 +402,8 @@ func serveStatic(w http.ResponseWriter, r *http.Request, webDir string) {
 		// SPA fallback
 		full = filepath.Join(webDir, "index.html")
 	}
+	// index.html 必须无缓存(才能拿到最新 bundle 名); 其余静态也禁缓存避免旧前端
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	http.ServeFile(w, r, full)
 }
 
