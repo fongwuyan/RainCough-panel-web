@@ -295,28 +295,92 @@ func netDialTimeout(port int) (io.Closer, error) {
 	return conn, err
 }
 
-// handlePluginRuntimeLog GET /api/sys/plugins-health/log?name=x&lines=n — 指定插件子进程 runtime 日志。
+// handlePluginRuntimeLog GET /api/sys/plugins-health/log?name=x&lines=n&offset=m&grep=k
+// 指定插件子进程完整控制台日志(.runtime.log 从启动一直追加)。
+// lines: 0=全部, N=尾部 N 行(默认 200); offset+lines 可翻页; grep 过滤。
 func (s *server) handlePluginRuntimeLog(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
-	lines := 200
-	if v := r.URL.Query().Get("lines"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			lines = n
-		}
-	}
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
 		return
 	}
+	lines := 200
+	if v := r.URL.Query().Get("lines"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			lines = n
+		}
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			offset = n
+		}
+	}
+	grep := r.URL.Query().Get("grep")
+
 	p := filepath.Join(s.cfg.PluginsDir, name, ".runtime.log")
 	if !fileExists(p) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"exists": false, "text": ""})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"exists": false, "text": "", "total_lines": 0, "size": 0})
 		return
 	}
-	text, err := tailFile(p, lines)
+	st, _ := os.Stat(p)
+	size := st.Size()
+	text, err := readLogRange(p, offset, lines)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"exists": true, "text": text})
+	total := 0
+	if strings.TrimSpace(text) == "" {
+		total = 0
+	} else {
+		total = strings.Count(text, "\n") + 1
+	}
+	if grep != "" {
+		var keep []string
+		for _, l := range strings.Split(text, "\n") {
+			if strings.Contains(l, grep) {
+				keep = append(keep, l)
+			}
+		}
+		text = strings.Join(keep, "\n")
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"exists": true, "text": text, "total_lines": total,
+		"size": size, "file": p,
+	})
+}
+
+// readLogRange 读取日志行区间: offset=0 且 lines=0 返回全部;
+// offset>0 时按行窗口(lines 行)返回; 否则返回尾部 lines 行。
+func readLogRange(p string, offset, lines int) (string, error) {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimRight(string(b), "\n")
+	if text == "" {
+		return "", nil
+	}
+	parts := strings.Split(text, "\n")
+	// grep 之外: 全量
+	if offset == 0 && lines == 0 {
+		return strings.Join(parts, "\n"), nil
+	}
+	if offset > 0 {
+		// 从 offset 起 lines 行(offset 是行偏移)
+		end := offset + lines
+		if end > len(parts) {
+			end = len(parts)
+		}
+		if offset > len(parts) {
+			offset = len(parts)
+		}
+		return strings.Join(parts[offset:end], "\n"), nil
+	}
+	// 尾部 lines 行
+	if len(parts) > lines {
+		parts = parts[len(parts)-lines:]
+	}
+	return strings.Join(parts, "\n"), nil
 }

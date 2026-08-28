@@ -12,6 +12,40 @@ const q = ref('')
 const logName = ref('')
 const logText = ref('')
 const logLoading = ref(false)
+const logLines = ref(500)       // 0 = 全部
+const logGrep = ref('')
+const logInfo = ref(null)       // {size,total_lines,file}
+
+async function loadLog(name) {
+  if (!name) return
+  logName.value = name
+  logLoading.value = true
+  logText.value = ''
+  logInfo.value = null
+  try {
+    const q = 'name=' + encodeURIComponent(name) +
+      '&lines=' + logLines.value +
+      (logGrep.value.trim() ? '&grep=' + encodeURIComponent(logGrep.value.trim()) : '')
+    const r = await fetch('/api/sys/plugins-health/log?' + q)
+    const d = await r.json()
+    logInfo.value = d
+    logText.value = (d && d.text) ? d.text : (d && d.text === '' ? '(空日志)' : '(无日志文件)')
+  } catch (e) { logText.value = '读取失败: ' + e.message }
+  logLoading.value = false
+  setTimeout(scrollLogBottom, 60)
+}
+
+function scrollLogBottom() {
+  const el = document.querySelector('.ph-logbox')
+  if (el) el.scrollTop = el.scrollHeight
+}
+
+function fmtSize(b) {
+  if (b == null) return ''
+  if (b < 1024) return b + 'B'
+  if (b < 1048576) return (b / 1024).toFixed(1) + 'KB'
+  return (b / 1048576).toFixed(1) + 'MB'
+}
 
 const lastRefresh = ref('')
 
@@ -59,18 +93,6 @@ function fmtUp(sec) {
   if (sec < 3600) return Math.floor(sec / 60) + 'm' + (sec % 60) + 's'
   if (sec < 86400) return Math.floor(sec / 3600) + 'h' + Math.floor((sec % 3600) / 60) + 'm'
   return Math.floor(sec / 86400) + 'd' + Math.floor((sec % 86400) / 3600) + 'h'
-}
-
-async function loadLog(name) {
-  logName.value = name
-  logLoading.value = true
-  logText.value = ''
-  try {
-    const r = await fetch('/api/sys/plugins-health/log?name=' + encodeURIComponent(name) + '&lines=500')
-    const d = await r.json()
-    logText.value = (d && d.text) ? d.text : '(无日志文件)'
-  } catch (e) { logText.value = '读取失败: ' + e.message }
-  logLoading.value = false
 }
 
 let timer = null
@@ -176,9 +198,28 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
           </select>
           <button class="btn btn-primary" @click="logName && loadLog(logName)" :disabled="!logName || logLoading">{{ logLoading ? '读取中…' : '读取日志' }}</button>
         </div>
+
+        <!-- 查看范围 + 过滤 + 文件信息 -->
+        <div class="flex" style="gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap;" v-if="logName">
+          <select v-model="logLines" class="input" style="width:130px;" @change="logName && loadLog(logName)">
+            <option :value="100">最近 100 行</option>
+            <option :value="500">最近 500 行</option>
+            <option :value="2000">最近 2000 行</option>
+            <option :value="10000">最近 10000 行</option>
+            <option :value="0">完整日志(全部)</option>
+          </select>
+          <input v-model="logGrep" class="input" style="width:200px;" placeholder="grep 过滤…" @keydown.enter="logName && loadLog(logName)" />
+          <button class="btn btn-sm" v-if="logGrep" @click="logGrep = ''; loadLog(logName)">清过滤</button>
+          <button class="btn btn-sm" @click="logLines = 0; loadLog(logName)" :disabled="logLines === 0">全部日志</button>
+          <button class="btn btn-sm btn-ghost" @click="loadLog(logName)">刷新</button>
+          <span v-if="logInfo && logInfo.exists" class="mono faint" style="font-size:11px;margin-left:auto;">
+            {{ logInfo.total_lines }} 行 · {{ fmtSize(logInfo.size) }}
+          </span>
+        </div>
+
         <div v-if="logLoading" class="loading"><div class="spinner"></div> 加载日志...</div>
-        <pre v-else-if="logText" class="mono-block" style="max-height:65vh;overflow:auto;white-space:pre-wrap;">{{ logText }}</pre>
-        <p v-else class="hint">选择插件后点击读取日志</p>
+        <pre v-else-if="logText" class="mono-block ph-logbox" style="max-height:60vh;overflow:auto;white-space:pre-wrap;font-size:12px;">{{ logText }}</pre>
+        <p v-else class="hint">选择插件后点击读取日志; 可选完整日志或按行数/grep 查看</p>
       </div>
     </div>
   </div>
