@@ -295,14 +295,18 @@ func netDialTimeout(port int) (io.Closer, error) {
 	return conn, err
 }
 
-// handlePluginRuntimeLog GET /api/sys/plugins-health/log?name=x&lines=n&offset=m&grep=k
-// 指定插件子进程完整控制台日志(.runtime.log 从启动一直追加)。
-// lines: 0=全部, N=尾部 N 行(默认 200); offset+lines 可翻页; grep 过滤。
+// handlePluginRuntimeLog GET /api/sys/plugins-health/log?name=x&lines=n&offset=m&grep=k&source=system|runtime
+// source=runtime(默认): 插件子进程完整控制台日志(.runtime.log 从启动追加)。
+// source=system: 主系统日志(srv.log + syslog)中该插件的加载/错误/运行痕迹(含前后文)。
 func (s *server) handlePluginRuntimeLog(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
 		return
+	}
+	source := r.URL.Query().Get("source")
+	if source == "" {
+		source = "runtime"
 	}
 	lines := 200
 	if v := r.URL.Query().Get("lines"); v != "" {
@@ -310,14 +314,19 @@ func (s *server) handlePluginRuntimeLog(w http.ResponseWriter, r *http.Request) 
 			lines = n
 		}
 	}
-	offset := 0
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			offset = n
-		}
-	}
 	grep := r.URL.Query().Get("grep")
 
+	// ---- 系统日志模式: 主进程日志中的插件痕迹 ----
+	if source == "system" {
+		text, total, size := collectPluginSystemLog(name, grep)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"exists": true, "text": text, "total_lines": total,
+			"size": size, "file": "system",
+		})
+		return
+	}
+
+	// ---- runtime 模式 ----
 	p := filepath.Join(s.cfg.PluginsDir, name, ".runtime.log")
 	if !fileExists(p) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"exists": false, "text": "", "total_lines": 0, "size": 0})
@@ -325,7 +334,7 @@ func (s *server) handlePluginRuntimeLog(w http.ResponseWriter, r *http.Request) 
 	}
 	st, _ := os.Stat(p)
 	size := st.Size()
-	text, err := readLogRange(p, offset, lines)
+	text, err := readLogRange(p, 0, lines)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 		return
@@ -349,6 +358,57 @@ func (s *server) handlePluginRuntimeLog(w http.ResponseWriter, r *http.Request) 
 		"exists": true, "text": text, "total_lines": total,
 		"size": size, "file": p,
 	})
+}
+
+// collectPluginSystemLog 从主系统日志(srv.log + syslog + messages)提取某插件的痕迹:
+// 匹配插件名([host] 已加载:/启动失败/错误/单独出现), 支持 grep 二级过滤, 返回去重拼接文本。
+func collectPluginSystemLog(name, grep string) (text string, total int, size int64) {
+	paths := []string{"/home/f/raincough-dev/srv.log", "/var/log/syslog", "/var/log/messages"}
+	var out []string
+	var sz int64
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		sz += int64(len(b))
+		lines := strings.Split(string(b), "\n")
+		for _, l := range lines {
+			if l == "" {
+				continue
+			}
+			// 匹配: 插件名作为独立词(兼容大小写)
+			hit := strings.Contains(l, name) ||
+				strings.Contains(l, strings.ToLower(name)) ||
+				strings.Contains(l, strings.ToUpper(name)) ||
+				strings.Contains(l, "[host]") && (strings.Contains(l, "已加载: "+name) || strings.Contains(l, "启动失败"+"["+name+"]"))
+			if !hit {
+				continue
+			}
+			// 移除与主日志重复(同文件多次读到的行去重保序)
+			dup := false
+			for _, ex := range out {
+				if ex == l {
+					dup = true
+					break
+				}
+			}
+			if dup {
+				continue
+			}
+			if grep != "" && !strings.Contains(l, grep) {
+				continue
+			}
+			out = append(out, l)
+		}
+	}
+	// 限制尾部(取最后 2000 行防过大)
+	keep := len(out)
+	if keep > 2000 {
+		out = out[keep-2000:]
+		keep = 2000
+	}
+	return strings.Join(out, "\n"), keep, sz
 }
 
 // readLogRange 读取日志行区间: offset=0 且 lines=0 返回全部;

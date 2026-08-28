@@ -15,6 +15,7 @@ const logLoading = ref(false)
 const logLines = ref(500)       // 0 = 全部
 const logGrep = ref('')
 const logInfo = ref(null)       // {size,total_lines,file}
+const logSource = ref('system') // system=主系统日志(安装/加载/痕迹) | runtime=进程控制台
 
 async function loadLog(name) {
   if (!name) return
@@ -24,12 +25,13 @@ async function loadLog(name) {
   logInfo.value = null
   try {
     const q = 'name=' + encodeURIComponent(name) +
+      '&source=' + logSource.value +
       '&lines=' + logLines.value +
       (logGrep.value.trim() ? '&grep=' + encodeURIComponent(logGrep.value.trim()) : '')
     const r = await fetch('/api/sys/plugins-health/log?' + q)
     const d = await r.json()
     logInfo.value = d
-    logText.value = (d && d.text) ? d.text : (d && d.text === '' ? '(空日志)' : '(无日志文件)')
+    logText.value = (d && d.text) ? d.text : (d && d.exists === false ? '(无进程日志文件)' : '(无匹配日志)')
   } catch (e) { logText.value = '读取失败: ' + e.message }
   logLoading.value = false
   setTimeout(scrollLogBottom, 60)
@@ -190,7 +192,17 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
     <!-- ===== 独立日志 ===== -->
     <div v-else>
       <div class="section">
-        <div class="section-title">插件子进程日志(.runtime.log)</div>
+        <div class="section-title">插件日志</div>
+
+        <!-- 来源切换 -->
+        <div class="flex" style="gap:8px;margin-bottom:10px;">
+          <button class="btn btn-sm" :class="{ 'btn-primary': logSource === 'system' }" @click="logSource = 'system'; logName && loadLog(logName)">系统日志</button>
+          <button class="btn btn-sm" :class="{ 'btn-primary': logSource === 'runtime' }" @click="logSource = 'runtime'; logName && loadLog(logName)">进程控制台</button>
+          <span class="hint" style="font-size:11px;flex:1;align-self:center;">
+            {{ logSource === 'system' ? '主系统日志中的插件安装/加载/错误/运行痕迹' : '插件子进程自身的 stdout/stderr 完整输出' }}
+          </span>
+        </div>
+
         <div class="flex" style="gap:8px;margin-bottom:8px;">
           <select v-model="logName" class="input" style="flex:1" @change="logName && loadLog(logName)">
             <option value="">选择插件…</option>
