@@ -43,19 +43,35 @@ async function loadPluginFrontend() {
   mountFn = null
   const tryLoad = async (n) => {
     await import(/* @vite-ignore */ '/api/plugins/' + n + '/assets/plugin.js')
-    const reg = window.__rcPlugin_ && window.__rcPlugin_[n]
-    if (reg && typeof reg.mount === 'function') return reg
-    return null
+    // 注册键查找: 精确 + 大小写容错(产物可能注册了大写变体)
+    let reg = null
+    if (window.__rcPlugin_) {
+      reg = window.__rcPlugin_[n]
+      if (!reg) reg = window.__rcPlugin_[n.toLowerCase()]
+      if (!reg) {
+        for (const k in window.__rcPlugin_) {
+          if (k.toLowerCase() === n.toLowerCase()) { reg = window.__rcPlugin_[k]; break }
+        }
+      }
+    }
+    return (reg && typeof reg.mount === 'function') ? reg : null
   }
   let firstErr = ''
+  let notRegistered = false
   try {
     // 先按原始名(JMComic), 失败按小写(jmcomic) — 网关资产大小写敏感
     let reg = null
     try {
       reg = await tryLoad(name.value)
+      if (!reg && !window.__rcPlugin_) notRegistered = true
     } catch (e) { firstErr = String((e && e.message) || e) }
     if (!reg && name.value.toLowerCase() !== name.value) {
       try { reg = await tryLoad(name.value.toLowerCase()) } catch (e) {}
+    }
+    // import 成功但注册键缺失 → 资产缺陷(需诊断产物)
+    if (!reg && !firstErr && window.__rcPlugin_) {
+      notRegistered = true
+      firstErr = '资产已加载但未注册(keys=' + Object.keys(window.__rcPlugin_).join(',') + ')'
     }
     if (reg) {
       mode.value = 'plugin'
@@ -83,9 +99,11 @@ async function loadPluginFrontend() {
     if (!firstErr) firstErr = String((e && e.message) || e)
   }
   // 回退: 有内置组件(MAP)则静默回退(无独立前端是正常情况, 不报错);
-  // 仅当连内置组件都没有时才提示加载失败
+  // 仅当连内置组件都没有时才提示加载失败; 注册缺失(notRegistered)始终提示(产物缺陷)
   if (!MAP[name.value.toLowerCase()] && firstErr) {
     perr.value = '加载插件前端失败: ' + firstErr
+  } else if (notRegistered && MAP[name.value.toLowerCase()]) {
+    perr.value = '插件独立前端注册异常: ' + firstErr
   }
   mode.value = MAP[name.value.toLowerCase()] ? 'map' : 'generic'
 }
