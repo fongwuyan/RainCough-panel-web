@@ -186,6 +186,19 @@ func (h *PluginHost) All() []*Child {
 	return out
 }
 
+// DeadCounts 返回各插件启动退避次数 map(name -> count, 仅统计 ≥1 的)。
+func (h *PluginHost) DeadCounts() map[string]int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[string]int, len(h.dead))
+	for n, r := range h.dead {
+		if r.Count > 0 {
+			out[n] = r.Count
+		}
+	}
+	return out
+}
+
 // Find 按名返回子进程(大小写不敏感, 兼容小写路径访问大写插件如 JMComic)。
 func (h *PluginHost) Find(name string) *Child {
 	h.mu.Lock()

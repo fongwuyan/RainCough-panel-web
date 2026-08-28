@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"raincough/internal/host"
 )
 
 // handleSysLogs GET /api/sys/logs?lines=&grep= — 系统日志(兼容旧前端 Logs.vue)
@@ -123,51 +125,110 @@ func (s *server) handleSysKill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
 }
 
-// pluginCheckItem 单个插件的健康检查结果。
+// pluginCheckItem 单个插件的健康检查结果(信息丰富版)。
 type pluginCheckItem struct {
 	Name       string `json:"name"`
 	Label      string `json:"label"`
 	Version    string `json:"version"`
+	Lang       string `json:"lang,omitempty"`
+	Author     string `json:"author,omitempty"`
+	Description string `json:"description,omitempty"`
+	Routes     int    `json:"routes,omitempty"`
 	Alive      bool   `json:"alive"`
 	HealthHTTP bool   `json:"health_http"` // __health 网关可达
 	AssetOK    bool   `json:"asset_ok"`    // assets/plugin.js 可达(有独立前端)
+	PID        int    `json:"pid,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	StartedAt  int64  `json:"started_at,omitempty"` // unix
+	UptimeSec  int64  `json:"uptime_sec,omitempty"`
+	DeadCount  int    `json:"dead_count,omitempty"`
 	LogTail    string `json:"log_tail,omitempty"`
 	RuntimeLog string `json:"runtime_log,omitempty"` // .runtime.log 存在路径
 	Err        string `json:"error,omitempty"`
 }
 
 // handlePluginsHealth GET /api/sys/plugins-health — 插件加载全检(供「插件健康」页)。
-// 并发探测 __health 与 assets, 聚合子进程状态 + runtime 日志尾。
+// 遍历插件目录(含未加载), 聚合子进程状态/元数据/runtime 日志。
 func (s *server) handlePluginsHealth(w http.ResponseWriter, r *http.Request) {
-	// 只读 service; 有余裕时也可带 ?deep=1 逐插件 __health
 	items := make([]pluginCheckItem, 0)
 	base := s.cfg.PluginsDir
+	dead := s.host.DeadCounts()
+	seen := map[string]bool{}
 	for _, child := range s.host.All() {
-		it := pluginCheckItem{Name: child.Name(), Alive: child.Alive()}
-		it.Label = child.Label()
-		it.Version = child.Version()
-		port := child.Port()
-		if port > 0 {
-			it.HealthHTTP = pingTCP(port)
+		n := child.Name()
+		seen[n] = true
+		it := pluginCheckItem{Name: n, Label: child.Label(), Version: child.Version()}
+		info := child.ManifestInfo()
+		if v, ok := info["lang"].(string); ok { it.Lang = v }
+		if v, ok := info["author"].(string); ok { it.Author = v }
+		if v, ok := info["description"].(string); ok { it.Description = v }
+		if v, ok := info["routes"].([]string); ok { it.Routes = len(v) }
+		it.Alive = child.Alive()
+		it.Port = child.Port()
+		it.PID = child.PID()
+		st := child.StartedAt()
+		if !st.IsZero() {
+			it.StartedAt = st.Unix()
+			it.UptimeSec = int64(time.Since(st).Seconds())
 		}
-		// 资产可达: 文件存在即视为资产组件在位(提供服务端静态)
-		assetPath := filepath.Join(base, child.Name(), "assets", "plugin.js")
+		if it.Port > 0 {
+			it.HealthHTTP = pingTCP(it.Port)
+		}
+		assetPath := filepath.Join(base, n, "assets", "plugin.js")
 		it.AssetOK = fileExists(assetPath)
-		// runtime 日志尾部(子进程 stdout/stderr 落盘)
-		rlog := filepath.Join(base, child.Name(), ".runtime.log")
+		rlog := filepath.Join(base, n, ".runtime.log")
 		if fileExists(rlog) {
 			it.RuntimeLog = rlog
-			tail, _ := tailFile(rlog, 6)
+			tail, _ := tailFile(rlog, 8)
 			it.LogTail = tail
 		}
-		if !it.Alive {
-			it.Err = "子进程未存活"
-		} else if !it.HealthHTTP {
+		it.DeadCount = dead[n]
+		switch {
+		case !it.Alive:
+			it.Err = "子进程未存活" + errSuffix(child.StartErr())
+		case !it.HealthHTTP:
 			it.Err = "健康端点探测失败"
 		}
 		items = append(items, it)
 	}
-	// 汇总
+	// 目录中存在但未加载的插件(manifest 失败/退避中/资源型)
+	entries, err := os.ReadDir(base)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || seen[e.Name()] ||
+				e.Name() == "demo" {
+				continue
+			}
+			it := pluginCheckItem{Name: e.Name(), Label: e.Name()}
+			full := filepath.Join(base, e.Name())
+			m, merr := host.LoadManifest(full)
+			if merr != nil {
+				it.Err = "manifest 加载失败: " + merr.Error()
+			} else {
+				it.Label = m.Label; it.Version = m.Version
+				it.Lang = m.Lang; it.Author = m.Author
+				it.Description = m.Description
+				it.Routes = len(m.Routes)
+				if dc := dead[e.Name()]; dc > 0 {
+					it.DeadCount = dc
+					it.Err = "启动失败退避中(第 " + strconv.Itoa(dc) + " 次)"
+				} else {
+					it.Err = "未加载"
+				}
+			}
+			rlog := filepath.Join(full, ".runtime.log")
+			if fileExists(rlog) {
+				it.RuntimeLog = rlog
+				tail, _ := tailFile(rlog, 8)
+				it.LogTail = tail
+			}
+			items = append(items, it)
+		}
+	}
+
+// pingTCP TCP 连通探测(等价插件就绪判定)。
+
+	// 总汇
 	alive := 0
 	healthy := 0
 	for _, it := range items {
@@ -179,41 +240,21 @@ func (s *server) handlePluginsHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"total":   len(items),
-		"alive":   alive,
+		"total": len(items),
+		"alive": alive,
 		"healthy": healthy,
-		"items":   items,
+		"items": items,
+		"checked_at": time.Now().Unix(),
 	})
 }
 
-// handlePluginRuntimeLog GET /api/sys/plugins-health/log?name=x&lines=n — 指定插件子进程 runtime 日志。
-func (s *server) handlePluginRuntimeLog(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("name")
-	lines := 200
-	if v := r.URL.Query().Get("lines"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			lines = n
-		}
+func errSuffix(s string) string {
+	if s == "" {
+		return ""
 	}
-	if name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
-		return
-	}
-	p := filepath.Join(s.cfg.PluginsDir, name, ".runtime.log")
-	if !fileExists(p) {
-		// 也看主日志里该插件相关
-		writeJSON(w, http.StatusOK, map[string]interface{}{"exists": false, "text": ""})
-		return
-	}
-	text, err := tailFile(p, lines)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"exists": true, "text": text})
+	return ":「" + s + "」"
 }
 
-// pingTCP TCP 连通探测(等价插件就绪判定)。
 func pingTCP(port int) bool {
 	conn, err := netDialTimeout(port)
 	if err != nil {
@@ -252,4 +293,30 @@ func tailFile(p string, n int) (string, error) {
 func netDialTimeout(port int) (io.Closer, error) {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
 	return conn, err
+}
+
+// handlePluginRuntimeLog GET /api/sys/plugins-health/log?name=x&lines=n — 指定插件子进程 runtime 日志。
+func (s *server) handlePluginRuntimeLog(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	lines := 200
+	if v := r.URL.Query().Get("lines"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			lines = n
+		}
+	}
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
+		return
+	}
+	p := filepath.Join(s.cfg.PluginsDir, name, ".runtime.log")
+	if !fileExists(p) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"exists": false, "text": ""})
+		return
+	}
+	text, err := tailFile(p, lines)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"exists": true, "text": text})
 }

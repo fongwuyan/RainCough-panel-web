@@ -58,6 +58,38 @@ func (c *Child) Version() string {
 // Port 返回监听端口。
 func (c *Child) Port() int { return c.port }
 
+// PID 返回子进程 PID(未启动/已退出时为 0)。
+func (c *Child) PID() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.proc != nil && c.proc.Process != nil {
+		return c.proc.Process.Pid
+	}
+	return 0
+}
+
+// StartedAt 返回上次启动时间(未启动为零值)。
+func (c *Child) StartedAt() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.startedAt
+}
+
+// StartErr 返回启动错误信息(健康检查展示)。
+func (c *Child) StartErr() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.startErr
+}
+
+// ManifestInfo 返回 manifest 注册表信息(供健康页展示元数据)。
+func (c *Child) ManifestInfo() map[string]interface{} {
+	if c.manifest != nil {
+		return c.manifest.Info()
+	}
+	return map[string]interface{}{"name": c.name, "label": c.name}
+}
+
 // Start 拉起子进程并等待就绪探针。
 func (c *Child) Start() error {
 	freePort, err := freePort()

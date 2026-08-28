@@ -1,16 +1,19 @@
 <script setup>
-// 插件健康 — 系统顶级页面
-// 自动检测插件加载情况: 子进程存活 / 健康端点 / 独立前端资产 / runtime 日志
-// 子选项卡: ① 检测结果 ② 独立日志
+// 插件健康 — 系统顶级页面(信息丰富版)
+// 自动检测插件加载: 子进程/PID/端口/uptime/健康端点/前端资产/元数据/runtime日志
+// 子选项卡: ① 概览(卡片) ② 全部插件(表格+筛选) ③ 独立日志
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
-const tab = ref('status') // status | logs
+const tab = ref('overview') // overview | table | logs
 const data = ref(null)
 const loading = ref(false)
 const err = ref('')
+const q = ref('')
 const logName = ref('')
 const logText = ref('')
 const logLoading = ref(false)
+
+const lastRefresh = ref('')
 
 async function load() {
   loading.value = true
@@ -19,23 +22,43 @@ async function load() {
     const r = await fetch('/api/sys/plugins-health')
     const d = await r.json()
     if (d.error) { err.value = d.error } else { data.value = d }
+    const t = new Date()
+    lastRefresh.value = t.toTimeString().slice(0, 8)
   } catch (e) { err.value = e.message }
   loading.value = false
 }
 
-const summary = {
-  get total() { return data.value ? data.value.total : 0 },
-  get alive() { return data.value ? data.value.alive : 0 },
-  get healthy() { return data.value ? data.value.healthy : 0 },
-  get bad() { return (data.value ? data.value.total : 0) - (data.value ? data.value.healthy : 0) },
+const healthyCount = computed(() => data.value ? data.value.healthy : 0)
+const aliveCount = computed(() => data.value ? data.value.alive : 0)
+const issueCount = computed(() => (data.value ? data.value.total : 0) - (data.value ? data.value.healthy : 0))
+
+const items = computed(() => (data.value ? data.value.items : []).slice().sort((a, b) => {
+  // 异常优先
+  const ao = a.error ? 0 : 1
+  const bo = b.error ? 0 : 1
+  if (ao !== bo) return ao - bo
+  return (b.started_at || 0) - (a.started_at || 0)
+}))
+
+const issues = computed(() => items.value.filter((i) => i.error))
+const filtered = computed(() => {
+  const kw = q.value.trim().toLowerCase()
+  if (!kw) return items.value
+  return items.value.filter((i) => (i.label + i.name + (i.description || '')).toLowerCase().includes(kw))
+})
+
+function statusOf(it) {
+  if (!it.alive) return { label: '未存活', cls: 'bad', icon: '✕' }
+  if (!it.health_http) return { label: '健康端失败', cls: 'warn', icon: '!' }
+  return { label: '正常', cls: 'ok', icon: '✓' }
 }
 
-const probs = computed(() => (data.value ? (data.value.items || []).filter((i) => !i.alive || !i.health_http) : []))
-
-function statusText(it) {
-  if (!it.alive) return { label: '未存活', cls: 'bad' }
-  if (!it.health_http) return { label: '健康端失败', cls: 'warn' }
-  return { label: '正常', cls: 'ok' }
+function fmtUp(sec) {
+  if (!sec) return '—'
+  if (sec < 60) return sec + 's'
+  if (sec < 3600) return Math.floor(sec / 60) + 'm' + (sec % 60) + 's'
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h' + Math.floor((sec % 3600) / 60) + 'm'
+  return Math.floor(sec / 86400) + 'd' + Math.floor((sec % 86400) / 3600) + 'h'
 }
 
 async function loadLog(name) {
@@ -43,86 +66,115 @@ async function loadLog(name) {
   logLoading.value = true
   logText.value = ''
   try {
-    const r = await fetch('/api/sys/plugins-health/log?name=' + encodeURIComponent(name) + '&lines=400')
+    const r = await fetch('/api/sys/plugins-health/log?name=' + encodeURIComponent(name) + '&lines=500')
     const d = await r.json()
-    logText.value = (d && d.text) || '(无日志)'
+    logText.value = (d && d.text) ? d.text : '(无日志文件)'
   } catch (e) { logText.value = '读取失败: ' + e.message }
   logLoading.value = false
 }
 
 let timer = null
-onMounted(() => { load(); timer = setInterval(load, 5000) })
+onMounted(() => { load(); timer = setInterval(load, 8000) })
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </script>
 
 <template>
   <div>
-    <!-- 父级子选项卡 -->
     <div class="parent-tabs">
-      <div class="parent-tab" :class="{ on: tab === 'status' }" @click="tab = 'status'">检测结果</div>
+      <div class="parent-tab" :class="{ on: tab === 'overview' }" @click="tab = 'overview'">概览</div>
+      <div class="parent-tab" :class="{ on: tab === 'table' }" @click="tab = 'table'">全部插件</div>
       <div class="parent-tab" :class="{ on: tab === 'logs' }" @click="tab = 'logs'">独立日志</div>
     </div>
 
-    <!-- ============ 检测结果 ============ -->
-    <div v-if="tab === 'status'">
+    <!-- ===== 概览 ===== -->
+    <div v-if="tab === 'overview'">
       <div v-if="err" class="section error">{{ err }}</div>
-      <div v-if="loading && !data" class="section loading"><div class="spinner"></div> 检测中...</div>
 
-      <div v-if="data" class="stat-grid">
-        <div class="stat-card"><div class="stat-num">{{ summary.total }}</div><div class="stat-label">插件总数</div></div>
-        <div class="stat-card"><div class="stat-num accent">{{ summary.healthy }}</div><div class="stat-label">健康</div></div>
-        <div class="stat-card"><div class="stat-num warn">{{ summary.bad }}</div><div class="stat-label">异常</div></div>
-        <div class="stat-card"><div class="stat-num muted">{{ summary.alive }}</div><div class="stat-label">子进程存活</div></div>
+      <!-- 统计带 -->
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">{{ data ? data.total : '–' }}</div><div class="stat-label">插件总数</div></div>
+        <div class="stat-card"><div class="stat-num accent">{{ healthyCount }}</div><div class="stat-label">健康</div></div>
+        <div class="stat-card"><div class="stat-num warn" :style="{color: issueCount ? '#f0b429' : 'var(--text-faint)'}">{{ issueCount }}</div><div class="stat-label">异常</div></div>
+        <div class="stat-card"><div class="stat-num muted">{{ aliveCount }}</div><div class="stat-label">子进程存活</div></div>
       </div>
+      <p class="hint" style="margin:6px 0;">上次检测 {{ lastRefresh || '…' }} · 每 8s 自动刷新</p>
 
-      <!-- 异常概览 -->
-      <div v-if="probs.length" class="section">
-        <div class="section-title" style="color:var(--danger,#f85149);">⚠ 异常插件</div>
-        <div v-for="p in probs" :key="p.name" class="kv-row">
-          <span class="kv-k">{{ p.label || p.name }}</span>
-          <span class="kv-v mono" style="color:var(--danger,#f85149);">{{ p.error || '健康检查失败' }}</span>
+      <!-- 异常卡片 -->
+      <div v-if="issues.length" class="section" style="border:1px solid var(--danger,#5a1f2a);">
+        <div class="section-title" style="color:var(--danger,#f85149);">⚠ 异常插件 ({{ issues.length }})</div>
+        <div v-for="it in issues" :key="it.name" class="kv-row">
+          <span class="kv-k"><b>{{ it.label || it.name }}</b> <span class="mono faint" style="font-size:11px;">{{ it.name }}</span></span>
+          <span class="kv-v mono" style="color:var(--danger,#f85149);">{{ it.error }}</span>
         </div>
       </div>
 
-      <!-- 全表 -->
-      <div class="section">
-        <div class="section-title">全部插件</div>
-        <table class="table">
-          <thead>
-            <tr><th>插件</th><th>版本</th><th>子进程</th><th>健康端</th><th>前端资产</th><th>状态</th><th>日志尾</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="it in (data ? data.items : [])" :key="it.name">
-              <td class="mono">{{ it.label || it.name }}</td>
-              <td class="mono faint" style="font-size:11px;">{{ it.version }}</td>
-              <td>{{ it.alive ? '✔' : '✘' }}</td>
-              <td>{{ it.health_http ? '✔' : '✘' }}</td>
-              <td>{{ it.asset_ok ? '✔' : '—' }}</td>
-              <td>
-                <span :class="'tag-chip ' + statusText(it).cls">{{ statusText(it).label }}</span>
-              </td>
-              <td>
-                <span v-if="it.log_tail" class="mono faint" style="font-size:10px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;" :title="it.log_tail">{{ it.log_tail.split('\n').slice(-1)[0] }}</span>
-                <span v-else class="faint">-</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <button class="btn btn-sm" style="margin-top:8px;" @click="load">立即检测</button>
+      <!-- 插件卡片网格 -->
+      <div v-if="data" class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">
+        <div v-for="it in items" :key="it.name" class="card" style="padding:10px 12px;">
+          <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:6px;">
+            <div style="min-width:0;">
+              <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ it.label || it.name }}</div>
+              <div class="mono faint" style="font-size:10px;">{{ it.name }}{{ it.version ? ' · v' + it.version : '' }}</div>
+            </div>
+            <span :class="'tag-chip ' + statusOf(it).cls" style="flex-shrink:0;">{{ statusOf(it).icon }} {{ statusOf(it).label }}</span>
+          </div>
+
+          <div v-if="it.description" class="faint" style="font-size:11px;margin:5px 0;line-height:1.4;max-height:32px;overflow:hidden;">{{ it.description }}</div>
+
+          <div class="kv" style="margin-top:6px;">
+            <div class="kv-row" v-if="it.lang || it.author"><span class="kv-k" style="width:58px;">元数据</span><span class="kv-v mono" style="font-size:11px;">{{ [it.lang, it.author].filter(Boolean).join(' · ') }}{{ it.routes ? ' · ' + it.routes + ' 路由' : '' }}</span></div>
+            <div class="kv-row" v-if="it.alive"><span class="kv-k" style="width:58px;">进程</span><span class="kv-v mono" style="font-size:11px;">PID {{ it.pid }} · :{{ it.port }} · 已运行 {{ fmtUp(it.uptime_sec) }}</span></div>
+            <div class="kv-row"><span class="kv-k" style="width:58px;">检测</span><span class="kv-v mono" style="font-size:11px;">子进程 {{ it.alive ? '✔' : '✘' }} · 健康端 {{ it.health_http ? '✔' : '✘' }} · 前端 {{ it.asset_ok ? '✔' : '—' }}</span></div>
+            <div class="kv-row" v-if="it.dead_count"><span class="kv-k" style="width:58px;">退避</span><span class="kv-v" style="font-size:11px;color:var(--warn,#f0b429);">已崩 {{ it.dead_count }} 次</span></div>
+          </div>
+
+          <div v-if="it.log_tail" class="mono faint" style="font-size:10px;margin-top:6px;background:rgba(0,0,0,.18);padding:4px 6px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" :title="it.log_tail">{{ it.log_tail.split('\n').slice(-1)[0] }}</div>
+          <div v-else-if="it.error" class="mono" style="font-size:10px;margin-top:6px;color:var(--danger,#f85149);">{{ it.error }}</div>
+
+          <div class="flex" style="gap:6px;margin-top:8px;justify-content:flex-end;">
+            <button class="btn btn-sm" @click="logName = it.name; tab = 'logs'; loadLog(it.name)">日志</button>
+          </div>
+        </div>
       </div>
+      <button class="btn btn-sm" style="margin-top:8px;" @click="load">立即检测</button>
     </div>
 
-    <!-- ============ 独立日志 ============ -->
-    <div v-else tabindex="-1">
+    <!-- ===== 全部插件(表格) ===== -->
+    <div v-else-if="tab === 'table'">
+      <div class="flex" style="gap:8px;margin-bottom:8px;">
+        <input v-model="q" class="input" style="flex:1;" placeholder="筛选插件(名称/描述)…" />
+        <button class="btn btn-sm" @click="load">刷新</button>
+      </div>
+      <table class="table">
+        <thead>
+          <tr><th>插件</th><th>版本</th><th>类型/作者</th><th>PID</th><th>端口</th><th>运行</th><th>状态</th><th>资产</th><th>退避</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="it in filtered" :key="it.name">
+            <td class="mono">{{ it.label || it.name }}<div class="mono faint" style="font-size:10px;">{{ it.name }}</div></td>
+            <td class="mono faint" style="font-size:11px;">{{ it.version }}</td>
+            <td class="mono faint" style="font-size:11px;">{{ it.lang || '?' }}{{ it.author ? ' · ' + it.author : '' }}</td>
+            <td class="mono faint" style="font-size:11px;">{{ it.pid || '–' }}</td>
+            <td class="mono faint" style="font-size:11px;">{{ it.port || '–' }}</td>
+            <td class="mono faint" style="font-size:11px;">{{ fmtUp(it.uptime_sec) }}</td>
+            <td><span :class="'tag-chip ' + statusOf(it).cls">{{ statusOf(it).label }}</span></td>
+            <td class="mono faint">{{ it.asset_ok ? '✔' : '—' }}</td>
+            <td class="mono faint" :style="{color: it.dead_count ? '#f0b429' : ''}">{{ it.dead_count || '' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ===== 独立日志 ===== -->
+    <div v-else>
       <div class="section">
         <div class="section-title">插件子进程日志(.runtime.log)</div>
         <div class="flex" style="gap:8px;margin-bottom:8px;">
           <select v-model="logName" class="input" style="flex:1" @change="logName && loadLog(logName)">
             <option value="">选择插件…</option>
-            <option v-for="it in (data ? data.items : [])" :key="it.name" :value="it.name">{{ it.label || it.name }}</option>
+            <option v-for="it in items" :key="it.name" :value="it.name">{{ it.label || it.name }}</option>
           </select>
           <button class="btn btn-primary" @click="logName && loadLog(logName)" :disabled="!logName || logLoading">{{ logLoading ? '读取中…' : '读取日志' }}</button>
-          <button class="btn btn-sm btn-ghost" v-if="logName" @click="loadLog(logName)">刷新</button>
         </div>
         <div v-if="logLoading" class="loading"><div class="spinner"></div> 加载日志...</div>
         <pre v-else-if="logText" class="mono-block" style="max-height:65vh;overflow:auto;white-space:pre-wrap;">{{ logText }}</pre>
