@@ -33,7 +33,6 @@ const name = computed(() => String(route.params.name || ''))
 
 // 插件独立前端状态
 const mode = ref('loading')   // loading | plugin(独立前端) | map(内置回退) | generic
-const perr = ref('')
 let mountFn = null            // 卸载函数(插件 mount 返回)
 const mountEl = ref(null)     // 模板 ref(必须 ref() 声明, script setup 模板 ref 才会绑定)
 
@@ -42,7 +41,6 @@ const comp = computed(() => MAP[name.value.toLowerCase()] || GenericPlugin)
 
 async function loadPluginFrontend() {
   mode.value = 'loading'
-  perr.value = ''
   mountFn = null
   // ---- 浏览器适配: 三保险加载插件独立前端 ----
   // ①new Function 全局执行(fetch+eval, 产物是 IIFE, register(window) 必写全局)
@@ -145,7 +143,7 @@ async function loadPluginFrontend() {
           }
           mountFn = reg.mount(mountEl.value, ctx)
         } catch (e) {
-          perr.value = '挂载失败: ' + String((e && e.message) || e)
+          console.warn('[plugin:' + name.value + '] 挂载失败:', (e && e.message) || e)
         }
       }
       return
@@ -153,13 +151,11 @@ async function loadPluginFrontend() {
   } catch (e) {
     if (!firstErr) firstErr = String((e && e.message) || e)
   }
-  // 回退: 有内置组件(MAP)则静默回退(无独立前端是正常情况, 不报错);
-  // 仅当连内置组件都没有时才提示加载失败; 注册缺失(notRegistered)始终提示(产物缺陷)
+  // 回退: 有内置组件(MAP)则静默回退(无独立前端是正常情况);
+  // 诊断信息不发到插件页头部, 归位于「服务健康」页对应插件行(console 保留一份)
   firstDiag = 'err=' + (firstErr || '-') + ' regKeys=' + (window.__rcPlugin_ ? Object.keys(window.__rcPlugin_).join(',') : 'none') + ' v4keys=' + (window.__rcPluginV4__ ? Object.keys(window.__rcPluginV4__).join(',') : 'none')
-  if (!MAP[name.value.toLowerCase()] && firstErr) {
-    perr.value = '加载插件前端失败: ' + firstErr
-  } else if (notRegistered && MAP[name.value.toLowerCase()]) {
-    perr.value = '插件独立前端注册异常: ' + firstErr
+  if (firstErr || notRegistered) {
+    console.warn('[plugin:' + name.value + '] 前端加载诊断:', firstDiag)
   }
   mode.value = MAP[name.value.toLowerCase()] ? 'map' : 'generic'
 }
@@ -167,20 +163,12 @@ async function loadPluginFrontend() {
 onMounted(loadPluginFrontend)
 onBeforeUnmount(() => { if (typeof mountFn === 'function') { try { mountFn() } catch (e) {} } })
 
-onErrorCaptured((e) => { perr.value = String((e && (e.message || e)) || e) })
+onErrorCaptured((e) => { console.warn('[plugin:' + name.value + '] 渲染异常:', (e && (e.message || e)) || e) })
 </script>
 
 <template>
   <div>
-    <div v-if="perr" style="background:#7a1f1f;color:#fff;padding:10px 14px;margin:10px;font-size:12px;font-family:monospace">插件页错误: {{ perr }}</div>
-
-    <!-- 常驻诊断行: 仅回退态显示(方便定位独立前端为何未挂载) -->
-    <div v-if="mode !== 'plugin' && mode !== 'loading'" style="background:#0d1b2a;color:#7fd1ff;padding:8px 14px;margin:10px;font-size:11px;font-family:monospace;border:1px dashed #2d5f7a;border-radius:4px;">
-      [plugin-ctx] name={{ name }} mode={{ mode }}
-      <template v-if="firstDiag"> | {{ firstDiag }}</template>
-    </div>
-
-    <!-- 插件独立前端挂载区 -->
+    <!-- 插件独立前端挂载区(诊断信息见「服务健康」页, 不在插件页头部展示) -->
     <div v-if="mode === 'plugin'" ref="mountEl" class="plugin-mount"></div>
     <div v-else-if="mode === 'loading'" class="hint" style="padding:20px;">加载插件前端...</div>
 

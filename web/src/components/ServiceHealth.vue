@@ -28,12 +28,13 @@ async function load() {
       })
     }
     for (const it of (legacy && legacy.items) || []) {
-      const online = it.alive && it.health_http
+      const online = !!it.alive && !!it.health_http
       out.push({
         name: it.name, label: it.label, version: it.version, kind: 'plugin',
         source: 'legacy', status: online ? 'online' : 'offline', online,
         latency: null, fail: it.dead_count || 0, lastSeen: 0, ifaces: [],
-        legacy: true, err: it.error,
+        legacy: true, err: it.error, asset_ok: !!it.asset_ok,
+        health_http: !!it.health_http, runtime_log: it.runtime_log || '',
       })
     }
     rows.value = out
@@ -150,7 +151,16 @@ onBeforeUnmount(() => clearInterval(timer))
               <span class="faint">注册接口:</span>
               <span v-for="id in expandedRow.ifaces" :key="id" class="chip" @click.stop="goIfaces(id)">{{ id }}</span>
             </template>
-            <span v-else class="faint">该服务未注册接口(旧插件无接口级信息)</span>
+            <template v-else-if="expandedRow && expandedRow.legacy">
+              <div class="diag-grid">
+                <div class="diag-row"><span>加载错误</span><code>{{ expandedRow.err || '-' }}</code></div>
+                <div class="diag-row"><span>前端资产 plugin.js</span><code>{{ expandedRow.asset_ok ? '存在' : '缺失' }}</code></div>
+                <div class="diag-row"><span>健康端点</span><code>{{ expandedRow.health_http ? '可达' : '不可达' }}</code></div>
+                <div class="diag-row"><span>崩溃退避次数</span><code>{{ expandedRow.fail }}</code></div>
+                <div class="diag-row"><span>运行日志</span><code>{{ expandedRow.runtime_log || '-' }}</code></div>
+              </div>
+            </template>
+            <span v-else class="faint">该服务未注册接口</span>
           </td>
         </tr>
       </tbody>
@@ -177,6 +187,10 @@ onBeforeUnmount(() => clearInterval(timer))
 .err { color:#d33; font-size:12px; }
 .btn.small { padding: 2px 10px; font-size: 12px; margin-right: 4px; }
 .expand { background: rgba(53,121,168,.06); }
+.diag-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 18px; }
+.diag-row { font-size: 12px; }
+.diag-row span { color: #888; margin-right: 6px; }
+.diag-row code { background: #f0f0f0; border-radius: 4px; padding: 1px 6px; word-break: break-all; }
 .chip { display:inline-block; background:#eef4fa; border:1px solid #cfe0ee; border-radius: 10px; padding:2px 10px; margin:3px 4px 3px 0; font-size:12px; cursor:pointer; }
 .log-panel { margin-top:12px; border:1px solid var(--border,#e5e5e5); border-radius:8px; }
 .log-head { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border,#e5e5e5); }
