@@ -108,11 +108,32 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "path": target})
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/mkdir":
-		if err := core.Mkdir(abs); err != nil {
+		// 前端契约: body {path}(旧契约也兼容 query ?path=)
+		var b struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		target := b.Path
+		if target == "" {
+			target = r.URL.Query().Get("path")
+		}
+		if target == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "path 必填"})
+			return
+		}
+		targetAbs, err := resolveFM(target)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		if err := core.Mkdir(targetAbs); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "path": targetAbs})
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/rename":
 		var b struct {

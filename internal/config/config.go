@@ -46,7 +46,7 @@ type Config struct {
 func Load() *Config {
 	base := mustAbs(".")
 	return &Config{
-		DBDSN:              env("RC_DB", "sqlite:///data/rc.db"),
+		DBDSN:              env("RC_DB", "sqlite:///rc.db"), // 相对 DataDir => <data>/rc.db(避免 data/data 双嵌套)
 		DBPoolSize:         envInt("RC_DB_POOL_SIZE", 5),
 		DBQueryTimeout:     envInt("RC_DB_QUERY_TIMEOUT", 10),
 		BaseDir:            base,
