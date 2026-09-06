@@ -18745,7 +18745,7 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { tab: "extract", files: [], ext: null, cmp: null, err: "", env: null };
+        return { tab: "list", files: [], list: null, ext: null, cmp: null, fmt: "zip", level: 5, env: null, err: "" };
       },
       methods: {
         async read(e) {
@@ -18754,35 +18754,17 @@ ${codeFrame}` : message);
           for (const f of arr.slice(0, 10)) this.files.push({ name: f.name, data: await b64(f) });
           e.target.value = "";
         },
-        async extract() {
+        async run(method, payload) {
           this.err = "";
           try {
-            this.ext = await ctx.invoke("compress.dc.extract", { archive: this.files[0].data, name: this.files[0].name, organize: "none" });
-            this.list();
-          } catch (e) {
-            this.err = e && e.message || e;
-          }
-        },
-        async list() {
-          try {
-            const r = await ctx.invoke("compress.dc.list", { archive: this.files[0].data, name: this.files[0].name });
-            this.ext = r;
-          } catch (e) {
-            this.err = e && e.message || e;
-          }
-        },
-        async compress() {
-          this.err = "";
-          try {
-            this.ext = await ctx.invoke("compress.dc.compress", { files: this.files, format: "zip", level: 5, name: "archive" });
-          } catch (e) {
-            this.err = e && e.message || e;
-          }
-        },
-        async compare() {
-          this.err = "";
-          try {
-            this.cmp = await ctx.invoke("compress.dc.compare", { archives: this.files.map((f) => f.data) });
+            const r = await ctx.invoke(method, payload);
+            if (method.endsWith(".list")) this.list = r;
+            else if (method.endsWith(".extract")) {
+              this.ext = r;
+              this.tab = "extract";
+            } else if (method.endsWith(".compress")) this.ext = r;
+            else if (method.endsWith(".convert")) this.ext = r;
+            else if (method.endsWith(".compare")) this.cmp = r;
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18798,28 +18780,29 @@ ${codeFrame}` : message);
         this.env();
       },
       render() {
-        const tab = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
         return h("div", null, [
           h("div", { class: "section-title" }, "\u89E3\u538B\u538B\u7F29" + (this.env ? this.env.ok ? " \xB7 7z \u2713" : " \xB7 \u672A\u88C5 7z" : "")),
-          h("input", { type: "file", multiple: true, onchange: (e) => this.read(e), class: "input", style: "margin-bottom:8px;width:100%;" }),
-          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [tab("extract", "\u67E5\u770B/\u89E3\u538B"), tab("compress", "\u538B\u7F29"), tab("compare", "\u5BF9\u6BD4")]),
+          h("input", { type: "file", multiple: true, onchange: (e) => this.read(e), class: "input", style: "width:100%;margin-bottom:8px;" }),
+          h(
+            "div",
+            { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" },
+            [["list", "\u6253\u5305\u5185\u5BB9"], ["extract", "\u89E3\u538B"], ["compress", "\u538B\u7F29"], ["convert", "\u8F6C\u6362\u683C\u5F0F"], ["compare", "\u5BF9\u6BD4"]].map((x) => t(x[0], x[1]))
+          ),
           this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
-          this.tab === "extract" ? h("div", null, [
-            h("button", { class: "btn btn-sm", onclick: () => this.list() }, "\u67E5\u770B\u5185\u5BB9"),
-            h("button", { class: "btn btn-sm btn-primary", onclick: () => this.extract() }, "\u89E3\u538B\u5E76\u6253\u5305"),
-            this.ext ? h("div", { style: "margin-top:8px;font-size:12px;" }, [
-              h("p", null, "\u5171 " + (this.ext.total != null ? this.ext.total + " \u9879" : this.ext.count != null ? this.ext.count + " \u4E2A\u6587\u4EF6" : "-")),
-              this.ext.download ? h("a", { href: this.ext.download, class: "btn btn-sm" }, "\u4E0B\u8F7D\u7ED3\u679C") : null
-            ]) : null
-          ]) : null,
-          this.tab === "compress" ? h("div", null, [
-            h("button", { class: "btn", onclick: () => this.compress() }, "\u538B\u7F29\u4E3A zip"),
-            this.ext && this.ext.download ? h("a", { href: this.ext.download, style: "margin-left:8px;" }, "\u4E0B\u8F7D") : null
-          ]) : null,
-          this.tab === "compare" ? h("div", null, [
-            h("button", { class: "btn", onclick: () => this.compare() }, "\u5BF9\u6BD4\u524D\u4E24\u6587\u4EF6"),
-            this.cmp ? h("p", { style: "font-size:12px;" }, "A \u72EC\u6709 " + this.cmp.only_a.length + " \xB7 B \u72EC\u6709 " + this.cmp.only_b.length + " \xB7 \u5DEE\u5F02 " + this.cmp.diff.length + " \xB7 \u76F8\u540C " + this.cmp.same) : null
-          ]) : null
+          this.tab !== "compare" ? h("button", { class: "btn btn-sm btn-primary", onclick: () => {
+            if (this.tab === "list") this.run("compress.dc.list", { archive: this.files[0].data, name: this.files[0].name });
+            if (this.tab === "extract") this.run("compress.dc.extract", { archive: this.files[0].data, name: this.files[0].name, organize: "none" });
+            if (this.tab === "compress") this.run("compress.dc.compress", { files: this.files, format: this.fmt, level: Number(this.level) || 5, name: "archive" });
+            if (this.tab === "convert") this.run("compress.dc.convert", { archive: this.files[0].data, name: this.files[0].name, format: this.fmt });
+          } }, "\u6267\u884C") : h("button", { class: "btn btn-sm btn-primary", onclick: () => this.run("compress.dc.compare", { archives: this.files.map((f) => f.data) }) }, "\u5BF9\u6BD4\u524D\u4E24\u6587\u4EF6"),
+          this.fmtView = h("div", { class: "flex", style: "gap:6px;margin:6px 0;" }, [
+            this.tab === "compress" || this.tab === "convert" ? h("select", { class: "input", value: this.fmt, onchange: (e) => this.fmt = e.target.value }, ["7z", "zip", "tar", "gz"].map((f) => h("option", { value: f }, f))) : null,
+            this.tab === "compress" ? h("input", { class: "input", style: "width:70px;", placeholder: "\u7EA7\u522B", value: this.level, oninput: (e) => this.level = e.target.value }) : null
+          ]),
+          this.list ? h("p", { class: "faint", style: "font-size:12px;" }, this.list.name + " \xB7 " + this.list.total + " \u9879 \xB7 " + this.list.total_size + " B") : null,
+          this.ext && this.ext.download ? h("a", { href: this.ext.download, class: "btn btn-sm", style: "margin-top:4px;" }, "\u4E0B\u8F7D\u7ED3\u679C") : null,
+          this.cmp ? h("p", { style: "font-size:12px;margin-top:4px;" }, "A \u72EC\u6709 " + this.cmp.only_a.length + " \xB7 B \u72EC\u6709 " + this.cmp.only_b.length + " \xB7 \u5DEE\u5F02 " + this.cmp.diff.length + " \xB7 \u76F8\u540C " + this.cmp.same) : null
         ]);
       }
     };

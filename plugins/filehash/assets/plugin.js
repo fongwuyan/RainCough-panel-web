@@ -18745,13 +18745,13 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { tab: "calc", files: [], results: [], dup: null, gen: null, err: "" };
+        return { tab: "calc", files: [], stats: null, results: [], dup: null, gen: null, verify: null, verifyAlgo: "sha256", err: "" };
       },
       methods: {
         async pick(e) {
           const arr = e.target.files ? Array.from(e.target.files) : [];
           this.files = [];
-          for (const f of arr.slice(0, 10)) this.files.push({ name: f.name, data: await b64(f) });
+          for (const f of arr.slice(0, 12)) this.files.push({ name: f.name, data: await b64(f) });
           e.target.value = "";
         },
         async calc() {
@@ -18759,6 +18759,14 @@ ${codeFrame}` : message);
           try {
             const r = await ctx.invoke("filehash.h.calc", { files: this.files });
             this.results = r && r.results || [];
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async stats() {
+          this.err = "";
+          try {
+            this.stats = await ctx.invoke("filehash.da.stats", { files: this.files });
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18778,32 +18786,48 @@ ${codeFrame}` : message);
           } catch (e) {
             this.err = e && e.message || e;
           }
+        },
+        async verify() {
+          this.err = "";
+          try {
+            this.verify = await ctx.invoke("filehash.h.verify", { files: this.files });
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
         }
       },
       render() {
-        const tab = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        const cats = (this.stats && this.stats.categories || []).filter((c) => c.count > 0);
         return h("div", null, [
           h("div", { class: "section-title" }, "\u6587\u4EF6\u6821\u9A8C"),
-          h("input", { type: "file", multiple: true, onchange: (e) => this.pick(e), class: "input", style: "margin-bottom:8px;" }),
-          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [tab("calc", "\u8BA1\u7B97\u54C8\u5E0C"), tab("dup", "\u76EE\u5F55\u67E5\u91CD"), tab("gen", "\u751F\u6210\u6E05\u5355")]),
+          h("input", { type: "file", multiple: true, onchange: (e) => this.pick(e), class: "input", style: "width:100%;margin-bottom:8px;" }),
+          h(
+            "div",
+            { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" },
+            [["calc", "\u8BA1\u7B97"], ["stats", "\u76EE\u5F55\u7EDF\u8BA1"], ["dup", "\u67E5\u91CD"], ["gen", "\u751F\u6210\u6E05\u5355"], ["verify", "\u6821\u9A8C"]].map((x) => t(x[0], x[1]))
+          ),
           this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
           this.tab === "calc" ? h("div", null, [
-            h("button", { class: "btn", style: "margin-bottom:8px;", onclick: () => this.calc() }, "\u8BA1\u7B97 md5/sha1/sha256"),
-            h("table", { class: "table" }, [
-              h("thead", null, h("tr", null, [h("th", null, "\u6587\u4EF6"), h("th", null, "\u5927\u5C0F"), h("th", null, "md5"), h("th", null, "sha256")])),
-              h("tbody", null, this.results.map((r) => h("tr", { key: r.name }, [h("td", null, r.name), h("td", null, r.size), h("td", { class: "mono" }, r.md5), h("td", { class: "mono" }, r.sha256)])))
-            ])
+            h("button", { class: "btn", onclick: () => this.calc() }, "\u8BA1\u7B97 md5/sha1/sha256"),
+            h("table", { class: "table", style: "margin-top:6px;" }, [h("thead", null, h("tr", null, ["\u6587\u4EF6", "md5", "sha256"].map((x) => h("th", null, x)))), h("tbody", null, this.results.map((r) => h("tr", { key: r.name }, [h("td", null, r.name), h("td", { class: "mono" }, r.md5), h("td", { class: "mono" }, r.sha256)])))])
+          ]) : null,
+          this.tab === "stats" ? h("div", null, [
+            h("button", { class: "btn", onclick: () => this.stats() }, "\u7EDF\u8BA1\u4E0A\u4F20\u6587\u4EF6/\u538B\u7F29\u5305"),
+            this.stats ? h("div", { style: "margin-top:6px;font-size:13px;" }, [
+              h("p", null, this.stats.total_files + " \u4E2A\u6587\u4EF6 \xB7 \u5171 " + this.stats.total_size + " B"),
+              cats.map((c) => h("span", { class: "chip", style: "margin-right:6px;" }, c.name + " " + c.count))
+            ]) : null
           ]) : null,
           this.tab === "dup" ? h("div", null, [
-            h("button", { class: "btn", style: "margin-bottom:8px;", onclick: () => this.dup() }, "\u67E5\u91CD(\u6309 MD5)"),
-            this.dup ? this.dup.duplicates.map((d, i) => h("div", { key: i, class: "card", style: "padding:8px;margin-bottom:6px;font-size:12px;" }, [
-              h("code", null, d.hash.slice(0, 12) + "\u2026"),
-              " \xD7 " + d.files.length + " \u4EFD: " + d.files.map((f) => f.name).join(", ")
-            ])) : null
+            h("button", { class: "btn", onclick: () => this.dup() }, "\u67E5\u91CD(\u6309 MD5)"),
+            this.dup ? this.dup.duplicates.map((d, i) => h("div", { key: i, style: "margin-top:4px;font-size:12px;" }, d.hash.slice(0, 12) + "\u2026 \xD7" + d.files.length + ": " + d.files.map((f) => f.name).join(", "))) : null
           ]) : null,
-          this.tab === "gen" ? h("div", null, [
-            h("button", { class: "btn", style: "margin-bottom:8px;", onclick: () => this.gen() }, "\u751F\u6210 checksums.sha256"),
-            this.gen ? h("div", null, [h("a", { href: this.gen.download, class: "btn btn-sm" }, "\u4E0B\u8F7D\u6821\u9A8C\u6E05\u5355")]) : null
+          this.tab === "gen" ? h("div", null, [h("button", { class: "btn", onclick: () => this.gen() }, "\u751F\u6210 checksums.sha256"), this.gen ? h("a", { href: this.gen.download, class: "btn btn-sm", style: "margin-left:6px;" }, "\u4E0B\u8F7D") : null]) : null,
+          this.tab === "verify" ? h("div", null, [
+            h("p", { class: "faint", style: "font-size:12px;" }, "\u4E0A\u4F20\u6821\u9A8C\u6587\u4EF6(.md5/.sha1/.sha256) + \u5BF9\u5E94\u6570\u636E\u6587\u4EF6"),
+            h("button", { class: "btn", onclick: () => this.verify() }, "\u6821\u9A8C"),
+            this.verify ? h("table", { class: "table", style: "margin-top:6px;" }, [h("thead", null, h("tr", null, ["\u6587\u4EF6", "\u72B6\u6001"].map((x) => h("th", null, x)))), h("tbody", null, this.verify.results.map((r, i) => h("tr", { key: i }, [h("td", null, r.file), h("td", { style: { color: r.status === "ok" ? "#2e9e5b" : "#f85149" } }, r.status)])))]) : null
           ]) : null
         ]);
       }

@@ -18739,29 +18739,117 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { ov: null, status: null, env: null, err: "", loading: true, timer: null };
+        return { tab: "ov", ov: null, status: null, env: null, subs: [], nodes: [], subUrl: "", subName: "", q: "", wgText: "", wgName: "", ovpnText: "", ovpnName: "", err: "", timer: null };
       },
       methods: {
         async load() {
-          this.loading = true;
           try {
-            const [ov, st, env] = await Promise.all([
-              ctx.invoke("vpn.overview").catch(() => null),
-              ctx.invoke("vpn.v2.status").catch(() => null),
-              ctx.invoke("vpn.env").catch(() => null)
-            ]);
+            const [ov, st, env] = await Promise.all([ctx.invoke("vpn.overview").catch(() => null), ctx.invoke("vpn.v2.status").catch(() => null), ctx.invoke("vpn.env").catch(() => null)]);
             this.ov = ov;
             this.status = st;
             this.env = env;
           } catch (e) {
             this.err = e && e.message || e;
           }
-          this.loading = false;
+        },
+        async tabLoad(k) {
+          this.err = "";
+          try {
+            if (k === "subs") this.subs = (await ctx.invoke("vpn.v2.subs.list")).subs || [];
+            if (k === "nodes") this.nodes = (await ctx.invoke("vpn.v2.nodes.list", { q: this.q })).nodes || [];
+            if (k === "wg") {
+            }
+            if (k === "ovpn") {
+            }
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async addSub() {
+          if (!this.subUrl) {
+            this.err = "\u8BA2\u9605\u5730\u5740\u5FC5\u586B";
+            return;
+          }
+          try {
+            await ctx.invoke("vpn.v2.subs.save", { url: this.subUrl, name: this.subName });
+            this.subUrl = "";
+            this.tabLoad("subs");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async delSub(name) {
+          try {
+            await ctx.invoke("vpn.v2.subs.delete", { name });
+            this.tabLoad("subs");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async refreshSubs() {
+          try {
+            await ctx.invoke("vpn.v2.subs.refresh");
+            this.tabLoad("nodes");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async delNode(id) {
+          try {
+            await ctx.invoke("vpn.v2.nodes.delete", { id });
+            this.tabLoad("nodes");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async testNode(id) {
+          try {
+            const r = await ctx.invoke("vpn.v2.nodes.test", { ids: [id] });
+            alert(JSON.stringify(r));
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async connect(id) {
+          try {
+            await ctx.invoke("vpn.v2.connect", { id });
+            this.load();
+            this.tab = "ov";
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
         },
         async disconnect() {
           try {
             await ctx.invoke("vpn.v2.connect", { action: "disconnect" });
             this.load();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async stopAll() {
+          try {
+            await ctx.invoke("vpn.stop.all");
+            this.load();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async wgAct(kind, act) {
+          const name = kind === "wg" ? this.wgName : this.ovpnName;
+          if (kind === "import" ? !this.wgText.trim() && !this.ovpnText.trim() : !name) {
+            this.err = "\u7F3A\u540D\u79F0/\u914D\u7F6E";
+            return;
+          }
+          try {
+            if (kind === "import") {
+              await ctx.invoke("vpn.wg.import", { name: this.wgName, text: this.wgText });
+              this.wgText = "";
+            } else if (kind === "wg") await ctx.invoke("vpn.wg." + act, { name });
+            else if (kind === "ovpnimport") {
+              await ctx.invoke("vpn.ovpn.import", { name: this.ovpnName, text: this.ovpnText });
+              this.ovpnText = "";
+            } else await ctx.invoke("vpn.ovpn." + act, { name });
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18775,41 +18863,75 @@ ${codeFrame}` : message);
         clearInterval(this.timer);
       },
       render() {
-        const ov = this.ov || {};
-        const ch = ov.channels || {};
-        const row = (c, label) => h("div", { style: "margin-bottom:6px;font-size:13px;" }, [
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => {
+          this.tab = k;
+          this.tabLoad(k);
+        } }, l);
+        const ch = (this.ov || {}).channels || {};
+        const row = (c, label) => h("div", { style: "margin-bottom:4px;font-size:13px;" }, [
           h("label", null, label),
           " ",
           h("b", { style: { color: c && c.running ? "#2e9e5b" : "#d9524e" } }, c && c.running ? "\u8FD0\u884C\u4E2D" : "\u672A\u8FD0\u884C"),
           c && c.running && c.name ? h("span", { class: "faint" }, " \xB7 " + c.name) : null
         ]);
-        return h("div", { class: "vpn-panel" }, [
-          h("div", { class: "section" }, [
-            h("div", { class: "section-title", style: "display:flex;justify-content:space-between;" }, [
-              h("span", null, "VPN \u901A\u9053\u603B\u89C8"),
-              h("button", { class: "btn btn-sm", onclick: () => this.load() }, "\u5237\u65B0")
-            ]),
-            this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
-            h("div", { style: "margin-bottom:8px;font-size:13px;" }, [
-              h("span", { class: "faint" }, "\u672C\u673A\u76F4\u8FDE IP: "),
-              h("b", null, ov.direct_ip || "-"),
-              h("span", { class: "faint", style: "margin-left:16px;" }, "\u4EE3\u7406 IP: "),
-              h("b", null, this.status && this.status.proxy_ip || "-")
-            ]),
-            row(ch.proxy, "v2ray/sing-box \u4EE3\u7406"),
+        return h("div", null, [
+          h("div", { class: "section-title" }, "VPN \u7F51\u7EDC"),
+          h(
+            "div",
+            { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" },
+            [["ov", "\u603B\u89C8"], ["subs", "\u8BA2\u9605"], ["nodes", "\u8282\u70B9"], ["wg", "WireGuard"], ["ovpn", "OpenVPN"]].map((x) => t(x[0], x[1]))
+          ),
+          this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
+          this.tab === "ov" ? h("div", { class: "section" }, [
+            h("div", { style: "margin-bottom:6px;font-size:13px;" }, ["\u76F4\u8FDE IP ", h("b", null, (this.ov || {}).direct_ip || "-"), " \xB7 \u4EE3\u7406 IP ", h("b", null, this.status && this.status.proxy_ip || "-")]),
+            row(ch.proxy, "\u4EE3\u7406"),
             row(ch.wireguard, "WireGuard"),
             row(ch.openvpn, "OpenVPN"),
-            this.status && this.status.connected ? h("button", { class: "btn btn-sm btn-danger", onclick: () => this.disconnect() }, "\u65AD\u5F00\u4EE3\u7406") : null
-          ]),
-          h("div", { class: "section" }, [
-            h("div", { class: "section-title" }, "\u5DE5\u5177\u94FE"),
-            h("code", { style: "font-size:12px;" }, JSON.stringify(this.env ? {
-              v2ray: !!this.env.v2ray,
-              sing_box: !!this.env.sing_box,
-              wireguard: !!this.env.wireguard,
-              openvpn: !!this.env.openvpn
-            } : {}))
-          ])
+            h("div", { class: "flex", style: "gap:6px;margin-top:8px;" }, [
+              this.status && this.status.connected ? h("button", { class: "btn btn-sm btn-danger", onclick: () => this.disconnect() }, "\u65AD\u5F00\u4EE3\u7406") : null,
+              h("button", { class: "btn btn-sm", onclick: () => this.load() }, "\u5237\u65B0"),
+              h("button", { class: "btn btn-sm btn-danger", onclick: () => this.stopAll() }, "\u505C\u6B62\u5168\u90E8\u901A\u9053")
+            ])
+          ]) : null,
+          this.tab === "subs" ? h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
+              h("input", { class: "input", style: "flex:1;", placeholder: "\u8BA2\u9605 URL", value: this.subUrl, oninput: (e) => this.subUrl = e.target.value }),
+              h("input", { class: "input", style: "width:120px;", placeholder: "\u540D\u79F0", value: this.subName, oninput: (e) => this.subName = e.target.value }),
+              h("button", { class: "btn", onclick: () => this.addSub() }, "\u6DFB\u52A0"),
+              h("button", { class: "btn btn-sm", onclick: () => this.refreshSubs() }, "\u5168\u90E8\u62C9\u53D6")
+            ]),
+            this.subs.map((s) => h("div", { key: s.url, class: "flex", style: "justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);" }, [
+              h("div", null, [h("b", null, s.name), h("div", { class: "faint", style: "font-size:11px;" }, s.url + " \xB7 \u8282\u70B9 " + (s.nodes || 0) + (s.error ? " \xB7 " + s.error : ""))]),
+              h("button", { class: "btn btn-sm btn-danger", onclick: () => this.delSub(s.name) }, "\u5220\u9664")
+            ]))
+          ]) : null,
+          this.tab === "nodes" ? h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
+              h("input", { class: "input", style: "flex:1;", placeholder: "\u8FC7\u6EE4\u540D\u79F0/\u5730\u5740/\u534F\u8BAE", value: this.q, oninput: (e) => this.q = e.target.value, onkeyup: (e) => {
+                if (e.key === "Enter") this.tabLoad("nodes");
+              } }),
+              h("button", { class: "btn btn-sm", onclick: () => this.tabLoad("nodes") }, "\u641C\u7D22")
+            ]),
+            this.nodes.map((n) => h("div", { key: n._id, class: "flex", style: "justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);" }, [
+              h("div", null, [h("b", null, n.name || n._id.slice(0, 8)), h("span", { class: "faint" }, " \xB7 " + (n.protocol || "") + " \xB7 " + (n.addr || "") + (n.latency != null ? " \xB7 " + n.latency + "ms" : ""))]),
+              h("div", { class: "flex", style: "gap:4px;" }, [
+                h("button", { class: "btn btn-sm", onclick: () => this.testNode(n._id) }, "\u6D4B\u901F"),
+                h("button", { class: "btn btn-sm btn-primary", onclick: () => this.connect(n._id) }, "\u8FDE\u63A5"),
+                h("button", { class: "btn btn-sm btn-danger", onclick: () => this.delNode(n._id) }, "\u5220")
+              ])
+            ]))
+          ]) : null,
+          this.tab === "wg" || this.tab === "ovpn" ? h("div", { class: "section" }, [
+            this.tab === "wg" ? [
+              h("input", { class: "input", style: "width:160px;margin-bottom:6px;", placeholder: "\u63A5\u53E3\u540D", value: this.wgName, oninput: (e) => this.wgName = e.target.value }),
+              h("textarea", { class: "input", style: "width:100%;min-height:90px;margin-bottom:6px;", placeholder: "wg \u914D\u7F6E\u5185\u5BB9", value: this.wgText, oninput: (e) => this.wgText = e.target.value }),
+              h("div", { class: "flex", style: "gap:6px;" }, [h("button", { class: "btn btn-sm", onclick: () => this.wgAct("import", null) }, "\u5BFC\u5165"), h("button", { class: "btn btn-sm", onclick: () => this.wgAct("wg", "up") }, "\u542F\u7528"), h("button", { class: "btn btn-sm", onclick: () => this.wgAct("wg", "down") }, "\u505C\u7528")])
+            ] : [
+              h("input", { class: "input", style: "width:160px;margin-bottom:6px;", placeholder: "\u914D\u7F6E\u540D", value: this.ovpnName, oninput: (e) => this.ovpnName = e.target.value }),
+              h("textarea", { class: "input", style: "width:100%;min-height:90px;margin-bottom:6px;", placeholder: "ovpn \u914D\u7F6E\u5185\u5BB9", value: this.ovpnText, oninput: (e) => this.ovpnText = e.target.value }),
+              h("div", { class: "flex", style: "gap:6px;" }, [h("button", { class: "btn btn-sm", onclick: () => this.wgAct("ovpnimport", null) }, "\u5BFC\u5165"), h("button", { class: "btn btn-sm", onclick: () => this.wgAct("ovpn", "up") }, "\u542F\u52A8"), h("button", { class: "btn btn-sm", onclick: () => this.wgAct("ovpn", "down") }, "\u505C\u6B62")])
+            ]
+          ]) : null
         ]);
       }
     };
@@ -18825,9 +18947,7 @@ ${codeFrame}` : message);
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "VPN \u7F51\u7EDC" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

@@ -18739,31 +18739,29 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { containers: [], info: null, showAll: false, loading: false, err: "" };
+        return { tab: "ctr", info: null, status: null, env: null, containers: [], images: [], volumes: [], networks: [], cps: null, create: { image: "", name: "", ports: "", env: "", volumes: "" }, err: "" };
       },
       methods: {
         async load() {
-          this.loading = true;
           try {
-            const r = await ctx.invoke("docker.containers.list");
-            this.containers = r && r.containers || [];
+            const [info, status, env, ctr] = await Promise.all([
+              ctx.invoke("docker.info").catch(() => null),
+              ctx.invoke("docker.status").catch(() => null),
+              ctx.invoke("docker.env").catch(() => null),
+              ctx.invoke("docker.containers.list")
+            ]);
+            this.info = info;
+            this.status = status;
+            this.env = env;
+            this.containers = ctr && ctr.containers || [];
           } catch (e) {
             this.err = e && e.message || e;
-          }
-          this.loading = false;
-        },
-        async loadInfo() {
-          try {
-            const d = await ctx.invoke("docker.info");
-            this.info = d;
-          } catch (e) {
-            this.info = null;
           }
         },
         async act(cid, action) {
           try {
-            const d = await ctx.invoke("docker.containers." + action, { id: cid });
-            if (d && d.ok === false) this.err = d.error || "";
+            const r = await ctx.invoke("docker.containers." + action, { id: cid });
+            if (r.ok === false) this.err = r.error || "";
             this.load();
           } catch (e) {
             this.err = e && e.message || e;
@@ -18771,8 +18769,73 @@ ${codeFrame}` : message);
         },
         async logs(cid) {
           try {
-            const d = await ctx.invoke("docker.containers.logs", { id: cid });
-            alert(d && d.log || "(\u7A7A\u65E5\u5FD7)");
+            const r = await ctx.invoke("docker.containers.logs", { id: cid });
+            alert(r && r.log || "(\u7A7A\u65E5\u5FD7)");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async tabLoad(k) {
+          this.err = "";
+          try {
+            if (k === "img") this.images = (await ctx.invoke("docker.images.list")).images || [];
+            if (k === "vol") this.volumes = (await ctx.invoke("docker.volumes.list")).volumes || [];
+            if (k === "net") this.networks = (await ctx.invoke("docker.networks.list")).networks || [];
+            if (k === "cp") this.cps = await ctx.invoke("docker.compose.ps", { path: this.cpPath || "/" }).catch(() => null);
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async imgAct(id, act) {
+          try {
+            const r = await ctx.invoke("docker.images." + (act === "remove" ? "remove" : "pull"), act === "remove" ? { id } : { name: this.pullName });
+            if (r.ok === false) this.err = r.error || "";
+            this.tabLoad("img");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async volRm(name) {
+          try {
+            await ctx.invoke("docker.volume.remove", { name });
+            this.tabLoad("vol");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async prune() {
+          try {
+            await ctx.invoke("docker.system.prune", { all: true, volumes: true });
+            this.load();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async create() {
+          try {
+            await ctx.invoke("docker.containers.create", {
+              image: this.create.image,
+              name: this.create.name,
+              ports: this.create.ports.split(",").map((s) => s.trim()).filter(Boolean),
+              env: this.create.env.split(",").map((s) => s.trim()).filter(Boolean),
+              volumes: this.create.volumes.split(",").map((s) => s.trim()).filter(Boolean)
+            });
+            this.load();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async cp(action) {
+          if (!this.cpPath) {
+            this.err = "\u8BF7\u8F93\u5165 compose \u76EE\u5F55";
+            return;
+          }
+          this.err = "";
+          try {
+            const map2 = { up: "docker.compose.up", down: "docker.compose.down", ps: "docker.compose.ps" };
+            const r = await ctx.invoke(map2[action], { path: this.cpPath });
+            this.cps = r;
+            if (action !== "ps") this.tabLoad("cp");
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18780,43 +18843,68 @@ ${codeFrame}` : message);
       },
       mounted() {
         this.load();
-        this.loadInfo();
+        this.tabLoad("img");
       },
       render() {
-        const rows = this.containers.map((c) => h("tr", { key: c.id }, [
-          h("td", { class: "mono" }, c.name),
-          h("td", { class: "mono faint" }, c.image),
-          h("td", null, c.status),
-          h("td", { class: "mono faint", style: "font-size:11px;" }, c.ports || "-"),
-          h("td", null, h("div", { class: "flex", style: "gap:4px;justify-content:flex-end;" }, [
-            h("button", { class: "btn btn-sm", onclick: () => this.act(c.id, "start") }, "\u542F\u52A8"),
-            h("button", { class: "btn btn-sm", onclick: () => this.act(c.id, "stop") }, "\u505C\u6B62"),
-            h("button", { class: "btn btn-sm", onclick: () => this.act(c.id, "restart") }, "\u91CD\u542F"),
-            h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.logs(c.id) }, "\u65E5\u5FD7"),
-            h("button", { class: "btn btn-sm btn-danger", onclick: () => this.act(c.id, "remove") }, "\u5220\u9664")
-          ]))
-        ]));
-        return h("div", { class: "docker-panel" }, [
-          h("div", { class: "section" }, [
-            h("div", { class: "section-title", style: "display:flex;justify-content:space-between;align-items:center;" }, [
-              h("span", null, "Docker \u5BB9\u5668" + (this.info && this.info.server_version ? " \xB7 v" + this.info.server_version : "")),
-              h("div", { class: "flex", style: "gap:6px;" }, [
-                h("label", { style: "font-size:12px;display:flex;align-items:center;gap:4px;" }, [
-                  h("input", { type: "checkbox", checked: this.showAll, onchange: (e) => {
-                    this.showAll = e.target.checked;
-                    this.load();
-                  } }),
-                  "\u663E\u793A\u5DF2\u505C\u6B62"
-                ]),
-                h("button", { class: "btn btn-sm", onclick: () => this.load() }, "\u5237\u65B0")
-              ])
+        const st = this.status || {};
+        let v = null;
+        if (this.tab === "ctr") {
+          const rows = this.containers.map((c) => h("tr", { key: c.id }, [
+            h("td", { class: "mono" }, c.name),
+            h("td", { class: "faint" }, c.image),
+            h("td", { style: { color: c.state === "running" ? "#2e9e5b" : "#888" } }, c.status),
+            h("td", { class: "faint" }, (c.ports || []).join(", ") || "-"),
+            h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
+              c.state === "running" ? [h("button", { class: "btn btn-sm", onclick: () => this.act(c.id, "stop") }, "\u505C"), h("button", { class: "btn btn-sm", onclick: () => this.act(c.id, "restart") }, "\u91CD\u542F")] : h("button", { class: "btn btn-sm", onclick: () => this.act(c.id, "start") }, "\u542F"),
+              h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.logs(c.id) }, "\u65E5\u5FD7"),
+              h("button", { class: "btn btn-sm btn-danger", onclick: () => this.act(c.id, "remove") }, "\u5220")
+            ]))
+          ]));
+          v = h("div", null, [
+            h("button", { class: "btn btn-sm btn-danger", style: "margin-bottom:6px;", onclick: () => this.prune() }, "\u6E05\u7406\u672A\u7528\u8D44\u6E90(prune -a --volumes)"),
+            h("table", { class: "table" }, [h("thead", null, h("tr", null, ["\u540D\u79F0", "\u955C\u50CF", "\u72B6\u6001", "\u7AEF\u53E3", ""].map((x) => h("th", null, x)))), h("tbody", null, rows)])
+          ]);
+        } else if (this.tab === "img") {
+          v = h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:6px;" }, [
+              h("input", { class: "input", style: "flex:1;", placeholder: "\u955C\u50CF\u540D(\u62C9\u53D6)", value: this.pullName || "", oninput: (e) => this.pullName = e.target.value }),
+              h("button", { class: "btn btn-sm", onclick: () => this.imgAct(null, "pull") }, "\u62C9\u53D6(\u540E\u53F0)")
             ]),
-            this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
-            this.loading ? h("p", { class: "hint" }, "\u52A0\u8F7D\u4E2D...") : h("table", { class: "table" }, [
-              h("thead", null, h("tr", null, [h("th", null, "\u540D\u79F0"), h("th", null, "\u955C\u50CF"), h("th", null, "\u72B6\u6001"), h("th", null, "\u7AEF\u53E3"), h("th", null, "")])),
-              h("tbody", null, rows)
-            ])
-          ])
+            this.images.map((i) => h("div", { key: i.id, class: "flex", style: "justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);" }, [
+              h("div", null, [h("b", null, i.tags && i.tags[0] || i.id), h("span", { class: "faint" }, " \xB7 " + i.size + " B")]),
+              h("button", { class: "btn btn-sm btn-danger", onclick: () => this.imgAct(i.id, "remove") }, "\u5220\u9664")
+            ]))
+          ]);
+        } else if (this.tab === "vol") {
+          v = h("div", null, this.volumes.map((x) => h("div", { key: x.name, class: "flex", style: "justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);" }, [
+            h("span", null, x.name + " (" + x.driver + ")"),
+            h("button", { class: "btn btn-sm btn-danger", onclick: () => this.volRm(x.name) }, "\u5220\u9664")
+          ])));
+        } else if (this.tab === "net") {
+          v = h("table", { class: "table" }, [h("thead", null, h("tr", null, ["ID", "\u540D\u79F0", "\u9A71\u52A8", "\u8303\u56F4"].map((x) => h("th", null, x)))), h("tbody", null, this.networks.map((n) => h("tr", { key: n.id }, [h("td", { class: "mono" }, n.id), h("td", null, n.name), h("td", null, n.driver), h("td", null, n.scope)])))]);
+        } else if (this.tab === "create") {
+          const fields = [["image", "\u955C\u50CF*"], ["name", "\u540D\u79F0"], ["ports", "\u7AEF\u53E3\u6620\u5C04 80:80,8080:80"], ["env", "\u73AF\u5883 A=1,B=2"], ["volumes", "\u5377 /data:/data"]];
+          v = h("div", { class: "section" }, fields.map((f) => h("input", { class: "input", style: "width:100%;margin-bottom:6px;", placeholder: f[1], value: this.create[f[0]], oninput: (e) => this.create[f[0]] = e.target.value })).concat(h("button", { class: "btn btn-primary", onclick: () => this.create() }, "\u521B\u5EFA\u5E76\u8FD0\u884C")));
+        } else if (this.tab === "cp") {
+          v = h("div", { class: "section" }, [
+            h("div", { class: "flex", style: "gap:6px;" }, [
+              h("input", { class: "input", style: "flex:1;", placeholder: "compose \u9879\u76EE\u76EE\u5F55", value: this.cpPath || "", oninput: (e) => this.cpPath = e.target.value }),
+              h("button", { class: "btn btn-sm", onclick: () => this.cp("up") }, "up -d"),
+              h("button", { class: "btn btn-sm", onclick: () => this.cp("down") }, "down"),
+              h("button", { class: "btn btn-sm", onclick: () => this.cp("ps") }, "ps")
+            ]),
+            this.cps ? h("pre", { class: "faint", style: "white-space:pre-wrap;font-size:12px;margin-top:6px;" }, JSON.stringify(this.cps).slice(0, 500)) : null
+          ]);
+        }
+        const tabs = [["ctr", "\u5BB9\u5668"], ["img", "\u955C\u50CF"], ["vol", "\u5377"], ["net", "\u7F51\u7EDC"], ["create", "\u521B\u5EFA"], ["cp", "Compose"]];
+        return h("div", null, [
+          h("div", { class: "section-title" }, "Docker \u7BA1\u7406" + (this.info ? " \xB7 v" + this.info.server_version + " \xB7 " + (this.info.containers_running || 0) + "/" + (this.info.containers || 0) + " \u5BB9\u5668" : "")),
+          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" }, tabs.map((x) => h("button", { class: "btn btn-sm" + (this.tab === x[0] ? " btn-primary" : ""), onclick: () => {
+            this.tab = x[0];
+            this.tabLoad(x[0]);
+          } }, x[1]))),
+          this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
+          v
         ]);
       }
     };
@@ -18828,9 +18916,7 @@ ${codeFrame}` : message);
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "\u5BB9\u5668\u7BA1\u7406" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

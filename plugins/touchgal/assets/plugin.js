@@ -18736,19 +18736,24 @@ ${codeFrame}` : message);
 
   // plugins/touchgal/frontend/plugin.js
   var NAME = "touchgal";
+  var b64 = (f) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = rej;
+    r.readAsDataURL(f);
+  });
   function mount(container, ctx) {
     const App = {
       data() {
-        return { keyword: "", nsfw: false, results: [], res: [], loading: false, err: "" };
+        return { tab: "search", keyword: "", nsfw: false, results: [], res: [], img: "", rec: null, err: "", loading: false };
       },
       methods: {
         async search() {
           this.loading = true;
           this.err = "";
-          this.res = [];
           try {
             const r = await ctx.invoke("touchgal.search", { keyword: this.keyword, nsfw: this.nsfw });
-            this.results = r && (r.data || r.resources || []) || [];
+            this.results = r && (r.data || []) || [];
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18762,41 +18767,60 @@ ${codeFrame}` : message);
           } catch (e) {
             this.err = e && e.message || e;
           }
+        },
+        async pick(e) {
+          const f = e.target.files && e.target.files[0];
+          if (f) {
+            this.img = await b64(f);
+            e.target.value = "";
+          }
+        },
+        async recognize() {
+          const url = this.imgUrl && this.imgUrl.trim();
+          if (!url) {
+            this.err = "\u8BF7\u8F93\u5165\u56FE\u7247 URL";
+            return;
+          }
+          this.err = "";
+          try {
+            this.rec = await ctx.invoke("touchgal.recognize.dual", { imageUrl: url });
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
         }
       },
       render() {
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
         const rows = this.results.map((it) => h("tr", { key: it.patchId || it.id || it.name }, [
           h("td", null, it.name || it.title || ""),
-          h("td", { class: "faint" }, it.ratingCount != null ? it.ratingCount + " \u2605" : ""),
           h("td", null, h("button", { class: "btn btn-sm", onclick: () => this.resource(it) }, "\u8D44\u6E90"))
         ]));
-        const resList = this.res.map((x) => h("li", { key: x.name }, [
-          h("b", null, x.name),
-          " ",
-          h("span", { class: "faint" }, "[" + x.platform + " \xB7 " + x.language + "] " + x.size),
-          h("div", { class: "mono", style: "font-size:12px;" }, (x.content ? x.content + " | " : "") + "\u63D0\u53D6\u7801 " + x.code + " \xB7 \u5BC6\u7801 " + x.password)
-        ]));
-        return h("div", { class: "tg-panel" }, [
-          h("h3", "TouchGal \u6E38\u620F\u67E5\u627E"),
-          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;" }, [
-            h("input", { class: "input", placeholder: "\u6E38\u620F\u540D/\u5173\u952E\u5B57", value: this.keyword, oninput: (e) => this.keyword = e.target.value, style: "flex:1;min-width:200px;", onkeyup: (e) => {
-              if (e.key === "Enter") this.search();
-            } }),
-            h("label", { style: "font-size:12px;display:flex;align-items:center;gap:4px;" }, [
-              h("input", { type: "checkbox", checked: this.nsfw, onchange: (e) => this.nsfw = e.target.checked }),
-              "NSFW"
-            ]),
-            h("button", { class: "btn btn-primary", onclick: () => this.search(), disabled: this.loading }, this.loading ? "\u641C\u7D22\u4E2D..." : "\u641C\u7D22")
-          ]),
+        return h("div", null, [
+          h("div", { class: "section-title" }, "TouchGal \u6E38\u620F\u67E5\u627E"),
+          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [t("search", "\u641C\u7D22"), t("rec", "\u8BC6\u56FE")]),
           this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
-          h("table", { class: "table", style: "margin-top:10px;" }, [
-            h("thead", null, h("tr", null, [h("th", null, "\u540D\u79F0"), h("th", null, "\u8BC4\u5206"), h("th", null, "")])),
-            h("tbody", null, rows)
-          ]),
-          this.res.length ? h("div", { class: "section", style: "margin-top:12px;" }, [
-            h("div", { class: "section-title" }, "\u4E0B\u8F7D\u8D44\u6E90"),
-            h("ul", { style: "list-style:none;padding-left:0;" }, resList)
-          ]) : null
+          this.tab === "search" ? h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
+              h("input", { class: "input", style: "flex:1;", placeholder: "\u6E38\u620F\u540D", value: this.keyword, oninput: (e) => this.keyword = e.target.value, onkeyup: (e) => {
+                if (e.key === "Enter") this.search();
+              } }),
+              h("label", { style: "font-size:12px;display:flex;align-items:center;" }, h("input", { type: "checkbox", checked: this.nsfw, onchange: (e) => this.nsfw = e.target.checked }), "NSFW"),
+              h("button", { class: "btn", disabled: this.loading, onclick: () => this.search() }, this.loading ? "\u641C\u7D22\u4E2D..." : "\u641C\u7D22")
+            ]),
+            h("table", { class: "table" }, [h("thead", null, h("tr", null, ["\u540D\u79F0", ""].map((x) => h("th", null, x)))), h("tbody", null, rows)]),
+            this.res.length ? h("div", { class: "section", style: "margin-top:8px;" }, [
+              h("div", { class: "section-title" }, "\u4E0B\u8F7D\u8D44\u6E90"),
+              this.res.map((x) => h("div", { key: x.name, style: "padding:4px 0;" }, [
+                h("b", null, x.name),
+                h("span", { class: "faint" }, " [" + x.platform + " \xB7 " + x.language + "] " + x.size),
+                h("div", { class: "mono", style: "font-size:12px;" }, (x.content || "") + " | \u7801 " + x.code + " \xB7 \u5BC6 " + x.password)
+              ]))
+            ]) : null
+          ]) : h("div", null, [
+            h("input", { class: "input", style: "width:100%;margin-bottom:8px;", placeholder: "\u56FE\u7247 URL(animetrace)", value: this.imgUrl || "", oninput: (e) => this.imgUrl = e.target.value }),
+            h("button", { class: "btn", onclick: () => this.recognize() }, "\u53CC\u6A21\u578B\u8BC6\u56FE(anime+gal)"),
+            this.rec ? h("pre", { class: "faint", style: "white-space:pre-wrap;font-size:12px;margin-top:8px;" }, JSON.stringify(this.rec, null, 1).slice(0, 2e3)) : null
+          ])
         ]);
       }
     };
@@ -18808,9 +18832,7 @@ ${codeFrame}` : message);
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "\u6E38\u620F\u67E5\u627E" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

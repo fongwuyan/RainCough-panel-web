@@ -18739,17 +18739,14 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { tags: "", r18: false, num: 1, items: [], history: [], loading: false, err: "" };
+        return { tab: "fetch", tags: "", r18: false, items: [], history: [], cfg: null, settings: null, err: "", loading: false };
       },
       methods: {
         async fetch() {
           this.loading = true;
           this.err = "";
           try {
-            const r = await ctx.invoke("laizhangsetu.fetch", {
-              tags: this.tags.split(/[,\s。]+/).filter(Boolean),
-              r18: this.r18
-            });
+            const r = await ctx.invoke("laizhangsetu.fetch", { tags: this.tags.split(/[,\s。]+/).filter(Boolean), r18: this.r18 });
             this.items = r && r.items || [];
             this.loadHistory();
           } catch (e) {
@@ -18763,38 +18760,76 @@ ${codeFrame}` : message);
             this.history = r && r.history || [];
           } catch (e) {
           }
+        },
+        async clearHistory() {
+          try {
+            await ctx.invoke("laizhangsetu.history.clear");
+            this.history = [];
+            this.items = [];
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async loadCfg() {
+          try {
+            const [c, s] = await Promise.all([ctx.invoke("laizhangsetu.config.get"), ctx.invoke("laizhangsetu.settings")]);
+            this.cfg = c;
+            this.settings = s;
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async saveCfg() {
+          try {
+            await ctx.invoke("laizhangsetu.config.save", { r18: this.cfg.r18, exclude_ai: this.cfg.exclude_ai, flip_h: this.cfg.flip_h, flip_v: this.cfg.flip_v, blur_chance: Number(this.cfg.blur_chance) || 5, proxy: this.cfg.proxy, exclude_seen: this.cfg.exclude_seen, storage_paths: this.cfg.storage_paths });
+            this.loadCfg();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
         }
       },
       mounted() {
         this.loadHistory();
+        this.loadCfg();
       },
       render() {
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
         const imgs = (this.items.length ? this.items : this.history).map((it) => h("div", { key: it.pid || Math.random(), class: "card", style: "padding:6px;" }, [
-          it.url ? h("img", { src: it.url, loading: "lazy", style: "width:100%;display:block;background:#0a0d10;" }) : null,
-          h("div", { style: "font-size:11px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, it.title || "PID " + it.pid),
-          h("a", { href: it.url, target: "_blank", class: "mono faint", style: "font-size:10px;" }, "\u539F\u56FE \u2197")
+          it.url ? h("img", { src: it.url, loading: "lazy", style: "width:100%;display:block;" }) : null,
+          h("div", { style: "font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, it.title || "PID " + it.pid)
         ]));
-        return h("div", { class: "ls-panel" }, [
-          h("div", { class: "section" }, [
-            h("div", { class: "section-title" }, "\u6765\u5F20\u6DA9\u56FE(Pixiv / Lolicon API)"),
-            h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center;" }, [
-              h("input", { placeholder: "\u6807\u7B7E, \u9017\u53F7\u5206\u9694(\u5982: \u767D\u4E1D, \u5154\u5973\u90CE)", value: this.tags, oninput: (e) => this.tags = e.target.value, class: "input", style: "flex:1;min-width:180px;" }),
-              h("label", { style: "display:flex;align-items:center;gap:4px;font-size:12px;" }, [
-                h("input", { type: "checkbox", checked: this.r18, onchange: (e) => this.r18 = e.target.checked }),
-                "R18"
-              ]),
-              h(
-                "button",
-                { class: "btn btn-primary", onclick: () => this.fetch(), disabled: this.loading },
-                this.loading ? "\u83B7\u53D6\u4E2D..." : "\u83B7\u53D6"
-              )
+        const sw = (k, label) => h(
+          "label",
+          { style: "display:flex;gap:6px;align-items:center;font-size:13px;margin-bottom:6px;" },
+          h("input", { type: "checkbox", checked: !!this.cfg[k], onchange: (e) => this.cfg[k] = e.target.checked }),
+          label
+        );
+        return h("div", null, [
+          h("div", { class: "section-title" }, "\u6765\u5F20\u6DA9\u56FE(Lolicon)"),
+          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [t("fetch", "\u83B7\u53D6/\u5386\u53F2"), t("cfg", "\u8BBE\u7F6E")]),
+          this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
+          this.tab === "fetch" ? h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" }, [
+              h("input", { class: "input", style: "flex:1;min-width:160px;", placeholder: "\u6807\u7B7E, \u9017\u53F7\u5206\u9694", value: this.tags, oninput: (e) => this.tags = e.target.value, onkeyup: (e) => {
+                if (e.key === "Enter") this.fetch();
+              } }),
+              h("label", { style: "display:flex;align-items:center;font-size:12px;" }, h("input", { type: "checkbox", checked: this.r18, onchange: (e) => this.r18 = e.target.checked }), "R18"),
+              h("button", { class: "btn", disabled: this.loading, onclick: () => this.fetch() }, this.loading ? "\u83B7\u53D6\u4E2D..." : "\u83B7\u53D6"),
+              h("button", { class: "btn btn-sm btn-danger", onclick: () => this.clearHistory() }, "\u6E05\u7A7A\u5386\u53F2")
             ]),
-            this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null
-          ]),
-          h("div", { class: "section" }, [
-            h("div", { class: "section-title" }, this.items.length ? "\u672C\u6B21\u7ED3\u679C" : "\u5386\u53F2\u8BB0\u5F55"),
-            h("div", { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;" }, imgs),
-            !imgs.length && !this.loading ? h("p", { class: "hint" }, "\u6682\u65E0\u56FE\u7247, \u70B9\u51FB\u83B7\u53D6") : null
+            h("div", { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;" }, imgs.length ? imgs : h("p", { class: "hint" }, "\u6682\u65E0\u56FE\u7247, \u70B9\u51FB\u83B7\u53D6"))
+          ]) : h("div", { class: "section" }, [
+            this.cfg ? h("div", null, [
+              sw("r18", "R18"),
+              sw("exclude_ai", "\u6392\u9664 AI"),
+              sw("flip_h", "\u6C34\u5E73\u7FFB\u8F6C"),
+              sw("flip_v", "\u5782\u76F4\u7FFB\u8F6C"),
+              sw("exclude_seen", "\u6392\u9664\u5DF2\u89C1"),
+              h("div", { style: "margin:6px 0;" }, ["\u6A21\u7CCA\u6982\u7387 % ", h("input", { class: "input", style: "width:70px;", type: "number", value: this.cfg.blur_chance, oninput: (e) => this.cfg.blur_chance = e.target.value })]),
+              h("div", { style: "margin:6px 0;" }, ["\u4EE3\u7406 ", h("input", { class: "input", style: "width:200px;", value: this.cfg.proxy, oninput: (e) => this.cfg.proxy = e.target.value })]),
+              h("button", { class: "btn", onclick: () => this.saveCfg() }, "\u4FDD\u5B58")
+            ]) : null,
+            this.settings ? h("div", { class: "faint", style: "font-size:12px;margin-top:8px;" }, "\u5B58\u50A8\u8DEF\u5F84: " + (this.settings.storage_paths || []).map((p2) => p2.path + (p2.exists ? "" : " (\u4E0D\u5B58\u5728)")).join(" \xB7 ")) : null
           ])
         ]);
       }
@@ -18807,9 +18842,7 @@ ${codeFrame}` : message);
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "\u6765\u5F20\u6DA9\u56FE" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

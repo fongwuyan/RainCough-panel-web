@@ -18739,31 +18739,22 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { domains: [], info: null, loading: false, err: "" };
+        return { tab: "list", domains: [], info: null, detail: null, images: [], storage: null, cfg: {}, create: { name: "", vcpu: 2, memory_mb: 2048, disk: 8, iso: "", seed_user: "", seed_pw: "" }, err: "" };
       },
       methods: {
         async load() {
-          this.loading = true;
-          this.err = "";
           try {
-            const [d, i] = await Promise.all([
-              ctx.invoke("kvm.domains.list").catch((e) => {
-                this.err = e && e.message || e;
-                return { domains: [] };
-              }),
-              ctx.invoke("kvm.info").catch(() => null)
-            ]);
+            const [d, i] = await Promise.all([ctx.invoke("kvm.domains.list").catch(() => ({ domains: [] })), ctx.invoke("kvm.info").catch(() => null)]);
             this.domains = d && d.domains || [];
             this.info = i;
           } catch (e) {
             this.err = e && e.message || e;
           }
-          this.loading = false;
         },
         async act(name, action) {
           try {
             const r = await ctx.invoke("kvm.domain.action", { name, action });
-            if (r && r.ok === false) this.err = r.error || "";
+            if (r.ok === false) this.err = r.error || "";
             this.load();
           } catch (e) {
             this.err = e && e.message || e;
@@ -18777,11 +18768,59 @@ ${codeFrame}` : message);
               return;
             }
             if (r.need_reboot) {
-              alert(r.message || "\u9700\u91CD\u542F\u865A\u62DF\u673A\u751F\u6548");
+              alert(r.message);
               return;
             }
-            const host = location.hostname || "localhost";
-            window.open("ws://" + host + ":" + r.ws_port + "/websockify?token=" + r.token, "_blank");
+            window.open("ws://" + (location.hostname || "localhost") + ":" + r.ws_port + "/websockify?token=" + r.token, "_blank");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async detail(name) {
+          try {
+            this.detail = await ctx.invoke("kvm.domain.detail", { name });
+            this.tab = "detail";
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async tabLoad(k) {
+          this.err = "";
+          try {
+            if (k === "img") this.images = (await ctx.invoke("kvm.images.list")).images || [];
+            if (k === "storage") this.storage = await ctx.invoke("kvm.storage.list");
+            if (k === "cfg") this.cfg = await ctx.invoke("kvm.config.get");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async saveCfg() {
+          try {
+            await ctx.invoke("kvm.config.save", { sudo_pw: this.cfg.sudo_pw || "" });
+            this.tabLoad("cfg");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async createVm() {
+          if (!this.create.name) {
+            this.err = "\u540D\u79F0\u5FC5\u586B";
+            return;
+          }
+          this.err = "";
+          try {
+            await ctx.invoke("kvm.domains.create", this.create);
+            this.load();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async note(name) {
+          const note = prompt("\u5907\u6CE8:", "");
+          if (note === null) return;
+          try {
+            await ctx.invoke("kvm.domain.note.save", { name, note });
+            this.load();
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18789,30 +18828,61 @@ ${codeFrame}` : message);
       },
       mounted() {
         this.load();
+        this.tabLoad("img");
       },
       render() {
-        const rows = (this.domains || []).map((d) => h("tr", { key: d.name }, [
-          h("td", { class: "mono" }, d.name + (d.note ? " \xB7 " + d.note : "")),
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => {
+          this.tab = k;
+          this.tabLoad(k);
+        } }, l);
+        const rows = this.domains.map((d) => h("tr", { key: d.name }, [
+          h("td", null, d.name + (d.note ? " \xB7 " + d.note : "")),
           h("td", null, d.state_cn || d.state),
-          h("td", null, h("div", { style: "display:flex;gap:4px;" }, [
-            d.state === "running" ? [
-              h("button", { class: "btn btn-sm", onclick: () => this.act(d.name, "shutdown") }, "\u5173\u673A"),
-              h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.act(d.name, "reboot") }, "\u91CD\u542F")
-            ] : h("button", { class: "btn btn-sm", onclick: () => this.act(d.name, "start") }, "\u542F\u52A8"),
-            h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.vnc(d.name) }, "VNC"),
-            h("button", { class: "btn btn-sm btn-danger", onclick: () => this.act(d.name, "destroy") }, "\u5F3A\u5236\u5173\u95ED")
+          h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
+            d.state === "running" ? [h("button", { class: "btn btn-sm", onclick: () => this.act(d.name, "shutdown") }, "\u5173\u673A"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.act(d.name, "reboot") }, "\u91CD\u542F")] : h("button", { class: "btn btn-sm", onclick: () => this.act(d.name, "start") }, "\u542F\u52A8"),
+            h("button", { class: "btn btn-sm", onclick: () => this.vnc(d.name) }, "VNC"),
+            h("button", { class: "btn btn-sm", onclick: () => this.detail(d.name) }, "\u8BE6\u60C5"),
+            h("button", { class: "btn btn-sm", onclick: () => this.note(d.name) }, "\u5907\u6CE8"),
+            h("button", { class: "btn btn-sm btn-danger", onclick: () => this.act(d.name, "destroy") }, "\u5F3A\u5236\u5173")
           ]))
         ]));
-        return h("div", { class: "kvm-panel" }, [
-          h("div", { class: "section-title", style: "display:flex;justify-content:space-between;align-items:center;" }, [
-            h("span", null, "KVM \u865A\u62DF\u673A" + (this.info ? " \xB7 " + (this.info.libvirt || "") + " \xB7 " + this.info.domains_running + "/" + this.info.domains_total : "")),
-            h("button", { class: "btn btn-sm", onclick: () => this.load() }, "\u5237\u65B0")
-          ]),
+        return h("div", null, [
+          h("div", { class: "section-title" }, "KVM \u865A\u62DF\u673A" + (this.info ? " \xB7 " + (this.info.libvirt || "") + " \xB7 " + this.info.domains_running + "/" + this.info.domains_total : "")),
+          h(
+            "div",
+            { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" },
+            [["list", "\u865A\u62DF\u673A"], ["create", "\u521B\u5EFA"], ["img", "\u955C\u50CF"], ["storage", "\u5B58\u50A8"], ["cfg", "\u914D\u7F6E"]].map((x) => t(x[0], x[1]))
+          ),
           this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
-          this.loading ? h("p", { class: "hint" }, "\u52A0\u8F7D\u4E2D...") : h("table", { class: "table" }, [
-            h("thead", null, h("tr", null, [h("th", null, "\u540D\u79F0"), h("th", null, "\u72B6\u6001"), h("th", null, "\u64CD\u4F5C")])),
-            h("tbody", null, rows.length ? rows : h("tr", null, h("td", { colspan: 3, class: "empty" }, "\u65E0\u865A\u62DF\u673A")))
-          ])
+          this.tab === "list" ? h("table", { class: "table" }, [h("thead", null, h("tr", null, ["\u540D\u79F0", "\u72B6\u6001", "\u64CD\u4F5C"].map((x) => h("th", null, x)))), h("tbody", null, rows)]) : null,
+          this.tab === "detail" && this.detail ? h("div", { class: "section" }, [
+            h("h4", null, this.detail.name),
+            h("p", { class: "faint", style: "font-size:12px;" }, "CPU " + this.detail.vcpu + " \xB7 \u5185\u5B58 " + this.detail.memory_mb + "MB \xB7 \u81EA\u542F " + this.detail.autostart),
+            h("div", { style: "font-size:12px;" }, "\u78C1\u76D8: " + (this.detail.disks || []).map((x) => x.dev + ":" + x.src).join(" | "))
+          ]) : null,
+          this.tab === "create" ? h("div", { class: "section" }, [
+            h("input", { class: "input", style: "width:100%;margin-bottom:6px;", placeholder: "\u540D\u79F0*", value: this.create.name, oninput: (e) => this.create.name = e.target.value }),
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:6px;" }, [
+              h("input", { class: "input", style: "width:80px;", type: "number", placeholder: "vCPU", value: this.create.vcpu, oninput: (e) => this.create.vcpu = e.target.value }),
+              h("input", { class: "input", style: "width:100px;", type: "number", placeholder: "\u5185\u5B58MB", value: this.create.memory_mb, oninput: (e) => this.create.memory_mb = e.target.value }),
+              h("input", { class: "input", style: "width:80px;", placeholder: "\u5B89\u88C5ISO", value: this.create.iso, oninput: (e) => this.create.iso = e.target.value })
+            ]),
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:6px;" }, [
+              h("input", { class: "input", placeholder: "cloud-init \u7528\u6237", value: this.create.seed_user, oninput: (e) => this.create.seed_user = e.target.value }),
+              h("input", { class: "input", type: "password", placeholder: "cloud-init \u5BC6\u7801", value: this.create.seed_pw, oninput: (e) => this.create.seed_pw = e.target.value })
+            ]),
+            h("button", { class: "btn btn-primary", onclick: () => this.createVm() }, "\u521B\u5EFA\u5E76\u542F\u52A8")
+          ]) : null,
+          this.tab === "img" ? h("div", null, this.images.map((i) => h("div", { key: i.name, style: "padding:4px 0;border-bottom:1px solid var(--border);font-size:13px;" }, i.name + " \xB7 " + i.size + " B"))) : null,
+          this.tab === "storage" && this.storage ? h("div", null, this.storage.pools.map((p2) => h("div", { key: p2.name, style: "padding:4px 0;" }, [
+            h("b", null, p2.name),
+            h("span", { class: "faint" }, " \xB7 " + p2.state),
+            h("div", { class: "faint", style: "font-size:12px;" }, (this.storage.volumes[p2.name] || []).map((v) => v.name).join(", "))
+          ]))) : null,
+          this.tab === "cfg" ? h("div", { class: "section" }, [
+            h("div", { style: "margin:6px 0;" }, ["sudo \u5BC6\u7801 ", h("input", { class: "input", style: "width:160px;", type: "password", value: this.cfg.sudo_pw || "", oninput: (e) => this.cfg.sudo_pw = e.target.value })]),
+            h("button", { class: "btn", onclick: () => this.saveCfg() }, "\u4FDD\u5B58")
+          ]) : null
         ]);
       }
     };
@@ -18824,9 +18894,7 @@ ${codeFrame}` : message);
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "\u865A\u62DF\u673A" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

@@ -18739,15 +18739,25 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { list: [], status: null, console: "", cmd: "", err: "", timer: null };
+        return {
+          tab: "list",
+          list: [],
+          status: null,
+          metrics: null,
+          console: "",
+          cmd: "",
+          detail: null,
+          javas: [],
+          cores: null,
+          add: { id: "", label: "", dir: "/opt/mcserver", jar: "", port: 25565, java: "", mem_max: "4G" },
+          timer: null,
+          err: ""
+        };
       },
       methods: {
         async load() {
           try {
-            const [l, s] = await Promise.all([
-              ctx.invoke("mcserver.instances.list"),
-              ctx.invoke("mcserver.status").catch(() => null)
-            ]);
+            const [l, s] = await Promise.all([ctx.invoke("mcserver.instances.list").catch(() => ({ instances: [] })), ctx.invoke("mcserver.status").catch(() => null)]);
             this.list = l && l.instances || [];
             this.status = s;
           } catch (e) {
@@ -18765,7 +18775,7 @@ ${codeFrame}` : message);
         async action(act) {
           try {
             await ctx.invoke("mcserver." + act);
-            setTimeout(() => this.load(), 800);
+            setTimeout(() => this.load(), 600);
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18782,7 +18792,58 @@ ${codeFrame}` : message);
           try {
             await ctx.invoke("mcserver.console.send", { command: this.cmd });
             this.cmd = "";
-            setTimeout(() => this.consoleGet(), 300);
+            setTimeout(() => this.consoleGet(), 400);
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async tabLoad(k) {
+          this.err = "";
+          try {
+            if (k === "detail") this.detail = await ctx.invoke("mcserver.instance.detail");
+            else if (k === "javas") this.javas = (await ctx.invoke("mcserver.javas")).javas || [];
+            else if (k === "cores") this.cores = await ctx.invoke("mcserver.core.jars");
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+          if (k === "monitor") {
+            clearInterval(this.timer);
+            const fn = async () => {
+              try {
+                this.metrics = await ctx.invoke("mcserver.metrics");
+              } catch (e) {
+              }
+            };
+            await fn();
+            this.timer = setInterval(fn, 3e3);
+          }
+        },
+        async addInst() {
+          if (!this.add.id) {
+            this.err = "ID \u5FC5\u586B";
+            return;
+          }
+          this.err = "";
+          try {
+            await ctx.invoke("mcserver.instance.add", this.add);
+            this.add.id = "";
+            this.load();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async rmInst(id) {
+          try {
+            await ctx.invoke("mcserver.instance.remove", { id });
+            this.load();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async switchCore(jar) {
+          try {
+            await ctx.invoke("mcserver.core.switch", { jar });
+            this.tabLoad("cores");
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18800,39 +18861,60 @@ ${codeFrame}` : message);
         clearInterval(this.timer);
       },
       render() {
-        const st = this.status || {};
-        const rows = this.list.map((i) => h("tr", { key: i.id, style: i.active ? "background:rgba(53,121,168,.08)" : "" }, [
-          h("td", null, i.label + (i.active ? " \u2605" : "")),
-          h("td", null, i.running ? h("b", { style: "color:#2e9e5b" }, "\u8FD0\u884C\u4E2D") : h("span", { style: "color:#d9524e" }, "\u5DF2\u505C\u6B62")),
-          h("td", { class: "faint" }, (i.version || "-") + " \xB7 " + (i.port || "-")),
-          h("td", null, [
-            h("button", { class: "btn btn-sm", onclick: () => this.pick(i.id) }, "\u5207\u6362"),
-            i.running ? h("button", { class: "btn btn-sm", onclick: () => this.action("stop") }, "\u505C\u6B62") : h("button", { class: "btn btn-sm", onclick: () => this.action("start") }, "\u542F\u52A8"),
-            h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.action("restart") }, "\u91CD\u542F")
-          ])
-        ]));
-        return h("div", { class: "mc-panel" }, [
-          h("div", { class: "section-title", style: "display:flex;justify-content:space-between;align-items:center;" }, [
-            h("span", null, "MC \u670D\u52A1\u5668" + (st.inst_label ? " \xB7 " + st.inst_label : "") + (st.players ? " \xB7 " + st.player_count + " \u4EBA\u5728\u7EBF" : "")),
-            h("div", { class: "flex", style: "gap:6px;" }, [
-              h("button", { class: "btn btn-sm", onclick: () => this.load() }, "\u5237\u65B0")
-            ])
-          ]),
-          this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
-          h("table", { class: "table" }, [
-            h("thead", null, h("tr", null, [h("th", null, "\u5B9E\u4F8B"), h("th", null, "\u72B6\u6001"), h("th", null, "\u7248\u672C\xB7\u7AEF\u53E3"), h("th", null, "\u64CD\u4F5C")])),
-            h("tbody", null, rows)
-          ]),
-          h("div", { class: "section", style: "margin-top:12px;" }, [
-            h("div", { class: "section-title" }, "\u63A7\u5236\u53F0(4s \u8F6E\u8BE2)"),
-            h("pre", { style: "background:#0d1117;color:#c9d1d9;padding:10px;border-radius:6px;height:220px;overflow:auto;font-size:12px;" }, this.console || "(\u7A7A)"),
+        const s = this.status || {};
+        let v = null;
+        if (this.tab === "list") {
+          const rows = this.list.map((i) => h("tr", { key: i.id, style: i.active ? "background:rgba(53,121,168,.08)" : "" }, [
+            h("td", null, i.label + (i.active ? " \u2605" : "")),
+            h("td", null, i.running ? h("b", { style: { color: "#2e9e5b" } }, "\u8FD0\u884C\u4E2D") : h("span", { style: { color: "#d9524e" } }, "\u5DF2\u505C\u6B62")),
+            h("td", { class: "faint" }, (i.version || "-") + " \xB7 " + (i.port || "-")),
+            h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
+              h("button", { class: "btn btn-sm", onclick: () => this.pick(i.id) }, "\u5207\u6362"),
+              i.running ? h("button", { class: "btn btn-sm", onclick: () => this.action("stop") }, "\u505C") : h("button", { class: "btn btn-sm", onclick: () => this.action("start") }, "\u542F"),
+              h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rmInst(i.id) }, "\u5220")
+            ]))
+          ]));
+          v = h("table", { class: "table" }, [h("thead", null, h("tr", null, ["\u5B9E\u4F8B", "\u72B6\u6001", "\u7248\u672C\xB7\u7AEF\u53E3", "\u64CD\u4F5C"].map((x) => h("th", null, x)))), h("tbody", null, rows)]);
+        } else if (this.tab === "add") {
+          const fields = [["id", "ID*"], ["label", "\u540D\u79F0"], ["dir", "\u76EE\u5F55"], ["jar", "Jar"], ["java", "Java \u8DEF\u5F84"], ["mem_max", "\u5185\u5B58\u4E0A\u9650"]];
+          v = h("div", { class: "section" }, fields.map((f) => h("input", { class: "input", style: "width:100%;margin-bottom:6px;", placeholder: f[1], value: this.add[f[0]], oninput: (e) => this.add[f[0]] = e.target.value })).concat(h("div", { class: "flex", style: "gap:6px;" }, [
+            h("input", { class: "input", style: "width:100px;", type: "number", placeholder: "\u7AEF\u53E3", value: this.add.port, oninput: (e) => this.add.port = e.target.value }),
+            h("button", { class: "btn btn-primary", onclick: () => this.addInst() }, "\u65B0\u589E\u5B9E\u4F8B")
+          ])));
+        } else if (this.tab === "console") {
+          v = h("div", null, [
+            h("pre", { style: "background:#0d1117;color:#c9d1d9;padding:10px;border-radius:6px;height:260px;overflow:auto;font-size:12px;" }, this.console || "(\u7A7A)"),
             h("div", { class: "flex", style: "gap:6px;margin-top:8px;" }, [
-              h("input", { class: "input", placeholder: "\u8F93\u5165\u547D\u4EE4, \u5982 say hi", value: this.cmd, oninput: (e) => this.cmd = e.target.value, onkeyup: (e) => {
+              h("input", { class: "input", style: "flex:1;", placeholder: "\u547D\u4EE4", value: this.cmd, oninput: (e) => this.cmd = e.target.value, onkeyup: (e) => {
                 if (e.key === "Enter") this.send();
-              }, style: "flex:1;" }),
+              } }),
               h("button", { class: "btn", onclick: () => this.send() }, "\u53D1\u9001")
             ])
-          ])
+          ]);
+        } else if (this.tab === "monitor" && this.metrics) {
+          v = h("div", { class: "section" }, [
+            h("p", null, "CPU " + this.metrics.cpu + "% \xB7 \u5185\u5B58 " + this.metrics.mem_percent + "% (" + this.metrics.mem_used + "/" + this.metrics.mem_total + ") \xB7 JVM " + this.metrics.jvm_cpu + "% " + this.metrics.jvm_rss_mb + "MB"),
+            h("div", { class: "faint", style: "font-size:12px;" }, "\u5386\u53F2 CPU: " + (this.metrics.hist_cpu || []).map((x) => x.toFixed(0)).join(","))
+          ]);
+        } else if (this.tab === "detail" && this.detail) {
+          v = h("pre", { class: "faint", style: "white-space:pre-wrap;font-size:12px;" }, JSON.stringify(this.detail, null, 1));
+        } else if (this.tab === "cores" && this.cores) {
+          v = h("div", null, (this.cores.jars || []).map((j) => h("div", { key: j, class: "flex", style: "justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);" }, [
+            h("span", { class: "mono" }, j + (this.cores.current === j ? " (\u5F53\u524D)" : "")),
+            h("button", { class: "btn btn-sm", onclick: () => this.switchCore(j) }, "\u5207\u6362")
+          ])));
+        } else if (this.tab === "javas") {
+          v = h("div", null, this.javas.map((j) => h("div", { key: j, style: "padding:4px 0;font-family:var(--font-mono);" }, j)));
+        }
+        const tabs = [["list", "\u5B9E\u4F8B"], ["add", "\u65B0\u589E"], ["console", "\u63A7\u5236\u53F0"], ["monitor", "\u76D1\u63A7"], ["detail", "\u8BE6\u60C5"], ["cores", "\u6838\u5FC3"], ["javas", "Java"]];
+        return h("div", null, [
+          h("div", { class: "section-title" }, "MC \u670D\u52A1\u5668" + (s.inst_label ? " \xB7 " + s.inst_label : "") + (s.player_count != null ? " \xB7 " + s.player_count + " \u4EBA\u5728\u7EBF" : "")),
+          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" }, tabs.map((x) => h("button", { class: "btn btn-sm" + (this.tab === x[0] ? " btn-primary" : ""), onclick: () => {
+            this.tab = x[0];
+            this.tabLoad(x[0]);
+          } }, x[1]))),
+          this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
+          v
         ]);
       }
     };
@@ -18848,9 +18930,7 @@ ${codeFrame}` : message);
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "MC \u670D\u52A1\u5668" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

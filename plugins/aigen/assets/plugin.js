@@ -18736,16 +18736,24 @@ ${codeFrame}` : message);
 
   // plugins/aigen/frontend/plugin.js
   var NAME = "aigen";
+  var b64 = (f) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = rej;
+    r.readAsDataURL(f);
+  });
   function mount(container, ctx) {
     const App = {
       data() {
         return {
+          tab: "t2i",
           models: [],
           model: "",
           prompt: "",
           negative: "",
           steps: 20,
           size: 512,
+          img: "",
           busy: false,
           jobId: "",
           jobStatus: null,
@@ -18768,26 +18776,33 @@ ${codeFrame}` : message);
         },
         async loadGallery() {
           try {
-            const r = await ctx.invoke("aigen.gallery", { limit: 48 });
+            const r = await ctx.invoke("aigen.gallery", { limit: 60 });
             this.gallery = r && r.items || [];
           } catch (e) {
           }
         },
-        async generate() {
-          if (!this.prompt.trim()) return;
+        async pick(e) {
+          const f = e.target.files && e.target.files[0];
+          if (f) {
+            this.img = await b64(f);
+            e.target.value = "";
+          }
+        },
+        async run(mode) {
+          const p2 = { prompt: this.prompt, negative_prompt: this.negative, steps: Number(this.steps) || 20, width: Number(this.size) || 512, height: Number(this.size) || 512, model: this.model };
+          if (mode === "img2img") {
+            if (!this.img) {
+              this.err = "\u8BF7\u9009\u62E9\u8F93\u5165\u56FE\u7247";
+              return;
+            }
+            p2.image = this.img;
+          }
           this.busy = true;
           this.err = "";
           this.jobStatus = null;
           this.resultImgs = [];
           try {
-            const r = await ctx.invoke("aigen.generate", {
-              prompt: this.prompt,
-              negative_prompt: this.negative,
-              steps: Number(this.steps) || 20,
-              width: Number(this.size) || 512,
-              height: Number(this.size) || 512,
-              model: this.model
-            });
+            const r = await ctx.invoke(mode === "img2img" ? "aigen.img2img" : "aigen.generate", p2);
             this.jobId = r && r.job_id || "";
             this.poll();
           } catch (e) {
@@ -18801,7 +18816,7 @@ ${codeFrame}` : message);
             try {
               const d = await ctx.invoke("aigen.status", { job_id: self2.jobId });
               self2.jobStatus = d;
-              if (d.status === "done" || d.status === "error" || d.status === "cancelled") {
+              if (["done", "error", "cancelled"].includes(d.status)) {
                 clearInterval(iv);
                 if (d.status === "done") {
                   self2.resultImgs = d.images || [];
@@ -18812,6 +18827,23 @@ ${codeFrame}` : message);
               clearInterval(iv);
             }
           }, 1500);
+        },
+        async cancel() {
+          if (!this.jobId) return;
+          try {
+            await ctx.invoke("aigen.cancel", { job_id: this.jobId });
+            this.err = "\u5DF2\u8BF7\u6C42\u53D6\u6D88";
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async delImg(name) {
+          try {
+            await ctx.invoke("aigen.gallery.delete", { name });
+            this.loadGallery();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
         }
       },
       mounted() {
@@ -18819,46 +18851,38 @@ ${codeFrame}` : message);
         this.loadGallery();
       },
       render() {
-        const self2 = this;
-        const imgs = (this.resultImgs.length ? this.resultImgs : []).map((u) => h("img", { src: u, style: "max-width:100%;border:1px solid var(--border);border-radius:6px;" }));
-        const gal = this.gallery.map((it) => h("div", { key: it.name, class: "card", style: "padding:6px;" }, [
-          h("img", { src: it.url, loading: "lazy", style: "width:100%;display:block;" }),
-          h("div", { class: "mono faint", style: "font-size:10px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, it.name)
-        ]));
-        return h("div", { class: "aigen-panel" }, [
-          h("div", { class: "section" }, [
-            h("div", { class: "section-title" }, "AI \u751F\u56FE(Stable Diffusion \u672C\u5730)"),
-            this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        return h("div", null, [
+          h("div", { class: "section-title" }, "AI \u751F\u56FE(Stable Diffusion \u672C\u5730)"),
+          this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
+          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [t("t2i", "\u6587\u751F\u56FE"), t("i2i", "\u56FE\u751F\u56FE"), t("g", "\u753B\u5ECA")]),
+          this.tab !== "g" ? h("div", { class: "section" }, [
             h("div", { class: "flex", style: "gap:8px;flex-wrap:wrap;margin-bottom:8px;" }, [
-              h(
-                "select",
-                { value: this.model, onchange: (e) => this.model = e.target.value, class: "input" },
-                this.models.map((m) => h("option", { value: m.name }, m.name))
-              ),
+              h("select", { class: "input", value: this.model, onchange: (e) => this.model = e.target.value }, this.models.map((m) => h("option", { value: m.name }, m.name))),
               h("label", null, ["\u6B65\u6570 "]),
-              h("input", { type: "number", value: this.steps, oninput: (e) => this.steps = e.target.value, class: "input", style: "width:70px" }),
+              h("input", { class: "input", style: "width:60px;", type: "number", value: this.steps, oninput: (e) => this.steps = e.target.value }),
               h("label", null, ["\u5C3A\u5BF8 "]),
-              h(
-                "select",
-                { value: this.size, onchange: (e) => this.size = e.target.value, class: "input" },
-                [512, 768].map((s) => h("option", { value: s }, s + "px"))
-              )
+              h("select", { class: "input", value: this.size, onchange: (e) => this.size = e.target.value }, [512, 768].map((s) => h("option", { value: s }, s)))
             ]),
-            h("textarea", { placeholder: "\u63D0\u793A\u8BCD (prompt)...", value: this.prompt, oninput: (e) => this.prompt = e.target.value, class: "input", style: "width:100%;min-height:60px;font-family:var(--font-mono);" }),
-            h("input", { placeholder: "\u8D1F\u9762\u63D0\u793A\u8BCD (negative, \u53EF\u9009)", value: this.negative, oninput: (e) => this.negative = e.target.value, class: "input", style: "width:100%;margin-top:6px;" }),
-            h("div", { style: "margin-top:8px;" }, [
-              h("button", { class: "btn btn-primary", onclick: () => this.generate(), disabled: this.busy }, this.busy ? "\u63D0\u4EA4\u4E2D..." : "\u5F00\u59CB\u751F\u6210")
+            this.tab === "i2i" ? h("input", { type: "file", accept: "image/*", onchange: (e) => this.pick(e), class: "input", style: "margin-bottom:8px;width:100%;" }) : null,
+            h("textarea", { class: "input", style: "width:100%;min-height:60px;font-family:var(--font-mono);", placeholder: "\u63D0\u793A\u8BCD", value: this.prompt, oninput: (e) => this.prompt = e.target.value }),
+            h("input", { class: "input", style: "width:100%;margin-top:6px;", placeholder: "\u8D1F\u9762\u63D0\u793A\u8BCD", value: this.negative, oninput: (e) => this.negative = e.target.value }),
+            h("div", { class: "flex", style: "gap:6px;margin-top:8px;" }, [
+              h("button", { class: "btn btn-primary", disabled: this.busy, onclick: () => this.run(this.tab === "i2i" ? "img2img" : "text2img") }, this.busy ? "\u63D0\u4EA4\u4E2D..." : "\u751F\u6210"),
+              this.jobId ? h("button", { class: "btn", onclick: () => this.cancel() }, "\u53D6\u6D88") : null
             ]),
-            this.jobStatus ? h(
-              "p",
-              { class: "mono", style: "color:var(--text-faint);font-size:12px;" },
-              "\u4EFB\u52A1 " + this.jobId + ": " + this.jobStatus.status + " " + (this.jobStatus.progress || 0) + "%"
-            ) : null,
-            this.resultImgs.length ? h("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:10px;" }, imgs) : null
-          ]),
-          h("div", { class: "section" }, [
-            h("div", { class: "section-title" }, "\u6700\u8FD1\u751F\u6210"),
-            h("div", { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;" }, gal)
+            this.jobStatus ? h("p", { class: "mono faint", style: "font-size:12px;" }, "\u4EFB\u52A1 " + this.jobId + ": " + this.jobStatus.status + " " + (this.jobStatus.progress || 0) + "%") : null,
+            this.resultImgs.length ? h("div", { class: "flex", style: "gap:10px;margin-top:10px;flex-wrap:wrap;" }, this.resultImgs.map((u) => h("img", { src: u, style: "max-width:200px;border:1px solid var(--border);border-radius:6px;" }))) : null
+          ]) : h("div", { class: "section" }, [
+            h(
+              "div",
+              { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;" },
+              this.gallery.map((it) => h("div", { key: it.name, class: "card", style: "padding:6px;" }, [
+                h("img", { src: it.url, loading: "lazy", style: "width:100%;display:block;" }),
+                h("div", { class: "mono faint", style: "font-size:10px;" }, it.name),
+                h("button", { class: "btn btn-sm btn-danger", style: "margin-top:4px;width:100%;", onclick: () => this.delImg(it.name) }, "\u5220\u9664")
+              ]))
+            )
           ])
         ]);
       }
@@ -18871,9 +18895,7 @@ ${codeFrame}` : message);
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "AI \u751F\u56FE" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

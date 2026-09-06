@@ -18736,34 +18736,52 @@ ${codeFrame}` : message);
 
   // plugins/uptime/frontend/plugin.js
   var NAME = "uptime";
+  var timer = null;
   function mount(container, ctx) {
     const App = {
       data() {
-        return { targets: [], loading: true, newUrl: "", newName: "" };
+        return {
+          targets: [],
+          status: null,
+          openHist: null,
+          hist: [],
+          cells: [],
+          summary: null,
+          newUrl: "",
+          newName: "",
+          loading: true,
+          err: "",
+          edit: null,
+          editUrl: "",
+          editInterval: 60,
+          editTimeout: 10
+        };
       },
       methods: {
         async load() {
           this.loading = true;
           try {
-            const r = await ctx.invoke("uptime.targets.list");
-            this.targets = r && r.targets || [];
+            const [d, s] = await Promise.all([
+              ctx.invoke("uptime.targets.list"),
+              ctx.invoke("uptime.status").catch(() => null)
+            ]);
+            this.targets = d && d.targets || [];
+            this.summary = s;
           } catch (e) {
-            console.error(e);
+            this.err = e && e.message || e;
           }
           this.loading = false;
         },
         async add() {
           if (!this.newUrl) return;
+          this.err = "";
           try {
-            await ctx.invoke("uptime.targets.create", {
-              name: this.newName || "t" + Date.now() % 1e4,
-              url: this.newUrl
-            });
+            await ctx.invoke("uptime.targets.create", { name: this.newName || "t" + Date.now() % 1e4, url: this.newUrl, interval: 60 });
             this.newUrl = "";
             this.newName = "";
             this.load();
           } catch (e) {
-            alert("\u6DFB\u52A0\u5931\u8D25: " + (e && e.message || e));
+            this.err = e && e.message || e;
           }
         },
         async del(name) {
@@ -18771,67 +18789,112 @@ ${codeFrame}` : message);
             await ctx.invoke("uptime.targets.delete", { name });
             this.load();
           } catch (e) {
-            alert("\u5220\u9664\u5931\u8D25: " + (e && e.message || e));
+            this.err = e && e.message || e;
           }
         },
         async test(name) {
           try {
-            const r = await ctx.invoke("uptime.targets.test", { name });
-            alert(JSON.stringify(r, null, 2));
+            alert(JSON.stringify(await ctx.invoke("uptime.targets.test", { name }), null, 1));
           } catch (e) {
-            alert("\u6D4B\u8BD5\u5931\u8D25: " + (e && e.message || e));
+            this.err = e && e.message || e;
+          }
+        },
+        startEdit(t) {
+          this.edit = t.name;
+          this.editUrl = t.url;
+          this.editInterval = t.interval || 60;
+          this.editTimeout = t.timeout || 10;
+        },
+        async saveEdit() {
+          try {
+            await ctx.invoke("uptime.targets.update", { name: this.edit, url: this.editUrl, interval: Number(this.editInterval) || 60, timeout: Number(this.editTimeout) || 10 });
+            this.edit = null;
+            this.load();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async showHist(name) {
+          this.openHist = this.openHist === name ? null : name;
+          if (this.openHist) {
+            try {
+              const [h2, st] = await Promise.all([
+                ctx.invoke("uptime.targets.history", { name }),
+                ctx.invoke("uptime.targets.status24", { name })
+              ]);
+              this.hist = (h2 && h2.history || []).slice(-48).reverse();
+              this.cells = st && st.cells || [];
+            } catch (e) {
+              this.err = e && e.message || e;
+            }
           }
         }
       },
       mounted() {
         this.load();
+        timer = setInterval(() => this.load(), 3e4);
+      },
+      unmounted() {
+        clearInterval(timer);
       },
       render() {
-        const rows = (this.targets || []).map((t) => h("tr", { key: t.name }, [
+        const s = this.summary || {};
+        const rows = this.targets.map((t) => h("tr", { key: t.name }, [
           h("td", null, t.name),
-          h(
-            "td",
-            { style: { color: t.last_ok ? "#3fb950" : "#f85149" } },
-            t.last_ok === void 0 || t.last_ok === null ? "-" : t.last_ok ? "\u5728\u7EBF" : "\u79BB\u7EBF"
-          ),
-          h("td", null, t.last_ms != null ? t.last_ms + "ms" : "-"),
-          h("td", null, t.uptime !== void 0 && t.uptime !== null ? t.uptime + "%" : "-"),
-          h("td", null, [
-            h("button", { onclick: () => this.test(t.name) }, "\u6D4B\u8BD5"),
-            h("button", { onclick: () => this.del(t.name) }, "\u5220\u9664")
-          ])
+          h("td", null, h("span", { style: { color: t.last_ok ? "#3fb950" : "#f85149" } }, t.last_ok ? "\u5728\u7EBF" : t.last_ok === null ? "-" : "\u79BB\u7EBF")),
+          h("td", { class: "mono faint" }, t.last_ms != null ? t.last_ms + "ms" : "-"),
+          h("td", null, t.uptime != null ? t.uptime + "%" : "-"),
+          h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
+            h("button", { class: "btn btn-sm", onclick: () => this.test(t.name) }, "\u6D4B\u8BD5"),
+            h("button", { class: "btn btn-sm", onclick: () => this.startEdit(t) }, "\u7F16\u8F91"),
+            h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.showHist(t.name) }, "\u5386\u53F2"),
+            h("button", { class: "btn btn-sm btn-danger", onclick: () => this.del(t.name) }, "\u5220\u9664")
+          ]))
         ]));
         return h("div", { class: "uptime-panel" }, [
-          h("h3", "Uptime \u76D1\u63A7\u76EE\u6807"),
-          h("div", { class: "uptime-add" }, [
-            h("input", { placeholder: "\u540D\u79F0", value: this.newName, oninput: (e) => this.newName = e.target.value }),
-            h("input", { placeholder: "https://...", value: this.newUrl, oninput: (e) => this.newUrl = e.target.value }),
-            h("button", { onclick: () => this.add() }, "\u6DFB\u52A0")
+          h("div", { class: "section-title", style: "display:flex;justify-content:space-between;" }, [
+            h("span", null, "Uptime \u76D1\u63A7\u76EE\u6807"),
+            h("span", { class: "faint", style: "font-size:12px;" }, "\u5171 " + s.total + " \xB7 \u5728\u7EBF " + s.online + " \xB7 \u79BB\u7EBF " + s.offline + (s.avg_uptime != null ? " \xB7 \u5E73\u5747\u53EF\u7528\u7387 " + s.avg_uptime + "%" : ""))
           ]),
-          this.loading ? h("p", "\u52A0\u8F7D\u4E2D...") : h("table", { class: "uptime-table" }, [
-            h("thead", null, h("tr", null, [
-              h("th", null, "\u76EE\u6807"),
-              h("th", null, "\u72B6\u6001"),
-              h("th", null, "\u5EF6\u8FDF"),
-              h("th", null, "\u53EF\u7528\u7387"),
-              h("th", null, "")
-            ])),
+          this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
+          h("div", { class: "uptime-add flex", style: "gap:6px;margin-bottom:8px;" }, [
+            h("input", { class: "input", placeholder: "\u540D\u79F0", value: this.newName, oninput: (e) => this.newName = e.target.value, style: "width:140px;" }),
+            h("input", { class: "input", placeholder: "https://...", value: this.newUrl, oninput: (e) => this.newUrl = e.target.value, style: "flex:1;" }),
+            h("button", { class: "btn", onclick: () => this.add() }, "\u6DFB\u52A0")
+          ]),
+          this.edit != null ? h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;border:1px solid var(--border);padding:8px;border-radius:6px;" }, [
+            h("input", { class: "input", style: "flex:1;", value: this.editUrl, oninput: (e) => this.editUrl = e.target.value }),
+            h("input", { class: "input", style: "width:70px;", title: "\u95F4\u9694\u79D2", value: this.editInterval, oninput: (e) => this.editInterval = e.target.value }),
+            h("input", { class: "input", style: "width:70px;", title: "\u8D85\u65F6\u79D2", value: this.editTimeout, oninput: (e) => this.editTimeout = e.target.value }),
+            h("button", { class: "btn btn-sm btn-primary", onclick: () => this.saveEdit() }, "\u4FDD\u5B58"),
+            h("button", { class: "btn btn-sm", onclick: () => this.edit = null }, "\u53D6\u6D88")
+          ]) : null,
+          this.loading ? h("p", { class: "hint" }, "\u52A0\u8F7D\u4E2D...") : h("table", { class: "table" }, [
+            h("thead", null, h("tr", null, ["\u76EE\u6807", "\u72B6\u6001", "\u5EF6\u8FDF", "\u53EF\u7528\u7387", ""].map((x) => h("th", null, x)))),
             h("tbody", null, rows)
-          ])
+          ]),
+          this.openHist ? h("div", { class: "section", style: "margin-top:10px;" }, [
+            h("div", { class: "section-title" }, "24h \u53EF\u7528\u683C \xB7 " + this.openHist),
+            h("div", { style: "display:flex;flex-wrap:wrap;gap:2px;" }, (this.cells || []).map((c) => h("div", { style: "width:8px;height:14px;border-radius:1px;background:" + (c >= 1 ? "#2e9e5b" : c === 0 ? "#f85149" : "#333") + ";", title: c == null ? "\u65E0\u6570\u636E" : c ? "\u5728\u7EBF" : "\u79BB\u7EBF" }))),
+            h("div", { class: "section-title", style: "margin-top:8px;" }, "\u6700\u8FD1\u63A2\u6D3B"),
+            h("ul", { style: "list-style:none;padding-left:0;font-size:12px;color:var(--text-faint);" }, this.hist.map((x) => h("li", null, new Date(x.ts * 1e3).toLocaleString() + " \xB7 " + (x.ok ? "\u2713" : "\u2717") + (x.ms != null ? " " + x.ms + "ms" : ""))))
+          ]) : null
         ]);
       }
     };
     const vm = createApp(App);
+    const stop2 = () => {
+      if (App.unmounted) App.unmounted();
+      vm.unmount();
+    };
     vm.mount(container);
-    return () => vm.unmount();
+    return stop2;
   }
   function register(g) {
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "\u76D1\u63A7\u76EE\u6807" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

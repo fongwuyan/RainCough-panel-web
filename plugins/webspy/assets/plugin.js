@@ -18739,7 +18739,7 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { tab: "search", q: "", results: [], rss: [], rssUrl: "", rssName: "", entries: [], artUrl: "", art: null, err: "", loading: false };
+        return { tab: "search", q: "", results: [], urls: "", uc: null, rss: [], rssUrl: "", rssName: "", entries: [], artUrl: "", art: null, err: "", loading: false };
       },
       methods: {
         async search() {
@@ -18753,6 +18753,19 @@ ${codeFrame}` : message);
             this.err = e && e.message || e;
           }
           this.loading = false;
+        },
+        async urlcheck() {
+          const list = this.urls.split(/[\n,;\s]+/).filter(Boolean);
+          if (!list.length) {
+            this.err = "\u8BF7\u8F93\u5165\u94FE\u63A5";
+            return;
+          }
+          this.err = "";
+          try {
+            this.uc = await ctx.invoke("webspy.urlcheck", { urls: list });
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
         },
         async loadRss() {
           try {
@@ -18803,56 +18816,51 @@ ${codeFrame}` : message);
         this.loadRss();
       },
       render() {
-        const tabBtn = (k, label) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, label);
-        const searchView = h("div", null, [
-          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
-            h("input", { class: "input", style: "flex:1;", placeholder: "\u641C\u7D22\u5173\u952E\u8BCD", value: this.q, oninput: (e) => this.q = e.target.value, onkeyup: (e) => {
-              if (e.key === "Enter") this.search();
-            } }),
-            h("button", { class: "btn", onclick: () => this.search() }, "\u641C\u7D22")
-          ]),
-          this.results.map((r) => h("div", { class: "card", style: "padding:8px;margin-bottom:6px;" }, [
-            h("a", { href: r.url, target: "_blank", style: "font-weight:bold;" }, r.title),
-            h("div", { class: "faint", style: "font-size:12px;" }, r.url),
-            h("div", { style: "font-size:13px;" }, r.snippet)
-          ]))
-        ]);
-        const rssView = h("div", null, [
-          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
-            h("input", { class: "input", style: "flex:1;", placeholder: "RSS \u5730\u5740", value: this.rssUrl, oninput: (e) => this.rssUrl = e.target.value }),
-            h("input", { class: "input", style: "width:120px;", placeholder: "\u540D\u79F0(\u53EF\u9009)", value: this.rssName, oninput: (e) => this.rssName = e.target.value }),
-            h("button", { class: "btn", onclick: () => this.addRss() }, "\u6DFB\u52A0")
-          ]),
-          this.rss.map((f, i) => h("div", { key: f.url, class: "flex", style: "justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);" }, [
-            h("div", null, [h("b", null, f.name), h("div", { class: "faint", style: "font-size:11px;" }, f.url)]),
-            h("div", null, [
-              h("button", { class: "btn btn-sm", onclick: () => this.fetchRss(f.url) }, "\u6293\u53D6"),
-              h("button", { class: "btn btn-sm btn-danger", onclick: () => this.delRss(i) }, "\u5220\u9664")
-            ])
-          ])),
-          this.entries.length ? h("div", { class: "section", style: "margin-top:10px;" }, [
-            h("div", { class: "section-title" }, "\u6700\u65B0\u6761\u76EE"),
-            this.entries.map((e) => h("div", { style: "padding:4px 0;" }, [
-              h("a", { href: e.link, target: "_blank" }, e.title),
-              h("div", { class: "faint", style: "font-size:11px;" }, (e.published || "") + " \xB7 " + (e.summary || "").slice(0, 120))
-            ]))
-          ]) : null
-        ]);
-        const artView = h("div", null, [
-          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
-            h("input", { class: "input", style: "flex:1;", placeholder: "\u7F51\u9875 URL", value: this.artUrl, oninput: (e) => this.artUrl = e.target.value }),
-            h("button", { class: "btn", onclick: () => this.readability(), disabled: this.loading }, "\u63D0\u53D6\u6B63\u6587")
-          ]),
-          this.art ? h("div", null, [
-            h("h4", null, this.art.title),
-            h("pre", { class: "faint", style: "white-space:pre-wrap;font-size:13px;max-height:500px;overflow:auto;" }, this.art.text)
-          ]) : null
-        ]);
-        return h("div", { class: "webspy-panel" }, [
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        return h("div", null, [
           h("div", { class: "section-title" }, "\u91C7\u96C6\u89E3\u6790"),
-          h("div", { class: "flex", style: "gap:6px;margin-bottom:10px;" }, [tabBtn("search", "\u641C\u7D22"), tabBtn("rss", "RSS"), tabBtn("art", "\u6B63\u6587\u63D0\u53D6")]),
+          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" }, [["search", "\u641C\u7D22"], ["uc", "\u94FE\u63A5\u68C0\u6D4B"], ["rss", "RSS"], ["art", "\u6B63\u6587\u63D0\u53D6"]].map((x) => t(x[0], x[1]))),
           this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
-          this.tab === "search" ? searchView : this.tab === "rss" ? rssView : artView
+          this.tab === "search" ? h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
+              h("input", { class: "input", style: "flex:1;", placeholder: "\u641C\u7D22\u5173\u952E\u8BCD", value: this.q, oninput: (e) => this.q = e.target.value, onkeyup: (e) => {
+                if (e.key === "Enter") this.search();
+              } }),
+              h("button", { class: "btn", onclick: () => this.search() }, "\u641C\u7D22")
+            ]),
+            this.results.map((r) => h("div", { key: r.url, class: "card", style: "padding:8px;margin-bottom:6px;" }, [
+              h("a", { href: r.url, target: "_blank", style: "font-weight:bold;" }, r.title),
+              h("div", { class: "faint", style: "font-size:11px;" }, r.url),
+              h("div", { style: "font-size:13px;" }, r.snippet)
+            ]))
+          ]) : null,
+          this.tab === "uc" ? h("div", null, [
+            h("textarea", { class: "input", style: "width:100%;min-height:80px;", placeholder: "\u6BCF\u884C\u4E00\u4E2A URL", value: this.urls, oninput: (e) => this.urls = e.target.value }),
+            h("button", { class: "btn", style: "margin-top:6px;", onclick: () => this.urlcheck() }, "\u68C0\u6D4B(\u6700\u591A20)"),
+            this.uc ? this.uc.results.map((r, i) => h("div", { key: i, style: "font-size:12px;margin-top:4px;" }, (r.ok ? "\u2713" : "\u2717") + " [" + (r.status || "-") + "] " + r.url + (r.error ? " \u2014 " + r.error : ""))) : null
+          ]) : null,
+          this.tab === "rss" ? h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
+              h("input", { class: "input", style: "flex:1;", placeholder: "RSS \u5730\u5740", value: this.rssUrl, oninput: (e) => this.rssUrl = e.target.value }),
+              h("input", { class: "input", style: "width:120px;", placeholder: "\u540D\u79F0", value: this.rssName, oninput: (e) => this.rssName = e.target.value }),
+              h("button", { class: "btn", onclick: () => this.addRss() }, "\u6DFB\u52A0")
+            ]),
+            this.rss.map((f, i) => h("div", { key: f.url, class: "flex", style: "justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);" }, [
+              h("div", null, [h("b", null, f.name), h("div", { class: "faint", style: "font-size:11px;" }, f.url)]),
+              h("div", null, [h("button", { class: "btn btn-sm", onclick: () => this.fetchRss(f.url) }, "\u6293\u53D6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.delRss(i) }, "\u5220")])
+            ])),
+            this.entries.length ? this.entries.map((e, i) => h("div", { key: i, style: "padding:4px 0;" }, [
+              h("a", { href: e.link, target: "_blank" }, e.title),
+              h("div", { class: "faint", style: "font-size:11px;" }, (e.published || "") + " \xB7 " + (e.summary || "").slice(0, 100))
+            ])) : null
+          ]) : null,
+          this.tab === "art" ? h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
+              h("input", { class: "input", style: "flex:1;", placeholder: "\u7F51\u9875 URL", value: this.artUrl, oninput: (e) => this.artUrl = e.target.value }),
+              h("button", { class: "btn", disabled: this.loading, onclick: () => this.readability() }, "\u63D0\u53D6\u6B63\u6587")
+            ]),
+            this.art ? h("div", null, [h("h4", null, this.art.title), h("pre", { class: "faint", style: "white-space:pre-wrap;font-size:13px;max-height:500px;overflow:auto;" }, this.art.text)]) : null
+          ]) : null
         ]);
       }
     };
@@ -18864,9 +18872,7 @@ ${codeFrame}` : message);
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};
     g.__rcPluginV4__[NAME] = { pages: [{ path: "", title: "\u91C7\u96C6\u89E3\u6790" }], mount };
   }
-  if (typeof window !== "undefined") {
-    register(window);
-  }
+  if (typeof window !== "undefined") register(window);
 })();
 /*! Bundled license information:
 

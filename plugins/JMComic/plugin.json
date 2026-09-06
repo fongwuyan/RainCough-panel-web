@@ -93,6 +93,18 @@
       "visibility": "all",
       "version": "1",
       "description": "插件信息"
+    },
+    {
+      "id": "jmcomic.image",
+      "visibility": "all",
+      "version": "1",
+      "description": "按需取单张漫画图(base64)"
+    },
+    {
+      "id": "jmcomic.download.status",
+      "visibility": "all",
+      "version": "1",
+      "description": "下载进度"
     }
   ]
 }

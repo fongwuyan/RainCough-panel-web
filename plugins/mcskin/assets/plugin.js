@@ -18745,13 +18745,13 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { tab: "convert", img: "", model: "wide", result: null, err: "", prompt: "", t2s: null };
+        return { tab: "convert", img: "", model: "wide", result: null, prompt: "", t2s: null, hist: [], paint: null, pImg: "", err: "", timer: null };
       },
       methods: {
-        async pick(e) {
+        async pick(e, key) {
           const f = e.target.files && e.target.files[0];
           if (f) {
-            this.img = await b64(f);
+            this[key] = await b64(f);
             e.target.value = "";
           }
         },
@@ -18767,6 +18767,32 @@ ${codeFrame}` : message);
             this.err = e && e.message || e;
           }
         },
+        async paint() {
+          if (!this.pImg) {
+            this.err = "\u8BF7\u9009\u62E9\u56FE\u7247";
+            return;
+          }
+          this.err = "";
+          try {
+            this.paint = await ctx.invoke("mcskin.paint", { image: this.pImg, body: "wide", model: null, prompt: this.prompt });
+            this.pollPaint();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        pollPaint() {
+          const self2 = this;
+          clearInterval(this.timer);
+          this.timer = setInterval(async () => {
+            try {
+              const d = await ctx.invoke("mcskin.paint.status", { job_id: self2.paint.job_id });
+              self2.paint = d;
+              if (["done", "error", "cancelled"].includes(d.status)) clearInterval(self2.timer);
+            } catch (e) {
+              clearInterval(self2.timer);
+            }
+          }, 2e3);
+        },
         async t2s() {
           if (!this.prompt.trim()) {
             this.err = "\u8BF7\u8F93\u5165\u89D2\u8272\u63CF\u8FF0";
@@ -18778,51 +18804,81 @@ ${codeFrame}` : message);
           } catch (e) {
             this.err = e && e.message || e;
           }
-          this.poll();
+          this.pollT2s();
         },
-        poll() {
+        pollT2s() {
           const self2 = this;
-          const iv = setInterval(async () => {
+          clearInterval(this.timer);
+          this.timer = setInterval(async () => {
             try {
               const d = await ctx.invoke("mcskin.text2skin.status", { job_id: self2.t2s.job_id });
               self2.t2s = d;
-              if (d.status === "done" || d.status === "error") clearInterval(iv);
+              if (["done", "error", "cancelled"].includes(d.status)) {
+                clearInterval(self2.timer);
+                self2.loadHist();
+              }
             } catch (e) {
-              clearInterval(iv);
+              clearInterval(self2.timer);
             }
           }, 2e3);
+        },
+        async loadHist() {
+          try {
+            const r = await ctx.invoke("mcskin.text2skin.history");
+            this.hist = r && r.history || [];
+          } catch (e) {
+          }
         }
       },
+      mounted() {
+        this.loadHist();
+      },
+      unmounted() {
+        clearInterval(this.timer);
+      },
       render() {
-        const tab = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        const skin = this.result ? this.result.png ? "data:image/png;base64," + this.result.png : "" : "";
         return h("div", null, [
           h("div", { class: "section-title" }, "\u56FE\u7247\u8F6C\u76AE\u80A4"),
-          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [tab("convert", "\u8F6C\u76AE\u80A4"), tab("t2s", "\u6587\u751F\u80A4")]),
+          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [t("convert", "\u8F6C\u76AE\u80A4"), t("paint", "AI \u4E0A\u8272"), t("t2s", "\u6587\u751F\u80A4")]),
           this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
           this.tab === "convert" ? h("div", null, [
-            h("input", { type: "file", accept: "image/*", onchange: (e) => this.pick(e), class: "input", style: "margin-bottom:8px;" }),
+            h("input", { type: "file", accept: "image/*", onchange: (e) => this.pick(e, "img"), class: "input", style: "width:100%;margin-bottom:8px;" }),
             h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
               h("select", { class: "input", value: this.model, onchange: (e) => this.model = e.target.value }, ["wide", "slim"].map((m) => h("option", { value: m }, m === "wide" ? "Steve(\u5BBD)" : "Alex(\u7A84)"))),
               h("button", { class: "btn", onclick: () => this.convert() }, "\u751F\u6210\u76AE\u80A4")
             ]),
-            this.result ? h("div", null, [
-              this.result.png ? h("img", { src: "data:image/png;base64," + this.result.png, style: "max-width:220px;image-rendering:pixelated;" }) : null,
-              h("p", { class: "faint", style: "font-size:12px;" }, "\u5C3A\u5BF8 " + (this.result.size || []).join("\xD7") + " \xB7 " + this.result.model)
-            ]) : null
+            skin ? h("img", { src: skin, style: "max-width:260px;image-rendering:pixelated;border:1px solid var(--border);border-radius:6px;" }) : null
+          ]) : null,
+          this.tab === "paint" ? h("div", null, [
+            h("input", { type: "file", accept: "image/*", onchange: (e) => this.pick(e, "pImg"), class: "input", style: "width:100%;margin-bottom:8px;" }),
+            h("input", { class: "input", style: "width:100%;margin-bottom:8px;", placeholder: "\u63D0\u793A\u8BCD(\u53EF\u9009)", value: this.prompt, oninput: (e) => this.prompt = e.target.value }),
+            h("button", { class: "btn", onclick: () => this.paint() }, "\u5F00\u59CB AI \u4E0A\u8272(\u5F02\u6B65)"),
+            this.paint ? h("p", { class: "mono faint", style: "font-size:12px;margin-top:6px;" }, "\u4EFB\u52A1 " + (this.paint.job_id || this.paint.id) + ": " + (this.paint.status || "") + " " + (this.paint.progress || 0) + "%") : null,
+            this.paint && this.paint.png ? h("img", { src: "data:image/png;base64," + this.paint.png, style: "max-width:260px;margin-top:6px;image-rendering:pixelated;" }) : null
           ]) : null,
           this.tab === "t2s" ? h("div", null, [
-            h("input", { class: "input", style: "width:100%;margin-bottom:8px;", placeholder: '\u89D2\u8272\u63CF\u8FF0, \u5982 "\u94F6\u53D1\u7EA2\u77B3\u7684\u72D0\u8033\u5C11\u5973"', value: this.prompt, oninput: (e) => this.prompt = e.target.value, onkeyup: (e) => {
+            h("input", { class: "input", style: "width:100%;margin-bottom:8px;", placeholder: "\u89D2\u8272\u63CF\u8FF0", value: this.prompt, oninput: (e) => this.prompt = e.target.value, onkeyup: (e) => {
               if (e.key === "Enter") this.t2s();
             } }),
             h("button", { class: "btn", onclick: () => this.t2s() }, "\u751F\u6210(\u5F02\u6B65)"),
-            this.t2s ? h("p", { class: "mono", style: "font-size:12px;margin-top:8px;" }, "\u4EFB\u52A1 " + (this.t2s.job_id || this.t2s.id) + ": " + (this.t2s.status || "") + " " + (this.t2s.progress || 0) + "%") : null
+            this.t2s ? h("p", { class: "mono faint", style: "font-size:12px;margin:6px 0;" }, "\u4EFB\u52A1 " + (this.t2s.job_id || this.t2s.id) + ": " + (this.t2s.status || "") + " " + (this.t2s.progress || 0) + "%") : null,
+            this.hist.length ? h("div", { class: "section", style: "margin-top:8px;" }, [
+              h("div", { class: "section-title" }, "\u5386\u53F2"),
+              this.hist.slice(0, 10).map((x) => h("div", { key: x.id, style: "font-size:12px;padding:3px 0;border-bottom:1px solid var(--border);" }, (x.prompt || "").slice(0, 60) + " \xB7 " + (x.status || "") + " \xB7 " + (x.candidates || []).length + " \u5019\u9009"))
+            ]) : null
           ]) : null
         ]);
       }
     };
     const vm = createApp(App);
+    const stop2 = () => {
+      if (App.unmounted) App.unmounted();
+      vm.unmount();
+    };
     vm.mount(container);
-    return () => vm.unmount();
+    return stop2;
   }
   function register(g) {
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};

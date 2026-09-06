@@ -18745,19 +18745,19 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { tab: "dl", urls: "", files: [], out: null, mode: "prefix", value: "", err: "", docEnv: null };
+        return { tab: "dl", urls: "", files: [], out: null, mode: "prefix", value: "", value2: "", passes: 3, docTo: "html", docEnv: null, err: "" };
       },
       methods: {
         async pick(e) {
           const arr = e.target.files ? Array.from(e.target.files) : [];
           this.files = [];
-          for (const f of arr.slice(0, 10)) this.files.push({ name: f.name, data: await b64(f) });
+          for (const f of arr.slice(0, 12)) this.files.push({ name: f.name, data: await b64(f) });
           e.target.value = "";
         },
         async download() {
           const list = this.urls.split(/[\n,;\s]+/).filter(Boolean);
           if (!list.length) {
-            this.err = "\u8BF7\u8F93\u5165\u4E0B\u8F7D\u94FE\u63A5";
+            this.err = "\u8BF7\u8F93\u5165\u94FE\u63A5";
             return;
           }
           this.err = "";
@@ -18775,10 +18775,34 @@ ${codeFrame}` : message);
             this.err = e && e.message || e;
           }
         },
+        async join() {
+          this.err = "";
+          try {
+            this.out = await ctx.invoke("dltool.nt.join", { files: this.files, name: "joined.bin" });
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
         async rename() {
           this.err = "";
           try {
-            this.out = await ctx.invoke("dltool.nt.rename", { files: this.files, mode: this.mode, value: this.value });
+            this.out = await ctx.invoke("dltool.nt.rename", { files: this.files, mode: this.mode, value: this.value, value2: this.value2 });
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async wipe() {
+          this.err = "";
+          try {
+            this.out = await ctx.invoke("dltool.nt.delete", { files: this.files, passes: Number(this.passes) || 3 });
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async doc() {
+          this.err = "";
+          try {
+            this.out = await ctx.invoke("dltool.doc.convert", { files: this.files, to: this.docTo });
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18795,25 +18819,40 @@ ${codeFrame}` : message);
         this.docCheck();
       },
       render() {
-        const tab = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
+        const btns = {
+          split: () => this.split(),
+          join: () => this.join(),
+          rename: () => this.rename(),
+          wipe: () => this.wipe(),
+          doc: () => this.doc()
+        };
+        const title = { split: "\u6309 1MB \u5206\u7247\u6253\u5305", join: "\u5408\u5E76\u5206\u7247\u6253\u5305", rename: "\u91CD\u547D\u540D\u6253\u5305", wipe: "\u5B89\u5168\u5220\u9664(\u8986\u5199)", doc: "\u6587\u6863\u8F6C\u6362(pandoc)" }[this.tab];
         return h("div", null, [
-          h("div", { class: "section-title" }, "\u4E0B\u8F7D\u5DE5\u5177" + (this.docEnv ? this.docEnv.ok ? " \xB7 pandoc \u2713" : "" : "")),
-          h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [tab("dl", "URL \u4E0B\u8F7D"), tab("split", "\u5206\u7247"), tab("rename", "\u91CD\u547D\u540D")]),
+          h("div", { class: "section-title" }, "\u4E0B\u8F7D\u5DE5\u5177" + (this.docEnv ? this.docEnv.ok ? " \xB7 pandoc " + (this.docEnv.version || "") : "" : "")),
+          h(
+            "div",
+            { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" },
+            [["dl", "URL \u4E0B\u8F7D"], ["split", "\u5206\u7247"], ["join", "\u5408\u5E76"], ["rename", "\u91CD\u547D\u540D"], ["wipe", "\u5B89\u5168\u5220\u9664"], ["doc", "\u6587\u6863\u8F6C\u6362"]].map((x) => t(x[0], x[1]))
+          ),
           this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
           this.tab === "dl" ? h("div", null, [
-            h("textarea", { class: "input", style: "width:100%;min-height:90px;", placeholder: "\u6BCF\u884C\u4E00\u4E2A\u4E0B\u8F7D\u94FE\u63A5", value: this.urls, oninput: (e) => this.urls = e.target.value }),
-            h("button", { class: "btn", style: "margin-top:8px;", onclick: () => this.download() }, "\u5F00\u59CB\u4E0B\u8F7D(\u4EFB\u52A1\u961F\u5217\u67E5\u770B\u8FDB\u5EA6)"),
+            h("textarea", { class: "input", style: "width:100%;min-height:80px;", placeholder: "\u6BCF\u884C\u4E00\u4E2A\u4E0B\u8F7D\u94FE\u63A5", value: this.urls, oninput: (e) => this.urls = e.target.value }),
+            h("button", { class: "btn", style: "margin-top:6px;", onclick: () => this.download() }, "\u5F00\u59CB\u4E0B\u8F7D(\u4EFB\u52A1\u961F\u5217\u770B\u8FDB\u5EA6)"),
             this.out ? h("p", { class: "faint", style: "font-size:12px;" }, this.out.message) : null
-          ]) : null,
-          this.tab === "split" || this.tab === "rename" ? h("div", null, [
+          ]) : h("div", null, [
             h("input", { type: "file", multiple: true, onchange: (e) => this.pick(e), class: "input", style: "width:100%;margin-bottom:8px;" }),
-            this.tab === "split" ? h("button", { class: "btn", onclick: () => this.split() }, "\u6309 1MB \u5206\u7247\u6253\u5305") : h("div", { class: "flex", style: "gap:6px;" }, [
-              h("select", { class: "input", value: this.mode, onchange: (e) => this.mode = e.target.value }, ["prefix", "suffix", "replace", "number"].map((m) => h("option", { value: m }, m))),
-              h("input", { class: "input", placeholder: "\u503C", value: this.value, oninput: (e) => this.value = e.target.value }),
-              h("button", { class: "btn", onclick: () => this.rename() }, "\u91CD\u547D\u540D\u6253\u5305")
-            ]),
-            this.out && this.out.download ? h("a", { href: this.out.download, class: "btn btn-sm", style: "margin-top:8px;" }, "\u4E0B\u8F7D\u7ED3\u679C") : null
-          ]) : null
+            this.tab === "rename" ? h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;" }, [
+              h("select", { class: "input", value: this.mode, onchange: (e) => this.mode = e.target.value }, ["prefix", "suffix", "replace", "case", "number"].map((m) => h("option", { value: m }, m))),
+              h("input", { class: "input", style: "width:110px;", placeholder: "\u503C", value: this.value, oninput: (e) => this.value = e.target.value }),
+              h("input", { class: "input", style: "width:110px;", placeholder: "\u503C2", value: this.value2, oninput: (e) => this.value2 = e.target.value })
+            ]) : null,
+            this.tab === "wipe" ? h("input", { class: "input", style: "width:80px;margin-bottom:8px;", type: "number", value: this.passes, oninput: (e) => this.passes = e.target.value }) : null,
+            this.tab === "doc" ? h("select", { class: "input", style: "margin-bottom:8px;", value: this.docTo, onchange: (e) => this.docTo = e.target.value }, ["html", "markdown", "plain", "docx", "pdf"].map((f) => h("option", { value: f }, f))) : null,
+            h("button", { class: "btn", onclick: btns[this.tab] }, title),
+            this.out && this.out.download ? h("a", { href: this.out.download, class: "btn btn-sm", style: "margin-left:6px;" }, "\u4E0B\u8F7D\u7ED3\u679C") : null,
+            this.out && !this.out.download ? h("p", { class: "faint", style: "font-size:12px;" }, JSON.stringify(this.out).slice(0, 300)) : null
+          ])
         ]);
       }
     };

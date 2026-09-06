@@ -1,4 +1,4 @@
-// compress 插件前端(接口库 v4): 解压 / 压缩 / 对比
+// compress 插件前端(接口库 v4): 列表 / 解压 / 压缩 / 转换 / 对比
 import { createApp, h } from 'vue'
 
 const NAME = 'compress'
@@ -6,7 +6,7 @@ const b64 = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onl
 
 function mount(container, ctx) {
   const App = {
-    data() { return { tab: 'extract', files: [], ext: null, cmp: null, err: '', env: null } },
+    data() { return { tab: 'list', files: [], list: null, ext: null, cmp: null, fmt: 'zip', level: 5, env: null, err: '' } },
     methods: {
       async read(e) {
         const arr = e.target.files ? Array.from(e.target.files) : []
@@ -14,53 +14,41 @@ function mount(container, ctx) {
         for (const f of arr.slice(0, 10)) this.files.push({ name: f.name, data: await b64(f) })
         e.target.value = ''
       },
-      async extract() {
+      async run(method, payload) {
         this.err = ''
-        try { this.ext = await ctx.invoke('compress.dc.extract', { archive: this.files[0].data, name: this.files[0].name, organize: 'none' }); this.list() }
-        catch (e) { this.err = (e && e.message) || e }
+        try {
+          const r = await ctx.invoke(method, payload)
+          if (method.endsWith('.list')) this.list = r
+          else if (method.endsWith('.extract')) { this.ext = r; this.tab = 'extract' }
+          else if (method.endsWith('.compress')) this.ext = r
+          else if (method.endsWith('.convert')) this.ext = r
+          else if (method.endsWith('.compare')) this.cmp = r
+        } catch (e) { this.err = (e && e.message) || e }
       },
-      async list() {
-        try { const r = await ctx.invoke('compress.dc.list', { archive: this.files[0].data, name: this.files[0].name }); this.ext = r }
-        catch (e) { this.err = (e && e.message) || e }
-      },
-      async compress() {
-        this.err = ''
-        try { this.ext = await ctx.invoke('compress.dc.compress', { files: this.files, format: 'zip', level: 5, name: 'archive' }) }
-        catch (e) { this.err = (e && e.message) || e }
-      },
-      async compare() {
-        this.err = ''
-        try { this.cmp = await ctx.invoke('compress.dc.compare', { archives: this.files.map((f) => f.data) }) }
-        catch (e) { this.err = (e && e.message) || e }
-      },
-      async env() {
-        try { this.env = await ctx.invoke('compress.dc.check') } catch (e) {}
-      },
+      async env() { try { this.env = await ctx.invoke('compress.dc.check') } catch (e) {} },
     },
     mounted() { this.env() },
     render() {
-      const tab = (k, l) => h('button', { class: 'btn btn-sm' + (this.tab === k ? ' btn-primary' : ''), onclick: () => (this.tab = k) }, l)
+      const t = (k, l) => h('button', { class: 'btn btn-sm' + (this.tab === k ? ' btn-primary' : ''), onclick: () => (this.tab = k) }, l)
       return h('div', null, [
         h('div', { class: 'section-title' }, '解压压缩' + (this.env ? (this.env.ok ? ' · 7z ✓' : ' · 未装 7z') : '')),
-        h('input', { type: 'file', multiple: true, onchange: (e) => this.read(e), class: 'input', style: 'margin-bottom:8px;width:100%;' }),
-        h('div', { class: 'flex', style: 'gap:6px;margin-bottom:8px;' }, [tab('extract', '查看/解压'), tab('compress', '压缩'), tab('compare', '对比')]),
+        h('input', { type: 'file', multiple: true, onchange: (e) => this.read(e), class: 'input', style: 'width:100%;margin-bottom:8px;' }),
+        h('div', { class: 'flex', style: 'gap:6px;margin-bottom:8px;flex-wrap:wrap;' },
+          [['list', '打包内容'], ['extract', '解压'], ['compress', '压缩'], ['convert', '转换格式'], ['compare', '对比']].map((x) => t(x[0], x[1]))),
         this.err ? h('p', { style: 'color:var(--danger);font-size:12px;' }, this.err) : null,
-        this.tab === 'extract' ? h('div', null, [
-          h('button', { class: 'btn btn-sm', onclick: () => this.list() }, '查看内容'),
-          h('button', { class: 'btn btn-sm btn-primary', onclick: () => this.extract() }, '解压并打包'),
-          this.ext ? h('div', { style: 'margin-top:8px;font-size:12px;' }, [
-            h('p', null, '共 ' + (this.ext.total != null ? this.ext.total + ' 项' : (this.ext.count != null ? this.ext.count + ' 个文件' : '-'))),
-            this.ext.download ? h('a', { href: this.ext.download, class: 'btn btn-sm' }, '下载结果') : null,
-          ]) : null,
-        ]) : null,
-        this.tab === 'compress' ? h('div', null, [
-          h('button', { class: 'btn', onclick: () => this.compress() }, '压缩为 zip'),
-          this.ext && this.ext.download ? h('a', { href: this.ext.download, style: 'margin-left:8px;' }, '下载') : null,
-        ]) : null,
-        this.tab === 'compare' ? h('div', null, [
-          h('button', { class: 'btn', onclick: () => this.compare() }, '对比前两文件'),
-          this.cmp ? h('p', { style: 'font-size:12px;' }, 'A 独有 ' + this.cmp.only_a.length + ' · B 独有 ' + this.cmp.only_b.length + ' · 差异 ' + this.cmp.diff.length + ' · 相同 ' + this.cmp.same) : null,
-        ]) : null,
+        this.tab !== 'compare' ? h('button', { class: 'btn btn-sm btn-primary', onclick: () => {
+          if (this.tab === 'list') this.run('compress.dc.list', { archive: this.files[0].data, name: this.files[0].name })
+          if (this.tab === 'extract') this.run('compress.dc.extract', { archive: this.files[0].data, name: this.files[0].name, organize: 'none' })
+          if (this.tab === 'compress') this.run('compress.dc.compress', { files: this.files, format: this.fmt, level: Number(this.level) || 5, name: 'archive' })
+          if (this.tab === 'convert') this.run('compress.dc.convert', { archive: this.files[0].data, name: this.files[0].name, format: this.fmt })
+        } }, '执行') : h('button', { class: 'btn btn-sm btn-primary', onclick: () => this.run('compress.dc.compare', { archives: this.files.map((f) => f.data) }) }, '对比前两文件'),
+        this.fmtView = h('div', { class: 'flex', style: 'gap:6px;margin:6px 0;' }, [
+          (this.tab === 'compress' || this.tab === 'convert') ? h('select', { class: 'input', value: this.fmt, onchange: (e) => (this.fmt = e.target.value) }, ['7z', 'zip', 'tar', 'gz'].map((f) => h('option', { value: f }, f))) : null,
+          this.tab === 'compress' ? h('input', { class: 'input', style: 'width:70px;', placeholder: '级别', value: this.level, oninput: (e) => (this.level = e.target.value) }) : null,
+        ]),
+        this.list ? h('p', { class: 'faint', style: 'font-size:12px;' }, this.list.name + ' · ' + this.list.total + ' 项 · ' + this.list.total_size + ' B') : null,
+        this.ext && this.ext.download ? h('a', { href: this.ext.download, class: 'btn btn-sm', style: 'margin-top:4px;' }, '下载结果') : null,
+        this.cmp ? h('p', { style: 'font-size:12px;margin-top:4px;' }, 'A 独有 ' + this.cmp.only_a.length + ' · B 独有 ' + this.cmp.only_b.length + ' · 差异 ' + this.cmp.diff.length + ' · 相同 ' + this.cmp.same) : null,
       ])
     },
   }

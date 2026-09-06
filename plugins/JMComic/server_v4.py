@@ -211,6 +211,36 @@ def jm_download_status(params):
     return {'aid': aid, 'total': total, 'downloaded': downloaded, 'cached': cached, 'status': status}
 
 
+@rc.interface("jmcomic.image")
+def jm_image(params):
+    """按需取单张漫画图(本地优先, 缺失则下载+解码), 返回 base64 data URL。"""
+    import base64 as _b64
+    aid = _s(params, 'aid')
+    cid = _s(params, 'cid')
+    filename = _s(params, 'filename')
+    if not (aid and cid and filename):
+        _err('缺少 aid/cid/filename')
+    local = M.find_local_image(aid, filename)
+    if not local:
+        path = os.path.join(M.active_dir(), aid, cid, filename)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with M._cdn_lock:
+            p = M.find_local_image(aid, filename)
+            if not p:
+                data = M._download_image(aid, cid, filename, path)
+                if not data:
+                    _err('图片加载失败')
+                M.decode_jm_image(data, M.get_scramble_id(cid), cid, filename, path)
+                p = path
+        local = p
+    if not os.path.isfile(local):
+        _err('图片不存在')
+    ext = os.path.splitext(local)[1].lower().lstrip('.') or 'jpg'
+    with open(local, 'rb') as f:
+        b64 = _b64.b64encode(f.read()).decode()
+    return {'ok': True, 'data': 'data:image/%s;base64,%s' % (ext, b64)}
+
+
 @rc.interface("jmcomic.library.list")
 def jm_library_list(params):
     try:
@@ -286,8 +316,8 @@ if __name__ == "__main__":
         manifest={"label": "JMComic", "description": "禁漫搜索/阅读/库"},
         frontend={"pages": [{"path": "", "title": "JMComic"}]},
         iface_ids=["jmcomic.search", "jmcomic.meta", "jmcomic.album", "jmcomic.chapter",
-                   "jmcomic.download", "jmcomic.download.status", "jmcomic.library.list",
-                   "jmcomic.library.delete", "jmcomic.config.get", "jmcomic.config.save",
-                   "jmcomic.info"],
+                   "jmcomic.image", "jmcomic.download", "jmcomic.download.status",
+                   "jmcomic.library.list", "jmcomic.library.delete",
+                   "jmcomic.config.get", "jmcomic.config.save", "jmcomic.info"],
         plugin_dir=os.path.dirname(os.path.abspath(__file__)),
     )

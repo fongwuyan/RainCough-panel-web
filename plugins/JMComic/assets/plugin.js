@@ -18739,7 +18739,7 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { tab: "search", kw: "", results: [], lib: [], album: null, err: "", page: 1, pageCount: 1 };
+        return { tab: "search", kw: "", results: [], lib: [], album: null, chapter: null, pages: [], loadIdx: 6, err: "", page: 1, pageCount: 1, dl: {} };
       },
       methods: {
         async search(p2 = 1) {
@@ -18759,21 +18759,57 @@ ${codeFrame}` : message);
           try {
             this.album = await ctx.invoke("jmcomic.album", { aid });
             this.tab = "album";
+            this.chapter = null;
+            this.pages = [];
           } catch (e) {
             this.err = e && e.message || e;
           }
         },
         async download(aid) {
           try {
-            this.err = (await ctx.invoke("jmcomic.download", { aid })).message || "";
+            const r = await ctx.invoke("jmcomic.download", { aid });
+            this.dl[aid] = r.message;
           } catch (e) {
             this.err = e && e.message || e;
           }
         },
-        async loadLib() {
+        async dlStatus(aid) {
+          try {
+            const r = await ctx.invoke("jmcomic.download.status", { aid });
+            this.dl[aid] = "\u5DF2\u5B8C\u6210 " + (r.downloaded || 0) + "/" + (r.total || 0) + " (" + r.status + ")";
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async openChapter(cid, aid) {
           this.err = "";
           try {
-            const r = await ctx.invoke("jmcomic.library.list", { page: 1, page_size: 45 });
+            this.chapter = await ctx.invoke("jmcomic.chapter", { cid, aid });
+            this.pages = [];
+            this.loadIdx = 6;
+            this.tab = "read";
+            this.loadPages();
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async loadPages() {
+          const ch = this.chapter || {};
+          const arr = ch.page_arr || [];
+          const batch2 = arr.slice(this.pages.length, this.loadIdx);
+          for (const f of batch2) {
+            try {
+              const r = await ctx.invoke("jmcomic.image", { aid: ch.id || this.album.id, cid: ch.id, filename: f });
+              this.pages.push({ name: f, data: r.data });
+            } catch (e) {
+              this.pages.push({ name: f, data: "" });
+            }
+          }
+          this.loadIdx += 6;
+        },
+        async loadLib() {
+          try {
+            const r = await ctx.invoke("jmcomic.library.list", { page: 1, page_size: 60 });
             this.lib = r && r.items || [];
           } catch (e) {
             this.err = e && e.message || e;
@@ -18792,20 +18828,24 @@ ${codeFrame}` : message);
         this.loadLib();
       },
       render() {
-        const tab = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => this.tab = k }, l);
-        const rows = (this.tab === "album" && this.album ? [{ id: this.album.id, name: this.album.name }] : this.tab === "search" ? this.results : this.lib).map((it) => h("tr", { key: it.id }, [
-          h("td", null, it.id),
+        const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => {
+          this.tab = k;
+          if (k === "lib") this.loadLib();
+        } }, l);
+        const list = this.tab === "album" && this.album ? [{ id: this.album.id, name: this.album.name }] : this.tab === "search" ? this.results : this.lib;
+        const rows = list.map((it) => h("tr", { key: it.id }, [
+          h("td", { class: "mono" }, it.id),
           h("td", null, it.name + (it.author ? " \xB7 " + it.author : "")),
-          h("td", null, [
+          h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
             h("button", { class: "btn btn-sm", onclick: () => this.album(it.id) }, "\u8BE6\u60C5"),
-            this.tab === "search" ? h("button", { class: "btn btn-sm", onclick: () => this.download(it.id) }, "\u4E0B\u8F7D") : null,
-            this.tab === "lib" ? h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(it.id) }, "\u5220\u9664") : null
-          ])
+            this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(it.id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(it.id) }, "\u8FDB\u5EA6")] : null,
+            this.tab === "lib" ? [h("button", { class: "btn btn-sm", onclick: () => this.dlStatus(it.id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(it.id) }, "\u5220")] : null
+          ]))
         ]));
         return h("div", null, [
           h("div", { class: "section-title", style: "display:flex;justify-content:space-between;" }, [
             h("span", null, "JMComic"),
-            h("div", { class: "flex", style: "gap:6px;" }, [tab("search", "\u641C\u7D22"), tab("lib", "\u672C\u5B50\u5E93")])
+            h("div", { class: "flex", style: "gap:6px;" }, [t("search", "\u641C\u7D22"), t("lib", "\u672C\u5B50\u5E93")])
           ]),
           this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
           this.tab === "search" ? h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
@@ -18816,12 +18856,25 @@ ${codeFrame}` : message);
             h("button", { class: "btn btn-sm", disabled: this.page <= 1, onclick: () => this.search(this.page - 1) }, "\u4E0A\u4E00\u9875"),
             h("button", { class: "btn btn-sm", disabled: this.page >= this.pageCount, onclick: () => this.search(this.page + 1) }, "\u4E0B\u4E00\u9875")
           ]) : null,
-          this.tab === "album" && this.album ? h("div", { class: "section", style: "margin-bottom:10px;" }, [
+          this.tab === "album" && this.album ? h("div", { class: "section", style: "margin-bottom:8px;" }, [
             h("h3", null, this.album.name),
-            h("p", { class: "faint", style: "font-size:12px;" }, "\u4F5C\u8005 " + (this.album.author || "\u672A\u77E5") + " \xB7 " + (this.album.chapters || []).length + " \u7AE0"),
-            h("button", { class: "btn btn-sm", onclick: () => this.download(this.album.id) }, "\u4E0B\u8F7D\u672C\u5B50")
+            h("p", { class: "faint", style: "font-size:12px;" }, "\u4F5C\u8005 " + (this.album.author || "\u672A\u77E5") + " \xB7 " + (this.album.tags || []).join(", ")),
+            h("button", { class: "btn btn-sm", onclick: () => this.download(this.album.id) }, "\u4E0B\u8F7D\u672C\u5B50"),
+            h("div", { class: "section-title", style: "margin-top:8px;" }, "\u7AE0\u8282"),
+            (this.album.chapters || []).map((c) => h("div", { key: c.cid, style: "padding:4px 0;border-bottom:1px solid var(--border);font-size:13px;" }, [
+              c.name || "\u7AE0\u8282 " + c.cid,
+              h("button", { class: "btn btn-sm", style: "float:right;", onclick: () => this.openChapter(c.cid, c.aid) }, "\u9605\u8BFB")
+            ]))
           ]) : null,
-          h("table", { class: "table" }, [h("thead", null, h("tr", null, [h("th", null, "ID"), h("th", null, "\u540D\u79F0"), h("th", null, "\u64CD\u4F5C")])), h("tbody", null, rows)])
+          this.tab === "read" && this.chapter ? h("div", null, [
+            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
+              h("button", { class: "btn btn-sm", onclick: () => this.tab = "album" }, "\u8FD4\u56DE\u8BE6\u60C5"),
+              h("span", { class: "faint" }, this.pages.length + "/" + (this.chapter.page_arr || []).length + " \u9875")
+            ]),
+            this.pages.map((pg) => pg.data ? h("img", { key: pg.name, src: pg.data, loading: "lazy", style: "width:100%;max-width:520px;display:block;margin:6px auto;border:1px solid var(--border);border-radius:6px;" }) : null),
+            this.pages.length < (this.chapter.page_arr || []).length ? h("button", { class: "btn", style: "margin-top:6px;", onclick: () => this.loadPages() }, "\u52A0\u8F7D\u66F4\u591A") : h("p", { class: "hint" }, "\u5DF2\u5168\u90E8\u52A0\u8F7D")
+          ]) : null,
+          (this.tab === "search" || this.tab === "lib") && !this.err ? h("table", { class: "table" }, [h("thead", null, h("tr", null, ["ID", "\u540D\u79F0", "\u64CD\u4F5C"].map((x) => h("th", null, x)))), h("tbody", null, rows)]) : null
         ]);
       }
     };
