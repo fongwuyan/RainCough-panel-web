@@ -18,26 +18,12 @@ let timer = null
 async function load() {
   loading.value = true
   try {
-    const [srv, legacy] = await Promise.all([api.servicesHealth(), api.pluginsHealth().catch(() => null)])
-    const out = []
-    for (const p of srv.providers || []) {
-      out.push({
-        name: p.name, label: p.label, version: p.version, kind: p.kind || 'plugin',
-        source: 'v4', status: p.status, online: p.online, latency: p.latency_ms,
-        fail: p.fail_count, lastSeen: p.last_seen, ifaces: p.ifaces || [],
-      })
-    }
-    for (const it of (legacy && legacy.items) || []) {
-      const online = !!it.alive && !!it.health_http
-      out.push({
-        name: it.name, label: it.label, version: it.version, kind: 'plugin',
-        source: 'legacy', status: online ? 'online' : 'offline', online,
-        latency: null, fail: it.dead_count || 0, lastSeen: 0, ifaces: [],
-        legacy: true, err: it.error, asset_ok: !!it.asset_ok,
-        health_http: !!it.health_http, runtime_log: it.runtime_log || '',
-      })
-    }
-    rows.value = out
+    const srv = await api.servicesHealth()
+    rows.value = (srv.providers || []).map((p) => ({
+      name: p.name, label: p.label, version: p.version, kind: p.kind || 'plugin',
+      source: 'v4', status: p.status, online: p.online, latency: p.latency_ms,
+      fail: p.fail_count, lastSeen: p.last_seen, ifaces: p.ifaces || [],
+    }))
     Object.assign(summary.value, { total: out.length, interfaces: srv.interfaces || 0 })
     summary.value.online = out.filter((r) => r.online).length
     summary.value.offline = out.length - summary.value.online
@@ -131,7 +117,6 @@ onBeforeUnmount(() => clearInterval(timer))
           <td>
             <span class="dot" :class="r.online ? 'on' : 'off'"></span>
             <b>{{ r.label }}</b>
-            <span class="faint" v-if="r.source === 'legacy'">(旧)</span>
           </td>
           <td>{{ r.kind === 'system' ? '系统' : '插件' }}</td>
           <td>{{ r.version }}</td>
@@ -150,15 +135,6 @@ onBeforeUnmount(() => clearInterval(timer))
             <template v-if="expandedRow && expandedRow.ifaces.length">
               <span class="faint">注册接口:</span>
               <span v-for="id in expandedRow.ifaces" :key="id" class="chip" @click.stop="goIfaces(id)">{{ id }}</span>
-            </template>
-            <template v-else-if="expandedRow && expandedRow.legacy">
-              <div class="diag-grid">
-                <div class="diag-row"><span>加载错误</span><code>{{ expandedRow.err || '-' }}</code></div>
-                <div class="diag-row"><span>前端资产 plugin.js</span><code>{{ expandedRow.asset_ok ? '存在' : '缺失' }}</code></div>
-                <div class="diag-row"><span>健康端点</span><code>{{ expandedRow.health_http ? '可达' : '不可达' }}</code></div>
-                <div class="diag-row"><span>崩溃退避次数</span><code>{{ expandedRow.fail }}</code></div>
-                <div class="diag-row"><span>运行日志</span><code>{{ expandedRow.runtime_log || '-' }}</code></div>
-              </div>
             </template>
             <span v-else class="faint">该服务未注册接口</span>
           </td>
@@ -187,10 +163,6 @@ onBeforeUnmount(() => clearInterval(timer))
 .err { color:#d33; font-size:12px; }
 .btn.small { padding: 2px 10px; font-size: 12px; margin-right: 4px; }
 .expand { background: rgba(53,121,168,.06); }
-.diag-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 18px; }
-.diag-row { font-size: 12px; }
-.diag-row span { color: #888; margin-right: 6px; }
-.diag-row code { background: #f0f0f0; border-radius: 4px; padding: 1px 6px; word-break: break-all; }
 .chip { display:inline-block; background:#eef4fa; border:1px solid #cfe0ee; border-radius: 10px; padding:2px 10px; margin:3px 4px 3px 0; font-size:12px; cursor:pointer; }
 .log-panel { margin-top:12px; border:1px solid var(--border,#e5e5e5); border-radius:8px; }
 .log-head { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border,#e5e5e5); }

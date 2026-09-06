@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,15 +19,13 @@ import (
 
 	"raincough/internal/config"
 	"raincough/internal/core"
-	"raincough/internal/host"
 	"raincough/internal/pluginx"
 	"raincough/internal/shared"
 )
 
 type server struct {
-	cfg  *config.Config
-	sd   *shared.Shared
-	host *host.PluginHost
+	cfg *config.Config
+	sd  *shared.Shared
 }
 
 // globalPX 接口库 v4 运行时(插件自注册/接口总线/健康诊断)。
@@ -71,19 +68,6 @@ func main() {
 		log.Fatalf("接口库启动失败: %v", err)
 	}
 	defer globalPX.Stop()
-
-	// 插件运行时
-	ph := host.NewWithOptions(cfg.PluginsDir, cfg.ResolveDSN(), host.Options{
-		MaxChildren:  cfg.PluginMaxChildren,
-		ProxyTimeout: time.Duration(cfg.PluginProxyTimeout) * time.Second,
-		RestartMax:   cfg.PluginRestartMax,
-	})
-	ph.SetSudoPW(cfg.SudoPW)
-	for _, msg := range ph.Scan() {
-		log.Println(msg)
-	}
-	stopWd := make(chan struct{})
-	go ph.Watchdog(stopWd, 5*time.Second)
 
 	// 任务队列 + 调度器(core_tasks / core_scheduler namespace)
 	taskNS, err := sd.Namespace("core_tasks")
@@ -139,15 +123,13 @@ func main() {
 	}
 	globalEnv = core.NewEnvManager(envRoot, envNS)
 
-	// 插件市场(回调: 安装/卸载后触发 PluginHost 重扫)
+	// 插件市场(回调: 安装/卸载后触发接口库重新扫描端点)
 	storeNS, err := sd.Namespace("core_store")
 	if err != nil {
 		log.Fatalf("插件市场 namespace 初始化失败: %v", err)
 	}
 	globalStore = core.NewStore(storeNS, cfg.PluginsDir, func() {
-		for _, msg := range ph.Scan() {
-			log.Println(msg)
-		}
+		globalPX.Reload()
 	})
 
 	// 系统中心(服务/进程/日志/防火墙)
@@ -164,7 +146,7 @@ func main() {
 	perf = core.NewPerfTracker(sysMon)
 	go perf.Run()
 
-	s := &server{cfg: cfg, sd: sd, host: ph}
+	s := &server{cfg: cfg, sd: sd}
 	mux := http.NewServeMux()
 	s.routes(mux)
 
@@ -189,10 +171,9 @@ func main() {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sig
-		close(stopWd)
 		close(taskCleanupStop)
 		globalSched.Stop()
-		ph.Shutdown()
+		globalPX.Stop()
 		sd.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -221,10 +202,6 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/tasks/", s.handleTaskDetail)
 	mux.HandleFunc("/api/scheduler/jobs", s.handleSchedulerJobs)
-
-	// ---- 插件健康 ----
-	mux.HandleFunc("/api/sys/plugins-health", s.handlePluginsHealth)
-	mux.HandleFunc("/api/sys/plugins-health/log", s.handlePluginRuntimeLog)
 
 	// ---- 终端 ----
 	mux.HandleFunc("/api/terminal/open", s.handleTermOpen)
@@ -324,36 +301,20 @@ func (s *server) routes(mux *http.ServeMux) {
 	})
 }
 
-// ---- 插件路由 ----
+// ---- 插件路由(v4 接口库, 无 v3 网关) ----
 func (s *server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "仅支持 GET"})
 		return
 	}
-	list := s.host.List()
-	// 合并 v4 接口库注册插件(旧宿主不再扫描 v4 清单)
-	if globalPX != nil {
-		seen := map[string]bool{}
-		for _, it := range list {
-			if n, ok := it["name"].(string); ok {
-				seen[n] = true
-			}
-		}
-		for _, it := range globalPX.ListPlugins() {
-			if n, _ := it["name"].(string); !seen[n] {
-				list = append(list, it)
-				seen[n] = true
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, globalPX.ListPlugins())
 }
 
 func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
 	rest = strings.Trim(rest, "/")
 	if rest == "" {
-		writeJSON(w, http.StatusOK, s.host.List())
+		writeJSON(w, http.StatusOK, globalPX.ListPlugins())
 		return
 	}
 	parts := strings.SplitN(rest, "/", 2)
@@ -362,104 +323,41 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	if len(parts) > 1 {
 		sub = parts[1]
 	}
+	if !globalPX.HasPlugin(name) {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未注册: " + name})
+		return
+	}
 
-	// v4 接口库: 前端 invoke 桥(/api/plugins/<name>/invoke)
-	if sub == "invoke" && globalPX != nil {
+	switch {
+	case r.Method == http.MethodDelete && sub == "":
+		// 删除插件目录(外部进程由用户自行停用)
+		dir := filepath.Join(s.cfg.PluginsDir, name)
+		if err := os.RemoveAll(dir); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"message": "已移除插件目录: " + name})
+
+	case sub == "invoke" && r.Method == http.MethodPost:
 		globalPX.HandlePluginsInvoke(w, r)
-		return
-	}
 
-	switch r.Method {
-	case http.MethodDelete:
-		if sub == "" {
-			if err := s.host.Remove(name); err != nil {
-				writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": err.Error()})
-				return
-			}
-			dir := filepath.Join(s.cfg.PluginsDir, name)
-			if err := os.RemoveAll(dir); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]interface{}{"message": "已移除插件: " + name})
-			return
+	case r.Method == http.MethodGet && strings.HasPrefix(sub, "assets/"):
+		globalPX.ServeAsset(w, r, name, strings.TrimPrefix(sub, "assets/"))
+
+	case r.Method == http.MethodGet &&
+		(strings.HasPrefix(sub, "cache/") || strings.HasPrefix(sub, "output/") || strings.HasPrefix(sub, "work/")):
+		subdir := "cache"
+		switch {
+		case strings.HasPrefix(sub, "output/"):
+			subdir = "output"
+		case strings.HasPrefix(sub, "work/"):
+			subdir = "work"
 		}
-		// DELETE 带 subpath: 代理给插件子进程(插件自有 DELETE 路由)
-		child := s.hostFind(name)
-		if child == nil {
-			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未加载: " + name})
-			return
-		}
-		host.ProxyRequest(child, w, r, sub)
-		return
-	case http.MethodGet, http.MethodPost:
-		// 资产文件: /api/plugins/<name>/assets/<file>
-		if strings.HasPrefix(sub, "assets/") {
-			asset := strings.TrimPrefix(sub, "assets/")
-			// v4 插件资产(接口库托管); 其余走旧 PluginHost 资产
-			if globalPX != nil && globalPX.HasPlugin(name) {
-				globalPX.ServeAsset(w, r, name, asset)
-				return
-			}
-			s.servePluginAsset(w, r, name, asset)
-			return
-		}
-		// v4 插件本地文件(如 laizhangsetu cache 图片、aigen output 图、工具 work 产物)
-		if (strings.HasPrefix(sub, "cache/") || strings.HasPrefix(sub, "output/") || strings.HasPrefix(sub, "work/")) &&
-			globalPX != nil && globalPX.HasPlugin(name) && r.Method == http.MethodGet {
-			subdir := "cache"
-			switch {
-			case strings.HasPrefix(sub, "output/"):
-				subdir = "output"
-			case strings.HasPrefix(sub, "work/"):
-				subdir = "work"
-			}
-			globalPX.ServePluginFile(w, r, name, subdir, strings.TrimPrefix(sub, subdir+"/"))
-			return
-		}
-		// 网关代理
-		child := s.hostFind(name)
-		if child == nil {
-			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未加载: " + name})
-			return
-		}
-		// 使用痕迹: 记录插件 API 调用(供插件健康「系统日志」查看)
-		log.Printf("[trace] plugin=%s method=%s path=/%s", child.Name(), r.Method, sub)
-		host.ProxyRequest(child, w, r, sub)
-		return
+		globalPX.ServePluginFile(w, r, name, subdir, strings.TrimPrefix(sub, subdir+"/"))
+
 	default:
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "不支持的请求方法"})
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "不支持的插件路径/方法: " + r.Method + " " + sub})
 	}
-}
-
-// hostFind 按插件名查找(大小写不敏感, 兼容旧前端用小写路径访问大写插件如 JMComic)。
-func (s *server) hostFind(name string) *host.Child {
-	return s.host.Find(name)
-}
-
-// servePluginAsset 提供插件前端构建产物(远程组件挂载)。
-func (s *server) servePluginAsset(w http.ResponseWriter, r *http.Request, name, file string) {
-	child := s.hostFind(name)
-	if child == nil {
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未加载"})
-		return
-	}
-	// 用真实插件目录(大小写不敏感找到的 child 名)
-	name = child.Name()
-	// 安全: 仅允许 assets/ 下的文件, 拒绝路径穿越
-	clean := filepath.Clean(file)
-	if strings.Contains(clean, "..") || strings.HasPrefix(clean, "../") {
-		writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": "非法路径"})
-		return
-	}
-	dir := filepath.Join(s.cfg.PluginsDir, name, "assets")
-	ext := strings.ToLower(filepath.Ext(clean))
-	if ct := mime.TypeByExtension(ext); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	// 插件资产频繁更新且无 hash: 禁缓存, 避免浏览器服用旧损坏产物
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	http.ServeFile(w, r, filepath.Join(dir, clean))
 }
 
 // ---- 静态前端 ----

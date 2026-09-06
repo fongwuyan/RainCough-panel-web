@@ -51,7 +51,6 @@ export const api = {
     if (grep) u += '&grep=' + encodeURIComponent(grep)
     return req('GET', u)
   },
-  pluginsHealth: () => req('GET', '/api/sys/plugins-health'),
   pluginInvoke: (name, iface, params, timeoutMs) => req('POST', `/api/plugins/${name}/invoke`, { iface, params, timeout_ms: timeoutMs }),
 
   // 来张涩图
