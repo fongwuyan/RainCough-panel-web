@@ -24,9 +24,9 @@ async function load() {
       source: 'v4', status: p.status, online: p.online, latency: p.latency_ms,
       fail: p.fail_count, lastSeen: p.last_seen, ifaces: p.ifaces || [],
     }))
-    Object.assign(summary.value, { total: out.length, interfaces: srv.interfaces || 0 })
-    summary.value.online = out.filter((r) => r.online).length
-    summary.value.offline = out.length - summary.value.online
+    Object.assign(summary.value, { total: rows.value.length, interfaces: srv.interfaces || 0 })
+    summary.value.online = rows.value.filter((r) => r.online).length
+    summary.value.offline = rows.value.length - summary.value.online
   } catch (e) {
     console.error('health load failed', e)
   } finally {
