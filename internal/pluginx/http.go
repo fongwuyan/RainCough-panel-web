@@ -309,7 +309,7 @@ func (x *PluginX) HandleServicesHealth(w http.ResponseWriter, r *http.Request) {
 		}
 		sort.Strings(ifaces)
 		ifaceCount += len(ifaces)
-		online := p.conn != nil && p.Status == StatusOnline
+		online := p.Status == StatusOnline // 系统 Provider 常驻 online; 插件按状态
 		if online {
 			onlineCount++
 		}
@@ -333,6 +333,24 @@ func (x *PluginX) HandleServicesHealth(w http.ResponseWriter, r *http.Request) {
 		"total": len(providers), "online": onlineCount, "offline": len(providers) - onlineCount,
 		"interfaces": ifaceCount, "providers": providers, "checked_at": time.Now().Unix(),
 	})
+}
+
+// HealthSummary 服务健康汇总(供系统接口 system.health.services 复用)。
+func (x *PluginX) HealthSummary() map[string]interface{} {
+	x.mu.Lock()
+	total := len(x.plugins)
+	ifaceCount := len(x.ifaces)
+	online := 0
+	for _, p := range x.plugins {
+		if p.Status == StatusOnline {
+			online++
+		}
+	}
+	x.mu.Unlock()
+	return map[string]interface{}{
+		"total": total, "online": online, "offline": total - online,
+		"interfaces": ifaceCount, "providers": total, "checked_at": time.Now().Unix(),
+	}
 }
 
 // HandleServiceLog GET /api/services/health/log?name=&lines=&grep= — v4 插件诊断日志。

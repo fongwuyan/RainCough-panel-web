@@ -1,6 +1,6 @@
 # Go 构建产物
 raincough.exe
-raincough
+/raincough
 *.exe
 .gocache/
 .gotmp/

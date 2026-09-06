@@ -85,19 +85,20 @@ type Plugin struct {
 
 // Iface 接口目录记录。
 type Iface struct {
-	ID          string                 `json:"id"`
-	Plugin      string                 `json:"plugin"`
-	Visibility  string                 `json:"visibility"`
-	Version     string                 `json:"version"`
-	Description string                 `json:"description,omitempty"`
-	Input       map[string]interface{} `json:"input,omitempty"`
-	Output      map[string]interface{} `json:"output,omitempty"`
-	Online      bool                   `json:"online"`
-	Calls       int64                  `json:"calls"`
-	AvgMs       int64                  `json:"avg_ms"`
-	P95Ms       int64                  `json:"p95_ms"`
-	LastError   string                 `json:"last_error,omitempty"`
-	durations   []int64                // 滚动窗口(最近 100 次耗时)
+	ID          string                                        `json:"id"`
+	Plugin      string                                        `json:"plugin"`
+	Visibility  string                                        `json:"visibility"`
+	Version     string                                        `json:"version"`
+	Description string                                        `json:"description,omitempty"`
+	Input       map[string]interface{}                        `json:"input,omitempty"`
+	Output      map[string]interface{}                        `json:"output,omitempty"`
+	Online      bool                                          `json:"online"`
+	Calls       int64                                         `json:"calls"`
+	AvgMs       int64                                         `json:"avg_ms"`
+	P95Ms       int64                                         `json:"p95_ms"`
+	LastError   string                                        `json:"last_error,omitempty"`
+	durations   []int64                                       // 滚动窗口(最近 100 次耗时)
+	handler     func(params interface{}) (interface{}, error) // 系统内置接口: 本地执行
 }
 
 // Options PluginX 选项。

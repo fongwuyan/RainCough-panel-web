@@ -157,6 +157,9 @@ func main() {
 	initTermNS(sd)
 	initMediaNS(sd)
 
+	// M4: 系统功能注册为接口库内置 Provider(接口总览 source=system)
+	registerSystemProviders(globalPX)
+
 	// 性能趋势采样(每 1s 一点, 保留 60 点, 供工作台 SysPerf)
 	perf = core.NewPerfTracker(sysMon)
 	go perf.Run()

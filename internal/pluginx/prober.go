@@ -37,6 +37,9 @@ func (x *PluginX) probeAll() {
 		if p == nil {
 			continue
 		}
+		if p.Kind == "system" {
+			continue // 内置系统 Provider 常驻, 不探活
+		}
 		if p.conn == nil {
 			// 已注册未连接: 超期则 expired
 			lease := int64(p.HeartbeatSec) * 4

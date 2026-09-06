@@ -164,6 +164,56 @@ func (x *PluginX) onDisconnect(name string) {
 	}
 }
 
+// ---- 内置系统 Provider(接口总览 source=system, 本地 handler) ----
+
+// SystemIface 内置系统接口定义(无插件进程, 本地 Go handler 直接执行)。
+type SystemIface struct {
+	ID          string
+	Plugin      string // 所属系统 Provider 名
+	Label       string
+	Visibility  string // 默认 main
+	Version     string
+	Description string
+	Input       map[string]interface{}
+	Output      map[string]interface{}
+	Handler     func(params interface{}) (interface{}, error)
+}
+
+// RegisterSystemProvider 注册内置系统 Provider(常驻 online, 不可卸载)。
+func (x *PluginX) RegisterSystemProvider(provider, label string, ifaces []SystemIface) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	now := time.Now().Unix()
+	p := x.plugins[provider]
+	if p == nil {
+		p = &Plugin{Name: provider, Label: label, Kind: "system", Version: "1.0.0",
+			Status: StatusOnline, LastSeen: now}
+		x.plugins[provider] = p
+	} else {
+		p.Kind = "system"
+		p.Label = label
+		p.Status = StatusOnline
+		p.LastSeen = now
+	}
+	for _, it := range ifaces {
+		if it.Plugin == "" {
+			it.Plugin = provider
+		}
+		rec := &Iface{
+			ID: it.ID, Plugin: it.Plugin,
+			Visibility:  orDefault(it.Visibility, "main"),
+			Version:     orDefault(it.Version, "1"),
+			Description: it.Description,
+			Input:       it.Input,
+			Output:      it.Output,
+			Online:      true,
+			handler:     it.Handler,
+		}
+		x.ifaces[rec.ID] = rec
+		p.Ifaces = unique(append(p.Ifaces, rec.ID))
+	}
+}
+
 // ---- 跨插件调用(接口库总线) ----
 
 type callParams struct {
@@ -219,6 +269,17 @@ func (x *PluginX) invokeFrom(caller, ifaceID string, params interface{}, timeout
 		if caller != "ui" && caller != it.Plugin {
 			return nil, &RPCError{Code: 4201, Message: "main 接口仅主系统界面可调: " + ifaceID}
 		}
+	}
+	// 系统内置接口: 本地直接执行(无插件进程)
+	if it.handler != nil {
+		start := time.Now()
+		result, err := it.handler(params)
+		ms := time.Since(start).Milliseconds()
+		x.recordCall(it, ms, err)
+		if err != nil {
+			return nil, &RPCError{Code: 3000, Message: err.Error()}
+		}
+		return result, nil
 	}
 	if target == nil || target.conn == nil {
 		return nil, &RPCError{Code: 4301, Message: "目标插件离线: " + it.Plugin}
