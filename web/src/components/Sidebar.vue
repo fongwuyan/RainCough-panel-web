@@ -13,7 +13,7 @@ onMounted(load)
 
 const PAGES = [
   { key: 'ws', label: '工作台', path: '/', desc: '概览与状态' },
-  { key: 'plughealth', label: '插件健康', path: '/plughealth', desc: '加载检测与独立日志' },
+  { key: 'plughealth', label: '服务健康', path: '/plughealth', desc: '插件与服务健康诊断' },
   { key: 'ifaces', label: '接口总览', path: '/ifaces', desc: '服务总线接口目录' },
   { key: 'fm', label: '文件管理', path: '/plugin/filemanager', desc: '文件系统' },
   { key: 'term', label: '终端', path: '/terminal', desc: 'Shell' },
@@ -122,8 +122,8 @@ function isActive(name) {
       </div>
       <div class="plugin-item" :class="{ active: isActive('plughealth') }" @click="go('/plughealth')">
         <div class="info">
-          <div class="label">插件健康</div>
-          <div class="desc">加载检测与独立日志</div>
+          <div class="label">服务健康</div>
+          <div class="desc">插件与服务健康诊断</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('media') }" @click="go('/media')">

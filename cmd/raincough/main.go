@@ -312,6 +312,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/interfaces", globalPX.HandleIfacesCatalog)
 	mux.HandleFunc("/api/interfaces/", globalPX.HandleIfacesRoutes)
 	mux.HandleFunc("/api/services/health", globalPX.HandleServicesHealth)
+	mux.HandleFunc("/api/services/health/log", globalPX.HandleServiceLog)
 
 	// ---- 静态前端(public/) ----
 	webDir := filepath.Join(s.cfg.BaseDir, "public")

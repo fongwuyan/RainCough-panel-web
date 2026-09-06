@@ -1,7 +1,10 @@
 <script setup>
 // 接口总览: 接口库 v4 目录(系统+插件), 支持筛选/详情/试调用
 import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import { api } from '../api.js'
+
+const route = useRoute()
 
 const summary = ref({ interfaces: 0, online: 0, offline: 0, plugin: 0, system: 0, providers: 0 })
 const items = ref([])
@@ -98,6 +101,7 @@ function dotCls(it) {
 }
 
 onMounted(() => {
+  if (route.query.q) filters.value.q = String(route.query.q)
   load()
   timer = setInterval(load, 15000)
 })

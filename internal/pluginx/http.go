@@ -335,6 +335,42 @@ func (x *PluginX) HandleServicesHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleServiceLog GET /api/services/health/log?name=&lines=&grep= — v4 插件诊断日志。
+func (x *PluginX) HandleServiceLog(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	lines := 200
+	if v := r.URL.Query().Get("lines"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			lines = n
+		}
+	}
+	grep := r.URL.Query().Get("grep")
+	x.mu.Lock()
+	p := x.plugins[name]
+	x.mu.Unlock()
+	if p == nil || p.conn == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"exists": false, "text": "", "total_lines": 0, "size": 0, "file": name + "/.runtime.log",
+		})
+		return
+	}
+	resp, err := p.conn.request("log.tail", map[string]interface{}{"lines": lines, "grep": grep}, 5*time.Second)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	var out struct {
+		Text       string `json:"text"`
+		TotalLines int    `json:"total_lines"`
+		Size       int64  `json:"size"`
+	}
+	_ = json.Unmarshal(resp, &out)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"exists": true, "text": out.Text, "total_lines": out.TotalLines, "size": out.Size,
+		"file": name + "/.runtime.log",
+	})
+}
+
 // ---- 内部视图 ----
 
 // HasPlugin v4 插件是否存在(注册表或 v4 清单目录)。

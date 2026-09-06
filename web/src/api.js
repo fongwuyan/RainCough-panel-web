@@ -46,6 +46,12 @@ export const api = {
   ifaceInvoke: (id, params, timeoutMs) => req('POST', `/api/interfaces/${encodeURIComponent(id)}/invoke`, { params, timeout_ms: timeoutMs }),
   ifacesSummary: () => req('GET', '/api/interfaces/stats/summary'),
   servicesHealth: () => req('GET', '/api/services/health'),
+  servicesHealthLog: (name, lines, grep) => {
+    let u = '/api/services/health/log?name=' + encodeURIComponent(name) + '&lines=' + (lines || 200)
+    if (grep) u += '&grep=' + encodeURIComponent(grep)
+    return req('GET', u)
+  },
+  pluginsHealth: () => req('GET', '/api/sys/plugins-health'),
   pluginInvoke: (name, iface, params, timeoutMs) => req('POST', `/api/plugins/${name}/invoke`, { iface, params, timeout_ms: timeoutMs }),
 
   // 来张涩图
