@@ -23,18 +23,11 @@ async function reqForm(url, fd) {
 export const api = {
 
   listPlugins: () => req('GET', '/api/plugins'),
-  pluginInfo: (name) => req('GET', `/api/plugins/${name}/info`),
   removePlugin: (name) => req('DELETE', `/api/plugins/${name}`),
-  installPlugin: (file) => {
-    const fd = new FormData()
-    fd.append('file', file)
-    return req('POST', '/api/plugins/install', fd, true)
-  },
   sysInfo: () => req('GET', '/api/system'),
   sysStorage: () => req('GET', '/api/storage'),
   disks: () => req('GET', '/api/disks'),
   diskUnmount: (device) => req('POST', '/api/disks/unmount', { device }),
-  saveStorage: (plugin, cfg) => req('POST', `/api/plugins/${plugin}/config`, cfg),
 
   // 接口库 v4(自注册/服务总线)
   ifaces: (params) => {
@@ -53,8 +46,6 @@ export const api = {
   },
   pluginInvoke: (name, iface, params, timeoutMs) => req('POST', `/api/plugins/${name}/invoke`, { iface, params, timeout_ms: timeoutMs }),
 
-  // 来张涩图
-  lsFetch: (tags) => req('POST', '/api/plugins/laizhangsetu/fetch', { tags }),
   mtImage: (files, opts) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
@@ -211,8 +202,6 @@ export const api = {
   mediaTags: (path) => req('GET', `/api/media/tags?path=${encodeURIComponent(path)}`),
   mediaDedup: (root) => req('POST', '/api/media/dedup', { root }),
 
-  // AI 生图 (aigen)
-  agPing: () => req('GET', '/api/plugins/aigen/ping'),
   vmInfo: (file) => {
     const fd = new FormData(); fd.append('file', file)
     return reqForm('/api/media/tool/vmerge?action=info', fd)
@@ -287,55 +276,6 @@ export const api = {
   tmInput: (sid, data) => req('POST', '/api/terminal/input', { sid, data }),
   tmResize: (sid, rows, cols) => req('POST', '/api/terminal/resize', { sid, rows, cols }),
   tmClose: (sid) => req('POST', '/api/terminal/close', { sid }),
-  wgEnv: () => req('GET', '/api/plugins/vpn/wg/env'),
-  wgStatus: () => req('GET', '/api/plugins/vpn/wg/status'),
-  wgImport: (name, content) => req('POST', '/api/plugins/vpn/wg/import', { name, content }),
-  wgAction: (name, action) => req('POST', '/api/plugins/vpn/wg/action', { name, action }),
-  wgConfig: (name) => req('GET', `/api/plugins/vpn/wg/config?name=${encodeURIComponent(name)}`),
-  wgServer: () => req('GET', '/api/plugins/vpn/wg/server'),
-  wgServerSave: (data) => req('POST', '/api/plugins/vpn/wg/server/save', data),
-  wgServerUp: () => req('POST', '/api/plugins/vpn/wg/server/up'),
-  wgServerDown: () => req('POST', '/api/plugins/vpn/wg/server/down'),
-  wgPeerAdd: (name) => req('POST', '/api/plugins/vpn/wg/peers/add', { name }),
-  wgPeerDelete: (name) => req('POST', '/api/plugins/vpn/wg/peers/delete', { name }),
-  wgExport: (name) => req('POST', '/api/plugins/vpn/wg/export', { name }),
-  ovpnEnv: () => req('GET', '/api/plugins/vpn/ovpn/env'),
-  ovpnImport: (name, content) => req('POST', '/api/plugins/vpn/ovpn/import', { name, content }),
-  ovpnAction: (name, action) => req('POST', '/api/plugins/vpn/ovpn/action', { name, action }),
-  ovpnConfig: (name) => req('GET', `/api/plugins/vpn/ovpn/config?name=${encodeURIComponent(name)}`),
-  ovpnLog: () => req('GET', '/api/plugins/vpn/ovpn/log'),
-  ovpnServer: () => req('GET', '/api/plugins/vpn/ovpn/server'),
-  ovpnServerSave: (data) => req('POST', '/api/plugins/vpn/ovpn/server/save', data),
-  ovpnInitPki: () => req('POST', '/api/plugins/vpn/ovpn/server/init-pki'),
-  ovpnBuild: () => req('POST', '/api/plugins/vpn/ovpn/server/build'),
-  ovpnServerUp: () => req('POST', '/api/plugins/vpn/ovpn/server/up'),
-  ovpnServerDown: () => req('POST', '/api/plugins/vpn/ovpn/server/down'),
-  ovpnServerLog: () => req('GET', '/api/plugins/vpn/ovpn/server/log'),
-  v2Env: () => req('GET', '/api/plugins/vpn/v2/env'),
-  v2Load: (name) => req('GET', `/api/plugins/vpn/v2/load?name=${encodeURIComponent(name)}`),
-  v2Save: (name, config, port) => req('POST', '/api/plugins/vpn/v2/save', { name, config, port }),
-  v2Action: (name, action) => req('POST', '/api/plugins/vpn/v2/action', { name, action }),
-  v2Test: (name) => req('POST', '/api/plugins/vpn/v2/test', { name }),
-  v2Log: () => req('GET', '/api/plugins/vpn/v2/log'),
-  v2Wizard: (data) => req('POST', '/api/plugins/vpn/v2/wizard', data),
-  v2Subs: () => req('GET', '/api/plugins/vpn/v2/subs'),
-  v2SubAdd: (url, name) => req('POST', '/api/plugins/vpn/v2/subs', { url, name }),
-  v2SubDel: (url) => req('DELETE', '/api/plugins/vpn/v2/subs', { url }),
-  v2SubRefresh: (url) => req('POST', '/api/plugins/vpn/v2/subs/refresh', { url }),
-  v2Nodes: (q, group) => {
-    const p = []
-    if (q) p.push(`q=${encodeURIComponent(q)}`)
-    if (group && group !== 'all') p.push(`group=${encodeURIComponent(group)}`)
-    return req('GET', `/api/plugins/vpn/v2/nodes${p.length ? `?${p.join('&')}` : ''}`)
-  },
-  v2NodesGroups: () => req('GET', '/api/plugins/vpn/v2/nodes/groups'),
-  v2NodesDelete: (ids) => req('POST', '/api/plugins/vpn/v2/nodes/delete', { ids }),
-  v2NodesTest: (ids) => req('POST', '/api/plugins/vpn/v2/nodes/test', { ids }),
-  v2NodeSpeedTest: (id) => req('POST', '/api/plugins/vpn/v2/nodes/speedtest', { id }),
-  v2NodesSelect: (id, name, port) => req('POST', '/api/plugins/vpn/v2/nodes/select', { id, name, port }),
-  v2ModeGet: () => req('GET', '/api/plugins/vpn/v2/mode'),
-  v2ModeSet: (mode) => req('POST', '/api/plugins/vpn/v2/mode', { mode }),
-
 
   // 系统级功能·第二批
   sysfCleanScan: () => req('GET', '/api/sysfunc/clean/scan'),
@@ -354,7 +294,6 @@ export const api = {
   sysfEvents: (limit) => req('GET', `/api/sysfunc/events/timeline?limit=${limit || 100}`),
   sysfLogrotateList: () => req('GET', '/api/sysfunc/logrotate/list'),
   sysfLogrotateSave: (name, content) => req('POST', '/api/sysfunc/logrotate/save', { name, content }),
-
 
   // 系统级功能·第四批
   sysfBootHistory: () => req('GET', '/api/sysfunc/boot/history'),
