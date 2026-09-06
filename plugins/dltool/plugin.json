@@ -2,11 +2,79 @@
   "name": "dltool",
   "label": "下载工具",
   "version": "2.0.0",
-  "description": "下载/分片/重命名/删除与文档转换检查(独立子进程)",
+  "description": "下载/分片/重命名与文档转换(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 20,
-  "routes": ["/networktools/download", "/networktools/split", "/networktools/join",
-             "/networktools/rename", "/networktools/delete", "/docconvert/check"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      {
+        "path": "",
+        "title": "下载工具"
+      }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": [
+      "python",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
+  },
+  "interfaces": [
+    {
+      "id": "dltool.doc.check",
+      "visibility": "all",
+      "version": "1",
+      "description": "pandoc 环境检查"
+    },
+    {
+      "id": "dltool.doc.convert",
+      "visibility": "main",
+      "version": "1",
+      "description": "文档转换"
+    },
+    {
+      "id": "dltool.nt.download",
+      "visibility": "main",
+      "version": "1",
+      "description": "URL 批量下载(任务队列)"
+    },
+    {
+      "id": "dltool.nt.split",
+      "visibility": "main",
+      "version": "1",
+      "description": "文件分片"
+    },
+    {
+      "id": "dltool.nt.join",
+      "visibility": "main",
+      "version": "1",
+      "description": "分片合并"
+    },
+    {
+      "id": "dltool.nt.rename",
+      "visibility": "main",
+      "version": "1",
+      "description": "批量重命名"
+    },
+    {
+      "id": "dltool.nt.delete",
+      "visibility": "main",
+      "version": "1",
+      "description": "安全删除(覆写)"
+    },
+    {
+      "id": "dltool.info",
+      "visibility": "all",
+      "version": "1",
+      "description": "插件信息"
+    }
+  ]
 }

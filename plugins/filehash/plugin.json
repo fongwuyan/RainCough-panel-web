@@ -2,10 +2,67 @@
   "name": "filehash",
   "label": "文件校验",
   "version": "2.0.0",
-  "description": "哈希计算/生成/校验与目录统计查重(独立子进程)",
+  "description": "哈希计算/生成/校验与目录统计查重(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 20,
-  "routes": ["/hash", "/generate", "/verify", "/diranalyze/stats", "/diranalyze/duplicate"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      {
+        "path": "",
+        "title": "文件校验"
+      }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": [
+      "python",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
+  },
+  "interfaces": [
+    {
+      "id": "filehash.da.stats",
+      "visibility": "main",
+      "version": "1",
+      "description": "目录/压缩包统计"
+    },
+    {
+      "id": "filehash.da.duplicate",
+      "visibility": "main",
+      "version": "1",
+      "description": "查重(按哈希)"
+    },
+    {
+      "id": "filehash.h.calc",
+      "visibility": "main",
+      "version": "1",
+      "description": "计算 md5/sha1/sha256"
+    },
+    {
+      "id": "filehash.h.generate",
+      "visibility": "main",
+      "version": "1",
+      "description": "生成校验清单"
+    },
+    {
+      "id": "filehash.h.verify",
+      "visibility": "main",
+      "version": "1",
+      "description": "校验清单验证"
+    },
+    {
+      "id": "filehash.info",
+      "visibility": "all",
+      "version": "1",
+      "description": "插件信息"
+    }
+  ]
 }

@@ -5,7 +5,7 @@ import json
 import re
 import sys
 
-NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 IFACE_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_.]+$")
 
 

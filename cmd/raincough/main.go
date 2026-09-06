@@ -404,12 +404,15 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 			s.servePluginAsset(w, r, name, asset)
 			return
 		}
-		// v4 插件本地文件(如 laizhangsetu cache 图片、aigen output 图): /api/plugins/<name>/<sub>/<file>
-		if (strings.HasPrefix(sub, "cache/") || strings.HasPrefix(sub, "output/")) &&
+		// v4 插件本地文件(如 laizhangsetu cache 图片、aigen output 图、工具 work 产物)
+		if (strings.HasPrefix(sub, "cache/") || strings.HasPrefix(sub, "output/") || strings.HasPrefix(sub, "work/")) &&
 			globalPX != nil && globalPX.HasPlugin(name) && r.Method == http.MethodGet {
 			subdir := "cache"
-			if strings.HasPrefix(sub, "output/") {
+			switch {
+			case strings.HasPrefix(sub, "output/"):
 				subdir = "output"
+			case strings.HasPrefix(sub, "work/"):
+				subdir = "work"
 			}
 			globalPX.ServePluginFile(w, r, name, subdir, strings.TrimPrefix(sub, subdir+"/"))
 			return

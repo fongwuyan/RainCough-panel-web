@@ -2,10 +2,97 @@
   "name": "JMComic",
   "label": "JMComic",
   "version": "2.0.0",
-  "description": "禁漫天堂搜索与漫画阅读(独立子进程, 数据经 SharedData)",
+  "description": "禁漫天堂搜索与漫画阅读(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 40,
-  "routes": ["/search", "/meta", "/album", "/chapter", "/config", "/library"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      {
+        "path": "",
+        "title": "JMComic"
+      }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": [
+      "python",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
+  },
+  "interfaces": [
+    {
+      "id": "jmcomic.search",
+      "visibility": "all",
+      "version": "1",
+      "description": "搜索"
+    },
+    {
+      "id": "jmcomic.meta",
+      "visibility": "all",
+      "version": "1",
+      "description": "漫画元信息"
+    },
+    {
+      "id": "jmcomic.album",
+      "visibility": "all",
+      "version": "1",
+      "description": "漫画详情+章节"
+    },
+    {
+      "id": "jmcomic.chapter",
+      "visibility": "all",
+      "version": "1",
+      "description": "章节图片列表"
+    },
+    {
+      "id": "jmcomic.download",
+      "visibility": "main",
+      "version": "1",
+      "description": "加入下载队列"
+    },
+    {
+      "id": "jmcomic.download.status",
+      "visibility": "all",
+      "version": "1",
+      "description": "下载进度"
+    },
+    {
+      "id": "jmcomic.library.list",
+      "visibility": "all",
+      "version": "1",
+      "description": "本地库"
+    },
+    {
+      "id": "jmcomic.library.delete",
+      "visibility": "main",
+      "version": "1",
+      "description": "删除本子"
+    },
+    {
+      "id": "jmcomic.config.get",
+      "visibility": "all",
+      "version": "1",
+      "description": "读取配置"
+    },
+    {
+      "id": "jmcomic.config.save",
+      "visibility": "main",
+      "version": "1",
+      "description": "保存配置"
+    },
+    {
+      "id": "jmcomic.info",
+      "visibility": "all",
+      "version": "1",
+      "description": "插件信息"
+    }
+  ]
 }

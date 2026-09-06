@@ -2,10 +2,115 @@
   "name": "mcskin",
   "label": "图片转皮肤",
   "version": "2.0.0",
-  "description": "图片转 MC Java 皮肤: 全身立绘映射、Steve/Alex 模型(独立子进程, 需 Pillow)",
+  "description": "图片转 MC Java 皮肤: 立绘映射、AI 上色(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 30,
-  "routes": ["/detect", "/convert", "/paint/models"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      {
+        "path": "",
+        "title": "图片转皮肤"
+      }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": [
+      "python",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
+  },
+  "interfaces": [
+    {
+      "id": "mcskin.detect",
+      "visibility": "main",
+      "version": "1",
+      "description": "图片识别(自动参数)"
+    },
+    {
+      "id": "mcskin.convert",
+      "visibility": "main",
+      "version": "1",
+      "description": "转 MC 皮肤"
+    },
+    {
+      "id": "mcskin.paint.models",
+      "visibility": "all",
+      "version": "1",
+      "description": "上色模型列表"
+    },
+    {
+      "id": "mcskin.paint",
+      "visibility": "main",
+      "version": "1",
+      "description": "AI 上色(异步)"
+    },
+    {
+      "id": "mcskin.paint.status",
+      "visibility": "all",
+      "version": "1",
+      "description": "上色任务状态"
+    },
+    {
+      "id": "mcskin.paint.cancel",
+      "visibility": "main",
+      "version": "1",
+      "description": "取消上色"
+    },
+    {
+      "id": "mcskin.text2skin.models",
+      "visibility": "all",
+      "version": "1",
+      "description": "文生肤模型"
+    },
+    {
+      "id": "mcskin.text2skin.styles",
+      "visibility": "all",
+      "version": "1",
+      "description": "风格/色调"
+    },
+    {
+      "id": "mcskin.text2skin",
+      "visibility": "main",
+      "version": "1",
+      "description": "文字生成皮肤(异步)"
+    },
+    {
+      "id": "mcskin.text2skin.status",
+      "visibility": "all",
+      "version": "1",
+      "description": "文生肤状态"
+    },
+    {
+      "id": "mcskin.text2skin.history",
+      "visibility": "all",
+      "version": "1",
+      "description": "文生肤历史"
+    },
+    {
+      "id": "mcskin.text2skin.regenerate",
+      "visibility": "main",
+      "version": "1",
+      "description": "重新生成"
+    },
+    {
+      "id": "mcskin.text2skin.feedback",
+      "visibility": "main",
+      "version": "1",
+      "description": "喜好反馈"
+    },
+    {
+      "id": "mcskin.info",
+      "visibility": "all",
+      "version": "1",
+      "description": "插件信息"
+    }
+  ]
 }
