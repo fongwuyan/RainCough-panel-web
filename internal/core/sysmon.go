@@ -32,16 +32,16 @@ type SystemSnapshot struct {
 	NetDownRate float64    `json:"net_down_rate"`
 	NetIfaces   []NetIface `json:"net_interfaces"`
 	// 进程/系统
-	ProcessCount int    `json:"process_count"`
-	ThreadCount  int64  `json:"thread_count"`
-	Hostname     string `json:"hostname"`
-	Platform     string `json:"platform"`
-	Arch         string `json:"arch"`
-	GoVersion    string `json:"go_version"`
+	ProcessCount  int    `json:"process_count"`
+	ThreadCount   int64  `json:"thread_count"`
+	Hostname      string `json:"hostname"`
+	Platform      string `json:"platform"`
+	Arch          string `json:"arch"`
+	GoVersion     string `json:"go_version"`
 	PythonVersion string `json:"python_version"` // 兼容旧前端"运行时"格: 新系统填 Go 版本
-	BootTime     int64  `json:"boot_time"`
-	Uptime       int64  `json:"uptime"`
-	CurrentTime  int64  `json:"current_time"`
+	BootTime      int64  `json:"boot_time"`
+	Uptime        int64  `json:"uptime"`
+	CurrentTime   int64  `json:"current_time"`
 }
 
 // DiskInfo 磁盘分区信息。

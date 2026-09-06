@@ -43,12 +43,12 @@ type StorePlugin struct {
 // Store 插件市场: GitHub 私有仓库 registry 拉取/安装/更新/卸载。
 // onInstalled 回调: 安装成功后触发 PluginHost 重扫。
 type Store struct {
-	ns Namespacelike
-	config StoreConfig
-	token  string // GitHub token(解密后)
-	client *http.Client
-	pluginsDir string
-	onInstalled func()  // 安装/卸载后回调(宿主注入: PluginHost.Scan)
+	ns          Namespacelike
+	config      StoreConfig
+	token       string // GitHub token(解密后)
+	client      *http.Client
+	pluginsDir  string
+	onInstalled func()        // 安装/卸载后回调(宿主注入: PluginHost.Scan)
 	mu          chan struct{} // 并发控制(1)
 }
 

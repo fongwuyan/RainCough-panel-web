@@ -68,16 +68,16 @@ func (m *SystemMonitor) Snapshot() *SystemSnapshot {
 		NetSent: curNet.Sent,
 		NetRecv: curNet.Recv,
 		// 系统
-		ProcessCount: processCountLinux(),
-		ThreadCount:  ThreadCount(),
-		Hostname:     hostname,
-		Platform:     runtime.GOOS,
-		Arch:         runtime.GOARCH,
-		GoVersion:    runtime.Version(),
+		ProcessCount:  processCountLinux(),
+		ThreadCount:   ThreadCount(),
+		Hostname:      hostname,
+		Platform:      runtime.GOOS,
+		Arch:          runtime.GOARCH,
+		GoVersion:     runtime.Version(),
 		PythonVersion: runtime.Version(),
-		BootTime:     BootTime(),
-		Uptime:       uptimeSec(),
-		CurrentTime:  time.Now().Unix(),
+		BootTime:      BootTime(),
+		Uptime:        uptimeSec(),
+		CurrentTime:   time.Now().Unix(),
 	}
 	if mem.Total > 0 {
 		snap.SwapPercent = float64(snap.SwapUsed) / float64(mem.SwapTotal) * 100

@@ -36,6 +36,18 @@ export const api = {
   diskUnmount: (device) => req('POST', '/api/disks/unmount', { device }),
   saveStorage: (plugin, cfg) => req('POST', `/api/plugins/${plugin}/config`, cfg),
 
+  // 接口库 v4(自注册/服务总线)
+  ifaces: (params) => {
+    const q = new URLSearchParams()
+    for (const k in params || {}) if (params[k]) q.set(k, params[k])
+    return req('GET', '/api/interfaces?' + q.toString())
+  },
+  ifaceDetail: (id) => req('GET', '/api/interfaces/' + encodeURIComponent(id)),
+  ifaceInvoke: (id, params, timeoutMs) => req('POST', `/api/interfaces/${encodeURIComponent(id)}/invoke`, { params, timeout_ms: timeoutMs }),
+  ifacesSummary: () => req('GET', '/api/interfaces/stats/summary'),
+  servicesHealth: () => req('GET', '/api/services/health'),
+  pluginInvoke: (name, iface, params, timeoutMs) => req('POST', `/api/plugins/${name}/invoke`, { iface, params, timeout_ms: timeoutMs }),
+
   // 来张涩图
   lsFetch: (tags) => req('POST', '/api/plugins/laizhangsetu/fetch', { tags }),
   lsHistory: () => req('GET', '/api/plugins/laizhangsetu/history'),

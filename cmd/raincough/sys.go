@@ -127,24 +127,24 @@ func (s *server) handleSysKill(w http.ResponseWriter, r *http.Request) {
 
 // pluginCheckItem 单个插件的健康检查结果(信息丰富版)。
 type pluginCheckItem struct {
-	Name       string `json:"name"`
-	Label      string `json:"label"`
-	Version    string `json:"version"`
-	Lang       string `json:"lang,omitempty"`
-	Author     string `json:"author,omitempty"`
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	Version     string `json:"version"`
+	Lang        string `json:"lang,omitempty"`
+	Author      string `json:"author,omitempty"`
 	Description string `json:"description,omitempty"`
-	Routes     int    `json:"routes,omitempty"`
-	Alive      bool   `json:"alive"`
-	HealthHTTP bool   `json:"health_http"` // __health 网关可达
-	AssetOK    bool   `json:"asset_ok"`    // assets/plugin.js 可达(有独立前端)
-	PID        int    `json:"pid,omitempty"`
-	Port       int    `json:"port,omitempty"`
-	StartedAt  int64  `json:"started_at,omitempty"` // unix
-	UptimeSec  int64  `json:"uptime_sec,omitempty"`
-	DeadCount  int    `json:"dead_count,omitempty"`
-	LogTail    string `json:"log_tail,omitempty"`
-	RuntimeLog string `json:"runtime_log,omitempty"` // .runtime.log 存在路径
-	Err        string `json:"error,omitempty"`
+	Routes      int    `json:"routes,omitempty"`
+	Alive       bool   `json:"alive"`
+	HealthHTTP  bool   `json:"health_http"` // __health 网关可达
+	AssetOK     bool   `json:"asset_ok"`    // assets/plugin.js 可达(有独立前端)
+	PID         int    `json:"pid,omitempty"`
+	Port        int    `json:"port,omitempty"`
+	StartedAt   int64  `json:"started_at,omitempty"` // unix
+	UptimeSec   int64  `json:"uptime_sec,omitempty"`
+	DeadCount   int    `json:"dead_count,omitempty"`
+	LogTail     string `json:"log_tail,omitempty"`
+	RuntimeLog  string `json:"runtime_log,omitempty"` // .runtime.log 存在路径
+	Err         string `json:"error,omitempty"`
 }
 
 // handlePluginsHealth GET /api/sys/plugins-health — 插件加载全检(供「插件健康」页)。
@@ -159,10 +159,18 @@ func (s *server) handlePluginsHealth(w http.ResponseWriter, r *http.Request) {
 		seen[n] = true
 		it := pluginCheckItem{Name: n, Label: child.Label(), Version: child.Version()}
 		info := child.ManifestInfo()
-		if v, ok := info["lang"].(string); ok { it.Lang = v }
-		if v, ok := info["author"].(string); ok { it.Author = v }
-		if v, ok := info["description"].(string); ok { it.Description = v }
-		if v, ok := info["routes"].([]string); ok { it.Routes = len(v) }
+		if v, ok := info["lang"].(string); ok {
+			it.Lang = v
+		}
+		if v, ok := info["author"].(string); ok {
+			it.Author = v
+		}
+		if v, ok := info["description"].(string); ok {
+			it.Description = v
+		}
+		if v, ok := info["routes"].([]string); ok {
+			it.Routes = len(v)
+		}
 		it.Alive = child.Alive()
 		it.Port = child.Port()
 		it.PID = child.PID()
@@ -205,8 +213,10 @@ func (s *server) handlePluginsHealth(w http.ResponseWriter, r *http.Request) {
 			if merr != nil {
 				it.Err = "manifest 加载失败: " + merr.Error()
 			} else {
-				it.Label = m.Label; it.Version = m.Version
-				it.Lang = m.Lang; it.Author = m.Author
+				it.Label = m.Label
+				it.Version = m.Version
+				it.Lang = m.Lang
+				it.Author = m.Author
 				it.Description = m.Description
 				it.Routes = len(m.Routes)
 				if dc := dead[e.Name()]; dc > 0 {
@@ -226,7 +236,7 @@ func (s *server) handlePluginsHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-// pingTCP TCP 连通探测(等价插件就绪判定)。
+	// pingTCP TCP 连通探测(等价插件就绪判定)。
 
 	// 总汇
 	alive := 0
@@ -240,10 +250,10 @@ func (s *server) handlePluginsHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"total": len(items),
-		"alive": alive,
-		"healthy": healthy,
-		"items": items,
+		"total":      len(items),
+		"alive":      alive,
+		"healthy":    healthy,
+		"items":      items,
 		"checked_at": time.Now().Unix(),
 	})
 }

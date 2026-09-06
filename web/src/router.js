@@ -13,6 +13,7 @@ import TaskQueue from './components/tasks/TaskQueue.vue'
 import SysFuncMain from './components/sysfunc/SysFuncMain.vue'
 import StorePlugins from './components/store/StorePlugins.vue'
 import PluginHealth from './components/PluginHealth.vue'
+import Ifaces from './components/Ifaces.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -30,6 +31,7 @@ const router = createRouter({
     { path: '/sysfunc', name: 'sysfunc', component: SysFuncMain },
     { path: '/store', name: 'store', component: StorePlugins },
     { path: '/plughealth', name: 'plughealth', component: PluginHealth },
+    { path: '/ifaces', name: 'ifaces', component: Ifaces },
     { path: '/plugin/:name', name: 'plugin', component: PluginView },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

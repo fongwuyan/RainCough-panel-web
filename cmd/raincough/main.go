@@ -21,6 +21,7 @@ import (
 	"raincough/internal/config"
 	"raincough/internal/core"
 	"raincough/internal/host"
+	"raincough/internal/pluginx"
 	"raincough/internal/shared"
 )
 
@@ -29,6 +30,9 @@ type server struct {
 	sd   *shared.Shared
 	host *host.PluginHost
 }
+
+// globalPX 接口库 v4 运行时(插件自注册/接口总线/健康诊断)。
+var globalPX *pluginx.PluginX
 
 func main() {
 	port := flag.Int("port", 3000, "监听端口")
@@ -48,6 +52,25 @@ func main() {
 		log.Fatalf("数据层初始化失败: %v", err)
 	}
 	defer sd.Close()
+
+	// 接口库 v4: 注册中心/接口总线/健康诊断(插件自注册, 无端口)
+	regNS, _ := sd.Namespace("core_registry")
+	probeEvery := 10 * time.Second
+	if v := os.Getenv("RC_PROBE_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			probeEvery = time.Duration(n) * time.Second
+		}
+	}
+	globalPX = pluginx.New(pluginx.Options{
+		PluginsDir: cfg.PluginsDir,
+		UDSDir:     os.Getenv("RC_UDS_DIR"),
+		Token:      os.Getenv("RC_REG_TOKEN"),
+		ProbeEvery: probeEvery,
+	}, regNS)
+	if err := globalPX.Start(); err != nil {
+		log.Fatalf("接口库启动失败: %v", err)
+	}
+	defer globalPX.Stop()
 
 	// 插件运行时
 	ph := host.NewWithOptions(cfg.PluginsDir, cfg.ResolveDSN(), host.Options{
@@ -134,8 +157,9 @@ func main() {
 	initTermNS(sd)
 	initMediaNS(sd)
 
-	// 性能趋势采样(每 60s 一点, 供工作台 SysPerf)
-	go perfSampler()
+	// 性能趋势采样(每 1s 一点, 保留 60 点, 供工作台 SysPerf)
+	perf = core.NewPerfTracker(sysMon)
+	go perf.Run()
 
 	s := &server{cfg: cfg, sd: sd, host: ph}
 	mux := http.NewServeMux()
@@ -185,8 +209,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/system/", s.handleSystemSub)
 
 	// ---- 文件管理 ----
-	mux.HandleFunc("/api/fm/ops", s.handleFmOps)       // 列表只在无子路径时生效
-	mux.HandleFunc("/api/fm/ops/", s.handleFmOps)      // {id}/cancel/download
+	mux.HandleFunc("/api/fm/ops", s.handleFmOps)  // 列表只在无子路径时生效
+	mux.HandleFunc("/api/fm/ops/", s.handleFmOps) // {id}/cancel/download
 	mux.HandleFunc("/api/fm/unzip", s.handleFmUnzip)
 	mux.HandleFunc("/api/fm/", s.handleFm)
 
@@ -284,6 +308,11 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/plugins", s.handlePlugins) // 列表
 	mux.HandleFunc("/api/plugins/", s.handlePlugin) // 网关+资产+删除
 
+	// ---- 接口库 v4(自注册/接口总线/健康) ----
+	mux.HandleFunc("/api/interfaces", globalPX.HandleIfacesCatalog)
+	mux.HandleFunc("/api/interfaces/", globalPX.HandleIfacesRoutes)
+	mux.HandleFunc("/api/services/health", globalPX.HandleServicesHealth)
+
 	// ---- 静态前端(public/) ----
 	webDir := filepath.Join(s.cfg.BaseDir, "public")
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +343,12 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 		sub = parts[1]
 	}
 
+	// v4 接口库: 前端 invoke 桥(/api/plugins/<name>/invoke)
+	if sub == "invoke" && globalPX != nil {
+		globalPX.HandlePluginsInvoke(w, r)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodDelete:
 		if sub == "" {
@@ -340,7 +375,13 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet, http.MethodPost:
 		// 资产文件: /api/plugins/<name>/assets/<file>
 		if strings.HasPrefix(sub, "assets/") {
-			s.servePluginAsset(w, r, name, strings.TrimPrefix(sub, "assets/"))
+			asset := strings.TrimPrefix(sub, "assets/")
+			// v4 插件资产(接口库托管); 其余走旧 PluginHost 资产
+			if globalPX != nil && globalPX.HasPlugin(name) {
+				globalPX.ServeAsset(w, r, name, asset)
+				return
+			}
+			s.servePluginAsset(w, r, name, asset)
 			return
 		}
 		// 网关代理

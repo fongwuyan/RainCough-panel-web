@@ -204,7 +204,7 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer out.Close()
-		if _, err := copyStream(out, file); err != nil {
+		if _, err := io.Copy(out, file); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 			return
 		}
@@ -285,13 +285,13 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 			}
 			dst := filepath.Join(destAbs, filepath.Base(srcAbs))
 			if isCopy {
-				if err := copyPathFM(srcAbs, dst); err != nil {
+				if err := core.Copy(srcAbs, dst); err != nil {
 					writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 					return
 				}
 			} else {
 				if err := os.Rename(srcAbs, dst); err != nil {
-					if err2 := copyPathFM(srcAbs, dst); err2 == nil {
+					if err2 := core.Copy(srcAbs, dst); err2 == nil {
 						os.RemoveAll(srcAbs)
 					} else {
 						writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
@@ -329,48 +329,6 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 func isFile(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
-}
-
-// copyPathFM 复制文件或目录(给 fm move/copy 同步端点用)。
-func copyPathFM(src, dst string) error {
-	st, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	if !st.IsDir() {
-		return copyFileFM(src, dst)
-	}
-	return filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(src, p)
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		return copyFileFM(p, target)
-	})
-}
-
-func copyFileFM(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	os.MkdirAll(filepath.Dir(dst), 0o755)
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = copyStream(out, in)
-	return err
-}
-
-func copyStream(dst io.Writer, src io.Reader) (int64, error) {
-	return io.Copy(dst, src)
 }
 
 func mimeFor(ctype string) string {

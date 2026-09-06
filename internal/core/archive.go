@@ -19,7 +19,7 @@ func extractArchive(src, destDir string) error {
 	lower := strings.ToLower(src)
 	switch {
 	case strings.HasSuffix(lower, ".zip"):
-		return unzipTo(src, destDir)
+		return UnzipTo(src, destDir)
 	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
 		return untarGzTo(src, destDir)
 	case strings.HasSuffix(lower, ".tar.xz"):
@@ -93,7 +93,8 @@ func untarReader(r io.Reader, destDir string) error {
 	return nil
 }
 
-func unzipTo(src, destDir string) error {
+// UnzipTo 解压 zip 到目标目录(zip-slip 防护, 保留文件权限)。
+func UnzipTo(src, destDir string) error {
 	zr, err := zip.OpenReader(src)
 	if err != nil {
 		return err

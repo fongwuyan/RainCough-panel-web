@@ -8,7 +8,18 @@ export PATH=$HOME/go-tool/go/bin:$PATH
 export GOTMPDIR=$HOME/gotmp && mkdir -p $HOME/gotmp
 
 echo "=== [1/5] 解压最新源码 ==="
-if [ -f src.tar ]; then tar -xf src.tar && rm -f src.tar; fi
+if [ -f src.tar ]; then
+  # 同步删除仓库中已移除的插件目录(避免残留加载报错)
+  for d in plugins/*/; do
+    n=$(basename "$d")
+    [ "$n" = "demo" ] && continue
+    if ! tar -tf src.tar | grep -q "plugins/$n/"; then
+      echo "  清理残留插件: $n"
+      rm -rf "plugins/$n"
+    fi
+  done
+  tar -xf src.tar && rm -f src.tar
+fi
 
 echo "=== [2/5] Go 编译二进制 ==="
 go build -o raincough ./cmd/raincough 2>&1 | head -3 && echo "go ok"

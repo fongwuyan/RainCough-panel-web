@@ -130,7 +130,9 @@ func (s *server) handleStorePluginUpdate(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "POST required"})
 		return
 	}
-	var b struct{ Name string `json:"name"` }
+	var b struct {
+		Name string `json:"name"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
 		return

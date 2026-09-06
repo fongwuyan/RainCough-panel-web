@@ -1,9 +1,11 @@
 <script setup>
 // PluginView — 插件页加载器
-// 适配: 插件自带独立 Vue3 前端(assets/plugin.js → window.__rcPlugin_<name>.mount)
+// 适配: 插件自带独立 Vue3 前端(assets/plugin.js)
+//   v3 远程组件: window.__rcPlugin_<name>.mount
+//   v4 接口库:   window.__rcPluginV4__[name].mount(ctx.invoke 走 /api/plugins/<name>/invoke)
 // 回退: 旧 MAP 组件(面板内置) → GenericPlugin 信息卡
 import { computed, ref, h, onMounted, onBeforeUnmount, nextTick, onErrorCaptured } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import GenericPlugin from './GenericPlugin.vue'
 import LsMain from './laizhangsetu/LsMain.vue'
 import TgMain from './touchgal/TgMain.vue'
@@ -26,6 +28,7 @@ const MAP = {
 }
 
 const route = useRoute()
+const router = useRouter()
 const name = computed(() => String(route.params.name || ''))
 
 // 插件独立前端状态
@@ -45,17 +48,18 @@ async function loadPluginFrontend() {
   // ①new Function 全局执行(fetch+eval, 产物是 IIFE, register(window) 必写全局)
   // ②<script> 标签加载 ③默认(异常→诊断)
   const readReg = (n) => {
-    let reg = null
-    if (window.__rcPlugin_) {
-      reg = window.__rcPlugin_[n]
-      if (!reg) reg = window.__rcPlugin_[n.toLowerCase()]
+    const pick = (regMap) => {
+      if (!regMap) return null
+      let reg = regMap[n] || regMap[n.toLowerCase()]
       if (!reg) {
-        for (const k in window.__rcPlugin_) {
-          if (k.toLowerCase() === n.toLowerCase()) { reg = window.__rcPlugin_[k]; break }
+        for (const k in regMap) {
+          if (k.toLowerCase() === n.toLowerCase()) { reg = regMap[k]; break }
         }
       }
+      return (reg && typeof reg.mount === 'function') ? reg : null
     }
-    return (reg && typeof reg.mount === 'function') ? reg : null
+    // v4 接口库注册优先, v3 远程组件兜底
+    return pick(window.__rcPluginV4__) || pick(window.__rcPlugin_)
   }
   const loadFetch = async (n) => {
     const url = '/api/plugins/' + n + '/assets/plugin.js'
@@ -113,9 +117,11 @@ async function loadPluginFrontend() {
       mode.value = 'plugin'
       await nextTick()
       if (mountEl.value) {
-        // ctx 仅提供环境信息与可选请求器; Vue 已内联在插件产物中, 不注入
+        // ctx: v3 提供 api 请求器; v4 提供 invoke(on/emit/toast/navigate)
+        // Vue 已内联在插件产物中, 不注入运行时
         try {
-          mountFn = reg.mount(mountEl.value, {
+          const listeners = new Set()
+          const ctx = {
             plugin: { name: name.value },
             api: {
               get: (p) => fetch('/api/plugins/' + name.value + p).then((r) => r.json()),
@@ -124,7 +130,20 @@ async function loadPluginFrontend() {
                 body: JSON.stringify(body || {}),
               }).then((r) => r.json()),
             },
-          })
+            invoke: async (iface, params, opts) => {
+              const r = await fetch('/api/plugins/' + name.value + '/invoke', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ iface, params: params || {}, timeout_ms: (opts && opts.timeoutMs) || 0 }),
+              }).then((r) => r.json())
+              if (!r.ok) throw new Error((r.rpc_error && r.rpc_error.message) || 'invoke failed')
+              return r.result
+            },
+            on: (ev, cb) => { listeners.add(cb); return () => listeners.delete(cb) },
+            emit: (ev, payload) => { listeners.forEach((cb) => { try { cb(payload) } catch (e) {} }) },
+            toast: (msg, kind) => { console.log('[plugin:' + name.value + ']', kind || 'info', msg) },
+            navigate: (to) => router.push(to),
+          }
+          mountFn = reg.mount(mountEl.value, ctx)
         } catch (e) {
           perr.value = '挂载失败: ' + String((e && e.message) || e)
         }
@@ -136,7 +155,7 @@ async function loadPluginFrontend() {
   }
   // 回退: 有内置组件(MAP)则静默回退(无独立前端是正常情况, 不报错);
   // 仅当连内置组件都没有时才提示加载失败; 注册缺失(notRegistered)始终提示(产物缺陷)
-  firstDiag = 'err=' + (firstErr || '-') + ' regKeys=' + (window.__rcPlugin_ ? Object.keys(window.__rcPlugin_).join(',') : 'none')
+  firstDiag = 'err=' + (firstErr || '-') + ' regKeys=' + (window.__rcPlugin_ ? Object.keys(window.__rcPlugin_).join(',') : 'none') + ' v4keys=' + (window.__rcPluginV4__ ? Object.keys(window.__rcPluginV4__).join(',') : 'none')
   if (!MAP[name.value.toLowerCase()] && firstErr) {
     perr.value = '加载插件前端失败: ' + firstErr
   } else if (notRegistered && MAP[name.value.toLowerCase()]) {

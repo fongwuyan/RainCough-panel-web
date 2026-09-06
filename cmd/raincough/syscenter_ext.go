@@ -4,50 +4,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
+
+	"raincough/internal/core"
 )
 
-// 系统中心扩展端点(对应旧前端 api.js sysf* 契约, 脚本化 sudo 执行)。
+// 系统中心扩展端点(对应旧前端 api.js sysf* 契约)。
+// 数据逻辑(硬件/更新/cron/LVM/用户/密钥/清理/电源/内核/时间/健康/事件/日志轮转/启动历史/网络)
+// 已下沉 internal/core.SysCenter 与 SystemMonitor; 本文件仅做 HTTP 装配。
+
+// 性能采样器(main 中初始化)。
+var perf *core.PerfTracker
 
 func (s *server) sysfHardware(w http.ResponseWriter, r *http.Request) {
-	out := map[string]interface{}{}
-	if b, err := os.ReadFile("/proc/cpuinfo"); err == nil {
-		out["cpuinfo"] = string(b)
-	}
-	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
-		out["meminfo"] = string(b)
-	}
-	out["cpu_count"] = runtimeNumCPU()
-	if sb, err := os.ReadFile("/sys/class/dmi/id/product_name"); err == nil {
-		out["product"] = strings.TrimSpace(string(sb))
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, globalSys.Hardware())
 }
 
 func (s *server) sysfUpdates(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/updates/")
 	switch r.Method {
 	case http.MethodGet:
-		out, err := globalSys.Sudo("apt", "list", "--upgradable", "-q")
-		var lines []string
-		for _, l := range strings.Split(out, "\n") {
-			l = strings.TrimSpace(l)
-			if l == "" || strings.HasPrefix(l, "Listing") || strings.Contains(l, "upgradable") {
-				continue
-			}
-			lines = append(lines, l)
-		}
+		lines, err := globalSys.AptUpgradable()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"updates": lines, "error": errStr(err)})
 	case http.MethodPost:
 		if sub == "refresh" {
-			_, err := globalSys.Sudo("apt", "update", "-q")
+			err := globalSys.AptRefresh()
 			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "message": "ok", "error": errStr(err)})
 		} else if sub == "run" {
-			go func() { globalSys.Sudo("apt", "upgrade", "-y") }()
+			go func() { globalSys.AptUpgrade() }()
 			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "started-in-background"})
 		} else {
 			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unsupported"})
@@ -61,7 +46,7 @@ func (s *server) sysfCron(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		user := r.URL.Query().Get("user")
-		out, _ := cronTabFor(user)
+		out, _ := globalSys.CronTab(user)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"user": user, "content": out})
 	case http.MethodPost:
 		var b struct {
@@ -69,58 +54,30 @@ func (s *server) sysfCron(w http.ResponseWriter, r *http.Request) {
 			Content string `json:"content"`
 		}
 		json.NewDecoder(r.Body).Decode(&b)
-		err := saveCronTab(b.User, b.Content)
+		err := globalSys.SaveCronTab(b.User, b.Content)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "error": errStr(err)})
 	}
 }
 
-func cronTabFor(user string) (string, error) {
-	if user == "" {
-		user = "root"
-	}
-	path := "/var/spool/cron/crontabs/" + user
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-func saveCronTab(user, content string) error {
-	if user == "" {
-		user = "root"
-	}
-	path := "/var/spool/cron/crontabs/" + user
-	if err := os.MkdirAll("/var/spool/cron/crontabs", 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(content), 0o600)
-}
-
 func (s *server) sysfDisks(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"disks": lsblkDisks()})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"disks": globalSys.LsblkDisks()})
 }
 
 func (s *server) sysfSnap(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/snapshot/")
 	switch sub {
 	case "cap":
-		out, err := globalSys.Sudo("lvs", "--noheadings", "-o", "lv_name,lv_size,lv_attr")
-		caps := []map[string]interface{}{}
-		for _, line := range strings.Split(out, "\n") {
-			f := strings.Fields(line)
-			if len(f) >= 3 {
-				caps = append(caps, map[string]interface{}{"name": f[0], "size": f[1], "attr": f[2]})
-			}
-		}
+		caps, err := globalSys.LvsCap()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"volumes": caps, "error": errStr(err)})
 	case "create":
-		var b struct{ Name string `json:"name"` }
+		var b struct {
+			Name string `json:"name"`
+		}
 		json.NewDecoder(r.Body).Decode(&b)
-		out, err := globalSys.Sudo("lvcreate", "-L", "2G", "-s", "-n", b.Name, "vg0/root")
+		out, err := globalSys.LvsCreateSnapshot(b.Name)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	case "list":
-		out, err := globalSys.Sudo("lvs", "--noheadings", "-o", "lv_name,lv_size,lv_attr")
+		out, err := globalSys.LvsList()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"output": out, "error": errStr(err)})
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unsupported"})
@@ -128,28 +85,13 @@ func (s *server) sysfSnap(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) sysfUsers(w http.ResponseWriter, r *http.Request) {
-	out, _ := os.ReadFile("/etc/passwd")
-	var users []map[string]interface{}
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Split(line, ":")
-		if len(f) >= 7 && !strings.Contains(f[6], "nologin") && f[6] != "/bin/false" {
-			users = append(users, map[string]interface{}{"name": f[0], "uid": f[2], "home": f[5], "shell": f[6]})
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"users": users})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"users": globalSys.Users()})
 }
 
 func (s *server) sysfSshKeys(w http.ResponseWriter, r *http.Request) {
 	user := r.URL.Query().Get("user")
-	if user == "" {
-		user = "root"
-	}
-	path := "/home/" + user + "/.ssh/authorized_keys"
-	if user == "root" {
-		path = "/root/.ssh/authorized_keys"
-	}
-	b, err := os.ReadFile(path)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"user": user, "keys": string(b), "error": errStr(err)})
+	keys, err := globalSys.SSHKeys(user)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"user": user, "keys": keys, "error": errStr(err)})
 }
 
 func (s *server) sysfSshKeysSave(w http.ResponseWriter, r *http.Request) {
@@ -158,34 +100,26 @@ func (s *server) sysfSshKeysSave(w http.ResponseWriter, r *http.Request) {
 		Keys string `json:"keys"`
 	}
 	json.NewDecoder(r.Body).Decode(&b)
-	home := "/home/" + b.User
-	if b.User == "root" {
-		home = "/root"
-	}
-	dir := home + "/.ssh"
-	os.MkdirAll(dir, 0o700)
-	err := os.WriteFile(dir+"/authorized_keys", []byte(b.Keys), 0o600)
+	err := globalSys.SaveSSHKeys(b.User, b.Keys)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "error": errStr(err)})
 }
 
 func (s *server) sysfClean(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/clean/")
 	if sub == "scan" {
-		items := []map[string]interface{}{
-			{"key": "apt", "path": "/var/cache/apt", "size": dirSize("/var/cache/apt"), "label": "apt-cache"},
-			{"key": "tmp", "path": "/tmp", "size": dirSize("/tmp"), "label": "tmp-files"},
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": globalSys.CleanScan()})
 	} else if sub == "do" {
-		var b struct{ Item string `json:"item"` }
+		var b struct {
+			Item string `json:"item"`
+		}
 		json.NewDecoder(r.Body).Decode(&b)
 		var out string
 		var err error
 		switch b.Item {
 		case "apt":
-			out, err = globalSys.Sudo("apt", "clean")
+			out, err = globalSys.CleanApt()
 		case "tmp":
-			out, err = globalSys.Sudo("sh", "-c", "find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} +")
+			out, err = globalSys.CleanTmp()
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	}
@@ -195,12 +129,7 @@ func (s *server) sysfPwr(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/pwr/")
 	switch sub {
 	case "state":
-		b, err := os.ReadFile("/run/systemd/shutdown/scheduled")
-		state := "none"
-		if err == nil {
-			state = strings.TrimSpace(string(b))
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"state": state})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"state": globalSys.PwrState()})
 	case "plan":
 		var b struct {
 			Action  string `json:"action"`
@@ -219,38 +148,24 @@ func (s *server) sysfPwr(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "minutes 必填(>0)"})
 			return
 		}
-		when := "+" + fmt.Sprint(b.Minutes)
-		var out string
-		var err error
-		if b.Action == "reboot" {
-			out, err = globalSys.Sudo("shutdown", "-r", when)
-		} else {
-			out, err = globalSys.Sudo("shutdown", "-P", when)
-		}
+		out, err := globalSys.PwrPlan(b.Action, b.Minutes)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	case "cancel":
-		out, err := globalSys.Sudo("shutdown", "-c")
+		out, err := globalSys.PwrCancel()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	}
 }
 
 func (s *server) sysfKernels(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		out, err := globalSys.Sudo("dpkg", "--list", "linux-image-*")
-		var kernels []string
-		for _, l := range strings.Split(out, "\n") {
-			if strings.Contains(l, "linux-image") {
-				f := strings.Fields(l)
-				if len(f) > 0 {
-					kernels = append(kernels, f[0])
-				}
-			}
-		}
+		kernels, err := globalSys.KernelList()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"kernels": kernels, "error": errStr(err)})
 	} else {
-		var b struct{ Pkg string `json:"pkg"` }
+		var b struct {
+			Pkg string `json:"pkg"`
+		}
 		json.NewDecoder(r.Body).Decode(&b)
-		out, err := globalSys.Sudo("apt", "remove", "-y", b.Pkg)
+		out, err := globalSys.KernelRemove(b.Pkg)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	}
 }
@@ -258,10 +173,10 @@ func (s *server) sysfKernels(w http.ResponseWriter, r *http.Request) {
 func (s *server) sysfTime(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/time/")
 	if sub == "sync" {
-		out, err := globalSys.Sudo("timedatectl", "set-ntp", "true")
+		out, err := globalSys.TimeSync()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	} else {
-		out, _ := globalSys.Run("timedatectl", "status")
+		out, _ := globalSys.TimeStatus()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": out})
 	}
 }
@@ -269,17 +184,10 @@ func (s *server) sysfTime(w http.ResponseWriter, r *http.Request) {
 func (s *server) sysfHealth(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/health/")
 	if sub == "restart" {
-		out, err := globalSys.Sudo("systemctl", "restart", "raincough")
+		out, err := globalSys.ServiceAction("raincough", "restart")
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	} else {
-		checks := []map[string]interface{}{}
-		df, _ := globalSys.Run("df", "-h", "/")
-		checks = append(checks, map[string]interface{}{"name": "disk-root", "ok": !strings.Contains(df, "100%")})
-		_, memErr := os.ReadFile("/proc/meminfo")
-		checks = append(checks, map[string]interface{}{"name": "mem-readable", "ok": memErr == nil})
-		_, srvErr := globalSys.Sudo("systemctl", "is-active", "raincough")
-		checks = append(checks, map[string]interface{}{"name": "panel-service", "ok": srvErr == nil})
-		writeJSON(w, http.StatusOK, map[string]interface{}{"checks": checks})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"checks": globalSys.HealthChecks("raincough")})
 	}
 }
 
@@ -288,22 +196,16 @@ func (s *server) sysfEvents(w http.ResponseWriter, r *http.Request) {
 	if l := r.URL.Query().Get("limit"); l != "" {
 		fmt.Sscanf(l, "%d", &limit)
 	}
-	out, err := globalSys.Run("journalctl", "--no-pager", "-n", fmt.Sprint(limit), "--output=short-iso")
-	events := []map[string]interface{}{}
-	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			events = append(events, map[string]interface{}{"line": line})
-		}
-	}
+	events, err := globalSys.Events(limit)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events, "error": errStr(err)})
 }
 
 func (s *server) sysfLogrotate(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/logrotate/")
 	if sub == "list" {
-		out, err := os.ReadFile("/etc/logrotate.conf")
+		out, err := globalSys.LogrotateList()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"list":  []map[string]interface{}{{"name": "logrotate.conf", "content": string(out)}},
+			"list":  []map[string]interface{}{{"name": "logrotate.conf", "content": out}},
 			"error": errStr(err),
 		})
 	} else if sub == "save" {
@@ -312,135 +214,36 @@ func (s *server) sysfLogrotate(w http.ResponseWriter, r *http.Request) {
 			Content string `json:"content"`
 		}
 		json.NewDecoder(r.Body).Decode(&b)
-		err := os.WriteFile("/etc/logrotate.d/"+b.Name, []byte(b.Content), 0o644)
+		err := globalSys.LogrotateSave(b.Name, b.Content)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "error": errStr(err)})
 	}
 }
 
 func (s *server) sysfBootHistory(w http.ResponseWriter, r *http.Request) {
-	out, _ := globalSys.Run("journalctl", "--list-boots", "--no-pager")
-	rows := []map[string]interface{}{}
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) >= 3 {
-			rows = append(rows, map[string]interface{}{"action": "boot", "when": f[1] + " " + f[2]})
-		}
-	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"rows": rows, "boot_started": time.Now().Format("2006-01-02 15:04:05"),
+		"rows":         globalSys.BootHistory(),
+		"boot_started": time.Now().Format("2006-01-02 15:04:05"),
 	})
 }
 
-// ---- 性能趋势/网络状态(工作台 SysPerf/SysNet) ----
-
-// perfHist 环形采样历史(每 1s 一点, 保留最近 60 点 = 60s 滚动窗口)。
-var perfHist = struct {
-	mu     sync.Mutex
-	points []map[string]float64 // {cpu, mem, disk}
-	netRx  uint64
-	netTx  uint64
-}{}
-
-const perfMaxPoints = 60
-
-func perfSampler() {
-	prev := sysMon.Snapshot()
-	prevSeen := time.Now()
-	for {
-		time.Sleep(time.Second)
-		cur := sysMon.Snapshot()
-		netDur := time.Since(prevSeen).Seconds()
-		if netDur <= 0 {
-			netDur = 1
-		}
-		perfHist.mu.Lock()
-		perfHist.points = append(perfHist.points, map[string]float64{
-			"cpu":  cur.CPUPercent,
-			"mem":  cur.MemoryPercent,
-			"disk": cur.DiskPercent,
-		})
-		if len(perfHist.points) > perfMaxPoints {
-			perfHist.points = perfHist.points[len(perfHist.points)-perfMaxPoints:]
-		}
-		perfHist.netRx = uint64(float64(cur.NetRecv-prev.NetRecv) / netDur)
-		perfHist.netTx = uint64(float64(cur.NetSent-prev.NetSent) / netDur)
-		perfHist.mu.Unlock()
-		prev = cur
-		prevSeen = time.Now()
-	}
-}
-
+// sysfPerfNet GET /api/sysfunc/perf/ 与 /api/sysfunc/net/status。
 func (s *server) sysfPerfNet(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/sysfunc/")
 	if strings.HasPrefix(sub, "perf") {
-		perfHist.mu.Lock()
-		pts := make([]map[string]float64, len(perfHist.points))
-		copy(pts, perfHist.points)
-		rx, tx := perfHist.netRx, perfHist.netTx
-		perfHist.mu.Unlock()
+		pts, rx, tx := perf.Snapshot()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"points": pts, "net": map[string]uint64{"rx": rx, "tx": tx}, "hours": 24,
 		})
 	} else if strings.HasPrefix(sub, "net") {
-		writeJSON(w, http.StatusOK, netStatus())
+		writeJSON(w, http.StatusOK, sysMon.NetStatus())
 	} else {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unknown"})
 	}
 }
-
-// netStatus 网络状态: 接口/连接数/IP/DNS/公网IP/速率(对应旧前端 SysNet)。
-func netStatus() map[string]interface{} {
-	snap := sysMon.Snapshot()
-	nics := []map[string]interface{}{}
-	for _, ni := range snap.NetIfaces {
-		nics = append(nics, map[string]interface{}{
-			"name": ni.Name, "up": ni.Up, "ip": firstNonEmpty(ni.Addr, "-"),
-			"mtu": 1500, "rate": map[string]float64{"rx": ni.DownRate, "tx": ni.UpRate},
-		})
-	}
-	tcp := 0
-	if b, err := os.ReadFile("/proc/net/tcp"); err == nil {
-		tcp = strings.Count(string(b), "\n") - 1
-	}
-	dns := ""
-	if b, err := os.ReadFile("/etc/resolv.conf"); err == nil {
-		for _, l := range strings.Split(string(b), "\n") {
-			if strings.HasPrefix(l, "nameserver") {
-				dns = strings.TrimSpace(strings.TrimPrefix(l, "nameserver"))
-				break
-			}
-		}
-	}
-	return map[string]interface{}{
-		"nics": nics, "tcp_conns": tcp, "dns": dns,
-		"public_ip": "-",
-		"rate":      map[string]float64{"rx": snap.NetDownRate, "tx": snap.NetUpRate},
-	}
-}
-
-func firstNonEmpty(v, def string) string {
-	if v != "" {
-		return v
-	}
-	return def
-}
-
-func runtimeNumCPU() int { return sysMon.Snapshot().CPUCount }
 
 func errStr(err error) string {
 	if err == nil {
 		return ""
 	}
 	return err.Error()
-}
-
-func dirSize(path string) int64 {
-	var total int64
-	filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
-			total += info.Size()
-		}
-		return nil
-	})
-	return total
 }

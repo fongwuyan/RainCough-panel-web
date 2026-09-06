@@ -14,8 +14,8 @@ import (
 type ScheduleJob struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
-	Cron        string            `json:"cron"`   // 5 段 cron (分 时 日 月 周), * 或数字
-	Trigger     string            `json:"trigger"` // cron|interval(兼容旧前端)
+	Cron        string            `json:"cron"`     // 5 段 cron (分 时 日 月 周), * 或数字
+	Trigger     string            `json:"trigger"`  // cron|interval(兼容旧前端)
 	Interval    int               `json:"interval"` // 秒(trigger=interval 时)
 	Minute      string            `json:"minute,omitempty"`
 	Hour        string            `json:"hour,omitempty"`
