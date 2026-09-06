@@ -2,10 +2,26 @@
   "name": "texttool",
   "label": "文本工具",
   "version": "2.0.0",
-  "description": "正则/替换/格式转换/统计(独立子进程)",
+  "description": "正则匹配/文本替换/JSON↔YAML 转换/文本统计(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 20,
-  "routes": ["/text/regex", "/text/replace", "/text/convert", "/text/stats"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "文本工具" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "texttool.regex", "visibility": "main", "version": "1", "description": "正则查找" },
+    { "id": "texttool.replace", "visibility": "main", "version": "1", "description": "文本替换(支持正则)" },
+    { "id": "texttool.convert", "visibility": "main", "version": "1", "description": "JSON/YAML 互转与格式化" },
+    { "id": "texttool.stats", "visibility": "main", "version": "1", "description": "文本统计" },
+    { "id": "texttool.info", "visibility": "all", "version": "1", "description": "插件信息" }
+  ]
 }

@@ -2,10 +2,24 @@
   "name": "imagetool",
   "label": "图像工具",
   "version": "2.0.0",
-  "description": "图片相似度与图像处理(独立子进程, 需 Pillow)",
+  "description": "图片相似度与图像处理(ImageMagick)(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 20,
-  "routes": ["/image/similar", "/image/process"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "图像工具" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "imagetool.similar", "visibility": "main", "version": "1", "description": "两图 dhash 相似度" },
+    { "id": "imagetool.process", "visibility": "main", "version": "1", "description": "ImageMagick 处理(resize/quality/rotate/format)" },
+    { "id": "imagetool.info", "visibility": "all", "version": "1", "description": "插件信息" }
+  ]
 }
