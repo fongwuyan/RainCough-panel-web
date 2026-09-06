@@ -2,10 +2,39 @@
   "name": "mcserver",
   "label": "MC 服务器",
   "version": "2.0.0",
-  "description": "多实例 Minecraft 服务器: 实时控制台、监控、启动/停止、实例 CRUD(独立子进程)",
+  "description": "多实例 Minecraft 服务器: 实时控制台、监控、启停、实例 CRUD、核心切换(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 40,
-  "routes": ["/instances", "/instance/add", "/start", "/stop", "/restart", "/status", "/console"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "MC 服务器" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "mcserver.instances.list", "visibility": "all", "version": "1", "description": "实例列表(含运行状态)" },
+    { "id": "mcserver.instance.detail", "visibility": "all", "version": "1", "description": "实例详情" },
+    { "id": "mcserver.instance.add", "visibility": "main", "version": "1", "description": "新增实例" },
+    { "id": "mcserver.instance.update", "visibility": "main", "version": "1", "description": "更新实例" },
+    { "id": "mcserver.instance.remove", "visibility": "main", "version": "1", "description": "删除实例" },
+    { "id": "mcserver.instance.set", "visibility": "main", "version": "1", "description": "切换当前实例" },
+    { "id": "mcserver.instance.clear_active", "visibility": "main", "version": "1", "description": "清空当前实例" },
+    { "id": "mcserver.javas", "visibility": "all", "version": "1", "description": "已安装 Java 列表" },
+    { "id": "mcserver.status", "visibility": "all", "version": "1", "description": "当前实例状态(玩家/版本/端口/TPS)" },
+    { "id": "mcserver.start", "visibility": "main", "version": "1", "description": "启动服务器" },
+    { "id": "mcserver.stop", "visibility": "main", "version": "1", "description": "停止服务器" },
+    { "id": "mcserver.restart", "visibility": "main", "version": "1", "description": "重启服务器" },
+    { "id": "mcserver.console.get", "visibility": "all", "version": "1", "description": "读取控制台日志(轮询)" },
+    { "id": "mcserver.console.send", "visibility": "main", "version": "1", "description": "向控制台发送命令" },
+    { "id": "mcserver.metrics", "visibility": "all", "version": "1", "description": "CPU/内存/玩家监控" },
+    { "id": "mcserver.core.jars", "visibility": "all", "version": "1", "description": "可用服务核心 jar" },
+    { "id": "mcserver.core.switch", "visibility": "main", "version": "1", "description": "切换服务核心" },
+    { "id": "mcserver.info", "visibility": "all", "version": "1", "description": "插件信息" }
+  ]
 }

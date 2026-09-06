@@ -2,10 +2,45 @@
   "name": "vpn",
   "label": "VPN 网络",
   "version": "2.0.0",
-  "description": "v2ray/wireguard 订阅管理: 订阅拉取、节点测试、连接控制(独立子进程)",
+  "description": "v2ray/wireguard/openvpn 订阅管理: 订阅拉取、节点测试、连接控制(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 30,
-  "routes": ["/env", "/overview", "/v2/subs", "/v2/nodes", "/v2/connect", "/v2/status", "/wg/status"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "VPN 网络" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "vpn.env", "visibility": "all", "version": "1", "description": "工具链环境探测" },
+    { "id": "vpn.overview", "visibility": "all", "version": "1", "description": "通道总览(直连/代理/wg/ovpn)" },
+    { "id": "vpn.logs", "visibility": "all", "version": "1", "description": "通道日志" },
+    { "id": "vpn.stop.all", "visibility": "main", "version": "1", "description": "停止全部通道" },
+    { "id": "vpn.v2.subs.list", "visibility": "all", "version": "1", "description": "订阅列表" },
+    { "id": "vpn.v2.subs.save", "visibility": "main", "version": "1", "description": "添加订阅" },
+    { "id": "vpn.v2.subs.delete", "visibility": "main", "version": "1", "description": "删除订阅" },
+    { "id": "vpn.v2.subs.refresh", "visibility": "main", "version": "1", "description": "拉取订阅节点" },
+    { "id": "vpn.v2.nodes.list", "visibility": "all", "version": "1", "description": "节点列表" },
+    { "id": "vpn.v2.nodes.delete", "visibility": "main", "version": "1", "description": "删除节点" },
+    { "id": "vpn.v2.nodes.test", "visibility": "main", "version": "1", "description": "测试节点延迟" },
+    { "id": "vpn.v2.connect", "visibility": "main", "version": "1", "description": "连接/断开代理" },
+    { "id": "vpn.v2.status", "visibility": "all", "version": "1", "description": "代理状态" },
+    { "id": "vpn.wg.status", "visibility": "all", "version": "1", "description": "WireGuard 状态" },
+    { "id": "vpn.wg.import", "visibility": "main", "version": "1", "description": "导入 wg 配置" },
+    { "id": "vpn.wg.up", "visibility": "main", "version": "1", "description": "启用 wg 接口" },
+    { "id": "vpn.wg.down", "visibility": "main", "version": "1", "description": "关闭 wg 接口" },
+    { "id": "vpn.wg.server.get", "visibility": "main", "version": "1", "description": "读取 wg 服务端配置" },
+    { "id": "vpn.wg.server.save", "visibility": "main", "version": "1", "description": "保存 wg 服务端配置" },
+    { "id": "vpn.ovpn.status", "visibility": "all", "version": "1", "description": "OpenVPN 状态" },
+    { "id": "vpn.ovpn.import", "visibility": "main", "version": "1", "description": "导入 ovpn 配置" },
+    { "id": "vpn.ovpn.up", "visibility": "main", "version": "1", "description": "启动 ovpn 客户端" },
+    { "id": "vpn.ovpn.down", "visibility": "main", "version": "1", "description": "停止 ovpn 客户端" },
+    { "id": "vpn.info", "visibility": "all", "version": "1", "description": "插件信息" }
+  ]
 }

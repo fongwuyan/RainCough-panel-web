@@ -2,10 +2,33 @@
   "name": "aigen",
   "label": "AI 生图",
   "version": "2.0.0",
-  "description": "本地 SD1.5 文生图/图生图(独立子进程, 需 diffusers/transformers)",
+  "description": "本地 SD1.5 文生图/图生图, 支持 EasyNegative、VAE、Real-ESRGAN(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 60,
-  "routes": ["/ping", "/models", "/generate", "/img2img", "/status", "/gallery"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "AI 生图" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "aigen.ping", "visibility": "all", "version": "1", "description": "模型就绪/状态探测" },
+    { "id": "aigen.models", "visibility": "all", "version": "1", "description": "模型/LoRA/辅助文件列表" },
+    { "id": "aigen.generate", "visibility": "main", "version": "1", "description": "文生图(异步任务)" },
+    { "id": "aigen.img2img", "visibility": "main", "version": "1", "description": "图生图(异步任务)" },
+    { "id": "aigen.status", "visibility": "all", "version": "1", "description": "任务状态/进度/结果图" },
+    { "id": "aigen.cancel", "visibility": "main", "version": "1", "description": "取消任务" },
+    { "id": "aigen.gallery", "visibility": "all", "version": "1", "description": "输出画廊" },
+    { "id": "aigen.gallery.delete", "visibility": "main", "version": "1", "description": "删除输出图片" },
+    { "id": "aigen.config.get", "visibility": "all", "version": "1", "description": "读取配置" },
+    { "id": "aigen.config.save", "visibility": "main", "version": "1", "description": "保存配置" },
+    { "id": "aigen.settings", "visibility": "all", "version": "1", "description": "存储路径设置" },
+    { "id": "aigen.info", "visibility": "all", "version": "1", "description": "插件信息" }
+  ]
 }
