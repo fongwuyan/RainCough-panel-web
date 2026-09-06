@@ -404,6 +404,11 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 			s.servePluginAsset(w, r, name, asset)
 			return
 		}
+		// v4 插件本地文件(如 laizhangsetu cache 图片): /api/plugins/<name>/cache/<file>
+		if strings.HasPrefix(sub, "cache/") && globalPX != nil && globalPX.HasPlugin(name) && r.Method == http.MethodGet {
+			globalPX.ServePluginFile(w, r, name, "cache", strings.TrimPrefix(sub, "cache/"))
+			return
+		}
 		// 网关代理
 		child := s.hostFind(name)
 		if child == nil {

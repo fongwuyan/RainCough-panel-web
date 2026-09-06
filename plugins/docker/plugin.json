@@ -2,10 +2,42 @@
   "name": "docker",
   "label": "Docker 管理",
   "version": "2.0.0",
-  "description": "容器/镜像管理: 列表、启停、日志、stats(独立子进程, 调 docker CLI)",
+  "description": "容器/镜像/卷/网络/Compose 管理(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 25,
-  "routes": ["/env", "/info", "/containers", "/containers/logs", "/containers/stats"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "容器管理" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "docker.env", "visibility": "all", "version": "1", "description": "docker/compose 环境探测" },
+    { "id": "docker.info", "visibility": "all", "version": "1", "description": "docker daemon 信息" },
+    { "id": "docker.status", "visibility": "all", "version": "1", "description": "总体状态汇总" },
+    { "id": "docker.containers.list", "visibility": "all", "version": "1", "description": "容器列表" },
+    { "id": "docker.containers.start", "visibility": "main", "version": "1", "description": "启动容器" },
+    { "id": "docker.containers.stop", "visibility": "main", "version": "1", "description": "停止容器" },
+    { "id": "docker.containers.restart", "visibility": "main", "version": "1", "description": "重启容器" },
+    { "id": "docker.containers.remove", "visibility": "main", "version": "1", "description": "删除容器" },
+    { "id": "docker.containers.logs", "visibility": "all", "version": "1", "description": "容器日志" },
+    { "id": "docker.containers.stats", "visibility": "all", "version": "1", "description": "容器实时统计" },
+    { "id": "docker.containers.create", "visibility": "main", "version": "1", "description": "创建并运行容器" },
+    { "id": "docker.images.list", "visibility": "all", "version": "1", "description": "镜像列表" },
+    { "id": "docker.images.pull", "visibility": "main", "version": "1", "description": "拉取镜像(后台)" },
+    { "id": "docker.images.remove", "visibility": "main", "version": "1", "description": "删除镜像" },
+    { "id": "docker.networks.list", "visibility": "all", "version": "1", "description": "网络列表" },
+    { "id": "docker.volumes.list", "visibility": "all", "version": "1", "description": "卷列表" },
+    { "id": "docker.volume.remove", "visibility": "main", "version": "1", "description": "删除卷" },
+    { "id": "docker.system.prune", "visibility": "main", "version": "1", "description": "系统资源清理" },
+    { "id": "docker.compose.up", "visibility": "main", "version": "1", "description": "Compose 启动" },
+    { "id": "docker.compose.down", "visibility": "main", "version": "1", "description": "Compose 停止" },
+    { "id": "docker.compose.ps", "visibility": "main", "version": "1", "description": "Compose 状态" }
+  ]
 }

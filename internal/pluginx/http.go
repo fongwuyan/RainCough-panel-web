@@ -428,6 +428,12 @@ func (x *PluginX) HasPlugin(name string) bool {
 
 // ServeAsset 提供插件前端产物(存于插件目录 assets/, 无缓存, 防穿越)。
 func (x *PluginX) ServeAsset(w http.ResponseWriter, r *http.Request, name, file string) {
+	x.ServePluginFile(w, r, name, "assets", file)
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+}
+
+// ServePluginFile 提供插件目录内指定子目录的文件(如 cache/ 图片), 防穿越。
+func (x *PluginX) ServePluginFile(w http.ResponseWriter, r *http.Request, name, subdir, file string) {
 	if x.opts.PluginsDir == "" {
 		http.NotFound(w, r)
 		return
@@ -437,12 +443,14 @@ func (x *PluginX) ServeAsset(w http.ResponseWriter, r *http.Request, name, file 
 		http.Error(w, "非法路径", http.StatusForbidden)
 		return
 	}
-	dir := filepath.Join(x.opts.PluginsDir, name, "assets")
+	base := filepath.Join(x.opts.PluginsDir, name, subdir)
 	if ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(clean))); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	http.ServeFile(w, r, filepath.Join(dir, clean))
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+	}
+	http.ServeFile(w, r, filepath.Join(base, clean))
 }
 
 func (x *PluginX) pluginOf(name string) *Plugin {

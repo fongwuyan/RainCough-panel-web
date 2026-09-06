@@ -2,10 +2,45 @@
   "name": "laizhangsetu",
   "label": "来张涩图",
   "version": "2.0.0",
-  "description": "调用 Lolicon API 获取随机 Pixiv 图片, 支持标签搜索、R18、图片缓存(独立子进程)",
+  "description": "调用 Lolicon API 获取随机 Pixiv 图片, 支持标签搜索、R18、图片缓存(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 25,
-  "routes": ["/fetch", "/config", "/history", "/cooldown"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "来张涩图" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "laizhangsetu.fetch", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "拉取随机涩图(保存到缓存并记录历史)" },
+    { "id": "laizhangsetu.config.get", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "读取配置" },
+    { "id": "laizhangsetu.config.save", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "保存配置" },
+    { "id": "laizhangsetu.settings", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "存储路径统计与切换设置" },
+    { "id": "laizhangsetu.history.list", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "历史记录" },
+    { "id": "laizhangsetu.history.clear", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "清空历史与已见记录" },
+    { "id": "laizhangsetu.cooldown", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "冷却时间(启动快照)" },
+    { "id": "laizhangsetu.info", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "插件信息" }
+  ]
 }
