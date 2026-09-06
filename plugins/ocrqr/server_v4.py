@@ -131,6 +131,17 @@ def ocrqr_info(params):
 
 
 if __name__ == "__main__":
+    # 启动时后台预热 OCR 引擎(首调用不再等待模型初始化 >15s)
+    import threading
+
+    def _warmup():
+        try:
+            M._get_ocr()
+            print('[ocrqr] rapidocr 预热完成')
+        except Exception as e:
+            print('[ocrqr] rapidocr 预热失败:', e)
+
+    threading.Thread(target=_warmup, daemon=True).start()
     rc.serve(
         endpoint=os.environ.get("RC_ENDPOINT", ""),
         name="ocrqr",
