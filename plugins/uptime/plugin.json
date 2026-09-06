@@ -2,12 +2,48 @@
   "name": "uptime",
   "label": "Uptime 监控",
   "version": "3.0.0",
-  "description": "站点探活监控: 定时检测 HTTP 目标在线状态、响应时间与可用率(Vue3 前端 + Python 后端)",
+  "description": "站点探活监控: 定时检测 HTTP 目标在线状态、响应时间与可用率(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 20,
-  "db": false,
-  "assets": {"entry": "plugin.js"},
-  "routes": ["/targets", "/targets/<name>", "/history/<name>"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "监控目标" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "uptime.targets.list", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "监控目标列表" },
+    { "id": "uptime.targets.create", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "新增监控目标" },
+    { "id": "uptime.targets.update", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "更新监控目标" },
+    { "id": "uptime.targets.delete", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "删除监控目标" },
+    { "id": "uptime.targets.test", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "立即测试目标" },
+    { "id": "uptime.targets.history", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "目标探活历史" },
+    { "id": "uptime.targets.status24", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "24 小时状态格" },
+    { "id": "uptime.status", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "总体状态汇总" },
+    { "id": "uptime.info", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "插件信息" }
+  ]
 }

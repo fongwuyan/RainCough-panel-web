@@ -389,6 +389,29 @@ func (x *PluginX) HandleServiceLog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ListPlugins v4 插件注册表条目(供 /api/plugins 合并, 保持侧栏/工作台可见)。
+func (x *PluginX) ListPlugins() []map[string]interface{} {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	out := []map[string]interface{}{}
+	for _, p := range x.plugins {
+		if p.Kind != "plugin" {
+			continue
+		}
+		out = append(out, map[string]interface{}{
+			"name":        p.Name,
+			"label":       p.Label,
+			"version":     p.Version,
+			"description": p.Manifest.Description,
+			"lang":        p.Manifest.Backend.Lang,
+			"v4":          true,
+			"alive":       p.Status == StatusOnline,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["name"].(string) < out[j]["name"].(string) })
+	return out
+}
+
 // ---- 内部视图 ----
 
 // HasPlugin v4 插件是否存在(注册表或 v4 清单目录)。

@@ -330,7 +330,23 @@ func (s *server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "仅支持 GET"})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.host.List())
+	list := s.host.List()
+	// 合并 v4 接口库注册插件(旧宿主不再扫描 v4 清单)
+	if globalPX != nil {
+		seen := map[string]bool{}
+		for _, it := range list {
+			if n, ok := it["name"].(string); ok {
+				seen[n] = true
+			}
+		}
+		for _, it := range globalPX.ListPlugins() {
+			if n, _ := it["name"].(string); !seen[n] {
+				list = append(list, it)
+				seen[n] = true
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
