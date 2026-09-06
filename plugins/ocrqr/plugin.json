@@ -2,10 +2,26 @@
   "name": "ocrqr",
   "label": "识别二维码",
   "version": "2.0.0",
-  "description": "OCR 识别(系统 tesseract/rapidocr)与二维码生成/解码(zbarimg/qrencode)",
+  "description": "OCR 识别(rapidocr)与二维码生成/解码(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 20,
-  "routes": ["/ocr", "/ocr/check", "/qr/gen", "/qr/decode"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "OCR / 二维码" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "ocrqr.ocr.check", "visibility": "all", "version": "1", "description": "OCR 环境检查" },
+    { "id": "ocrqr.ocr", "visibility": "main", "version": "1", "description": "图片 OCR 识别(base64 输入)" },
+    { "id": "ocrqr.qr.gen", "visibility": "all", "version": "1", "description": "生成二维码(返回缓存图 URL)" },
+    { "id": "ocrqr.qr.decode", "visibility": "main", "version": "1", "description": "解码二维码(base64 输入)" },
+    { "id": "ocrqr.info", "visibility": "all", "version": "1", "description": "插件信息" }
+  ]
 }

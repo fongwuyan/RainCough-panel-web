@@ -2,10 +2,29 @@
   "name": "webspy",
   "label": "采集解析",
   "version": "2.0.0",
-  "description": "搜索/链接检测/RSS/正文提取(独立子进程)",
+  "description": "搜索/链接检测/RSS/正文提取(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 20,
-  "routes": ["/search", "/urlcheck", "/rss/feeds", "/rss/fetch", "/readability"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "采集解析" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "webspy.search", "visibility": "all", "version": "1", "description": "Bing 搜索" },
+    { "id": "webspy.urlcheck", "visibility": "main", "version": "1", "description": "批量链接检测" },
+    { "id": "webspy.rss.list", "visibility": "all", "version": "1", "description": "订阅源列表" },
+    { "id": "webspy.rss.add", "visibility": "main", "version": "1", "description": "添加订阅源" },
+    { "id": "webspy.rss.delete", "visibility": "main", "version": "1", "description": "删除订阅源" },
+    { "id": "webspy.rss.fetch", "visibility": "all", "version": "1", "description": "抓取订阅条目" },
+    { "id": "webspy.readability", "visibility": "all", "version": "1", "description": "网页正文提取" },
+    { "id": "webspy.info", "visibility": "all", "version": "1", "description": "插件信息" }
+  ]
 }
