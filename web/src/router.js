@@ -15,11 +15,13 @@ import StorePlugins from './components/store/StorePlugins.vue'
 import PluginHealth from './components/PluginHealth.vue'
 import ServiceHealth from './components/ServiceHealth.vue'
 import Ifaces from './components/Ifaces.vue'
+import FmMain from './components/filemanager/FmMain.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', name: 'workspace', component: Workspace },
+    { path: '/fm', name: 'fm', component: FmMain }, // 文件管理(系统功能一级页)
     { path: '/settings', name: 'settings', component: Settings },
     { path: '/docs', name: 'docs', component: PluginDocs },
     { path: '/terminal', name: 'terminal', component: Terminal },

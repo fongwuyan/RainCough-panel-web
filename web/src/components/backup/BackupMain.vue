@@ -120,7 +120,7 @@ async function removeRun(r) {
 }
 
 async function goTarget(j) {
-  try { window.open('/#/plugin/filemanager', '_blank') } catch (e) {}
+  try { window.open('/#/fm', '_blank') } catch (e) {}
 }
 
 onMounted(() => { load(); timer = setInterval(load, 4000) })

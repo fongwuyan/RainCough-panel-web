@@ -15,7 +15,7 @@ const PAGES = [
   { key: 'ws', label: '工作台', path: '/', desc: '概览与状态' },
   { key: 'plughealth', label: '服务健康', path: '/plughealth', desc: '插件与服务健康诊断' },
   { key: 'ifaces', label: '接口总览', path: '/ifaces', desc: '服务总线接口目录' },
-  { key: 'fm', label: '文件管理', path: '/plugin/filemanager', desc: '文件系统' },
+  { key: 'fm', label: '文件管理', path: '/fm', desc: '文件系统' },
   { key: 'term', label: '终端', path: '/terminal', desc: 'Shell' },
   { key: 'sysf', label: '系统中心', path: '/sysfunc', desc: '系统功能' },
   { key: 'media', label: '媒体中心', path: '/media', desc: '图片视频' },
@@ -57,6 +57,7 @@ function isActive(name) {
   if (name === 'ifaces') return route.name === 'ifaces'
   if (name === 'settings') return route.name === 'settings'
   if (name === 'docs') return route.name === 'docs'
+  if (name === 'fm') return route.name === 'fm'
   if (name === 'filemanager') return route.name === 'plugin' && route.params.name === 'filemanager'
   if (name === 'terminal') return route.name === 'terminal'
   if (name === 'logs') return route.name === 'logs'
@@ -100,7 +101,7 @@ function isActive(name) {
           <div class="desc">概览与状态</div>
         </div>
       </div>
-      <div class="plugin-item" :class="{ active: isActive('filemanager') }" @click="go('/plugin/filemanager')">
+      <div class="plugin-item" :class="{ active: isActive('fm') }" @click="go('/fm')">
         <div class="info">
           <div class="label">文件管理</div>
           <div class="desc">服务器文件系统</div>
