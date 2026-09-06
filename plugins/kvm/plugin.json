@@ -2,10 +2,35 @@
   "name": "kvm",
   "label": "KVM 虚拟机",
   "version": "2.0.0",
-  "description": "KVM/QEMU 虚拟机管理: 列表、启停、详情、VNC(独立子进程, 调 virsh)",
+  "description": "KVM/QEMU 虚拟机管理: 列表、启停、详情、VNC、存储池与镜像(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 30,
-  "routes": ["/config", "/info", "/domains", "/domain", "/domain/action", "/domain/vnc"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "虚拟机" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "kvm.config.get", "visibility": "main", "version": "1", "description": "读取配置(含 sudo 密码)" },
+    { "id": "kvm.config.save", "visibility": "main", "version": "1", "description": "保存配置" },
+    { "id": "kvm.info", "visibility": "all", "version": "1", "description": "libvirt/qemu 环境信息" },
+    { "id": "kvm.domains.list", "visibility": "all", "version": "1", "description": "虚拟机列表(含备注)" },
+    { "id": "kvm.domain.detail", "visibility": "all", "version": "1", "description": "虚拟机详情(XML 解析)" },
+    { "id": "kvm.domain.stats", "visibility": "all", "version": "1", "description": "实时统计(CPU/内存/网络/磁盘)" },
+    { "id": "kvm.domain.note.get", "visibility": "all", "version": "1", "description": "读取虚拟机备注" },
+    { "id": "kvm.domain.note.save", "visibility": "main", "version": "1", "description": "保存虚拟机备注" },
+    { "id": "kvm.domain.action", "visibility": "main", "version": "1", "description": "启停/挂起/销毁/删除" },
+    { "id": "kvm.domain.autostart", "visibility": "main", "version": "1", "description": "设置开机自启" },
+    { "id": "kvm.domain.vnc", "visibility": "main", "version": "1", "description": "启用/查询 VNC 控制台" },
+    { "id": "kvm.images.list", "visibility": "all", "version": "1", "description": "镜像列表" },
+    { "id": "kvm.storage.list", "visibility": "all", "version": "1", "description": "存储池与卷" },
+    { "id": "kvm.domains.create", "visibility": "main", "version": "1", "description": "创建虚拟机" }
+  ]
 }

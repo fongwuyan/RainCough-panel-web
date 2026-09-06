@@ -2,10 +2,36 @@
   "name": "touchgal",
   "label": "TouchGal 游戏查找",
   "version": "2.0.0",
-  "description": "搜索 Galgame 游戏资源、获取下载链接(独立子进程)",
+  "description": "搜索 Galgame 游戏资源、获取下载链接、图片识别(接口库 v4 迁移)",
   "author": "RainCough",
-  "lang": "python",
-  "entry": ["python3", "server.py"],
-  "timeout": 30,
-  "routes": ["/search", "/resource"]
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "游戏查找" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "touchgal.search", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "关键词搜索游戏" },
+    { "id": "touchgal.resource", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "获取游戏下载资源" },
+    { "id": "touchgal.recognize", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "单模型识图" },
+    { "id": "touchgal.recognize.dual", "visibility": "main", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "双模型识图(anime+gal)" },
+    { "id": "touchgal.info", "visibility": "all", "version": "1",
+      "input": {"type": "object"}, "output": {"type": "object"},
+      "description": "插件信息" }
+  ]
 }
