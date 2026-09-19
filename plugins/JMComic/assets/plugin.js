@@ -18736,6 +18736,26 @@ ${codeFrame}` : message);
 
   // plugins/JMComic/frontend/plugin.js
   var NAME = "JMComic";
+  var STYLE_ID = "rc-jmcomic-style";
+  var CSS = `
+.rcjm-card{transition:transform .15s ease, box-shadow .15s ease;cursor:pointer}
+.rcjm-card:hover{transform:translateY(-3px);box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.rcjm-card:active{transform:translateY(-1px)}
+.rcjm-thumb{background:#1c2128;width:100%;height:150px;object-fit:cover;display:block;transition:opacity .25s ease}
+.rcjm-skel{width:100%;height:150px;background:linear-gradient(90deg,#1c2128 25%,#242a33 37%,#1c2128 63%);background-size:400% 100%;animation:rcjm-shine 1.2s infinite}
+@keyframes rcjm-shine{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.rcjm-spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:var(--accent,#58a6ff);border-radius:50%;animation:rcjm-rot .7s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes rcjm-rot{to{transform:rotate(360deg)}}
+.rcjm-page-img{max-width:560px;width:100%;display:block;margin:8px auto;border:1px solid var(--border);border-radius:6px;opacity:0;transition:opacity .25s ease}
+.rcjm-page-img.live{opacity:1}
+.rcjm-full{transition:background .2s}
+.rcjm-full:hover{background:rgba(58,120,168,.12)}
+.rcjm-bar{height:6px;background:#1f242c;border-radius:3px;overflow:hidden;margin-top:6px}
+.rcjm-bar>div{height:100%;background:var(--accent,#58a6ff);transition:width .3s ease;border-radius:3px}
+.rcjm-ch{border-bottom:1px solid var(--border);padding:6px 0;display:flex;justify-content:space-between;align-items:center;font-size:13px}
+.rcjm-ch:hover{background:rgba(58,120,168,.06);padding-left:6px;transition:all .15s}
+.rcjm-tag{display:inline-block;font-size:11px;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px 3px 0 0}
+`;
   function mount(container, ctx) {
     const App = {
       data() {
@@ -18748,20 +18768,62 @@ ${codeFrame}` : message);
           dl: { status: "unknown" },
           chapter: null,
           pages: [],
+          imgReady: {},
           loadIdx: 6,
           pageIdx: 0,
           view: "flow",
           coverMap: {},
           dlTimer: null,
+          loading: false,
+          loadingMore: false,
+          dlBusy: false,
           err: "",
+          okMsg: "",
           page: 1,
           pageCount: 1,
-          loadingCover: /* @__PURE__ */ new Set()
+          loadingCover: /* @__PURE__ */ new Set(),
+          keyHandler: null,
+          scrollHandler: null
         };
+      },
+      mounted() {
+        if (!document.getElementById(STYLE_ID)) {
+          const st = document.createElement("style");
+          st.id = STYLE_ID;
+          st.textContent = CSS;
+          document.head.appendChild(st);
+        }
+        this.keyHandler = (e) => {
+          if (this.tab !== "read" || this.view !== "single") return;
+          if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            this.prevPage();
+          }
+          if (e.key === "ArrowRight") {
+            e.preventDefault();
+            this.nextPage();
+          }
+        };
+        window.addEventListener("keydown", this.keyHandler);
+        this.scrollHandler = () => {
+          if (this.tab !== "read" || this.view !== "flow") return;
+          const arr = (this.chapter || {}).page_arr || [];
+          if (this.pages.length >= arr.length || this.loadingMore) return;
+          if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 800) this.loadMore();
+        };
+        window.addEventListener("scroll", this.scrollHandler, { passive: true });
+      },
+      unmounted() {
+        clearInterval(this.dlTimer);
+        if (this.keyHandler) window.removeEventListener("keydown", this.keyHandler);
+        if (this.scrollHandler) window.removeEventListener("scroll", this.scrollHandler);
+        const st = document.getElementById(STYLE_ID);
+        if (st && !document.querySelector("[data-jm-use]")) st.remove();
       },
       methods: {
         async search(p2 = 1) {
-          if (!this.kw.trim()) return;
+          if (!this.kw.trim() || this.loading) return;
+          this.loading = true;
           this.err = "";
           try {
             const r = await ctx.invoke("jmcomic.search", { keyword: this.kw, page: p2, mode: "keyword" });
@@ -18772,6 +18834,7 @@ ${codeFrame}` : message);
           } catch (e) {
             this.err = e && e.message || e;
           }
+          this.loading = false;
         },
         // 封面懒加载(全部条目, 并发≤4)
         loadCovers() {
@@ -18781,6 +18844,7 @@ ${codeFrame}` : message);
               const id = queue2.shift();
               if (this.coverMap[id]) continue;
               this.loadingCover.add(id);
+              this.$forceUpdate?.();
               try {
                 const r = await ctx.invoke("jmcomic.cover", { aid: id });
                 if (r && r.cover) this.coverMap[id] = r.cover;
@@ -18829,13 +18893,20 @@ ${codeFrame}` : message);
           }
         },
         async startDownload(aid) {
+          if (this.dlBusy) return;
+          this.dlBusy = true;
           this.err = "";
           try {
             await ctx.invoke("jmcomic.download", { aid });
+            this.okMsg = "\u5DF2\u52A0\u5165\u4E0B\u8F7D\u961F\u5217";
             this.pollDl(aid, false);
           } catch (e) {
             this.err = e && e.message || e;
           }
+          setTimeout(() => {
+            this.dlBusy = false;
+            this.okMsg = "";
+          }, 1500);
         },
         async openChapter(cid, aid) {
           if (this.dl.status !== "completed") {
@@ -18850,6 +18921,7 @@ ${codeFrame}` : message);
             this.loadIdx = 6;
             this.tab = "read";
             this.view === "flow" ? this.loadMore() : this.loadOnePage();
+            window.scrollTo(0, 0);
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18864,19 +18936,20 @@ ${codeFrame}` : message);
           const arr = ch.page_arr || [];
           if (!arr.length) return;
           const idx = Math.min(this.pageIdx, arr.length - 1);
-          const f = arr[idx];
           if (this.pages[idx]) return;
           try {
-            const r = await ctx.invoke("jmcomic.image", { aid: this.album.id, cid: ch.id, filename: f });
+            const r = await ctx.invoke("jmcomic.image", { aid: this.album.id, cid: ch.id, filename: arr[idx] });
             this.pages[idx] = r.data;
           } catch (e) {
+            this.pages[idx] = "err";
           }
         },
         async loadMore() {
           const ch = this.chapter || {};
           const arr = ch.page_arr || [];
-          const batch2 = arr.slice(this.pages.length, this.loadIdx);
-          for (const f of batch2) {
+          if (!arr.length || this.loadingMore) return;
+          this.loadingMore = true;
+          for (const f of arr.slice(this.pages.length, this.loadIdx)) {
             try {
               const r = await ctx.invoke("jmcomic.image", { aid: this.album.id, cid: ch.id, filename: f });
               this.pages.push(r.data);
@@ -18885,6 +18958,7 @@ ${codeFrame}` : message);
             }
           }
           this.loadIdx += 6;
+          this.loadingMore = false;
         },
         prevPage() {
           if (this.pageIdx > 0) {
@@ -18899,6 +18973,12 @@ ${codeFrame}` : message);
             this.loadOnePage();
           }
         },
+        imgState(i) {
+          return this.pages[i] === void 0 ? "loading" : this.pages[i] === "" || this.pages[i] === "err" ? "err" : "ok";
+        },
+        imgLoaded(i) {
+          this.imgReady = { ...this.imgReady, [i]: true };
+        },
         async loadLib() {
           try {
             const r = await ctx.invoke("jmcomic.library.list", { page: 1, page_size: 60 });
@@ -18909,9 +18989,10 @@ ${codeFrame}` : message);
           }
         },
         loadCoversFromLib() {
+          const saved = this.results;
           this.results = this.lib;
           this.loadCovers();
-          this.results = [];
+          this.results = saved;
         },
         async rm(aid) {
           try {
@@ -18924,7 +19005,8 @@ ${codeFrame}` : message);
         async download(aid) {
           try {
             const r = await ctx.invoke("jmcomic.download", { aid });
-            this.err = r.message;
+            this.okMsg = r.message;
+            setTimeout(() => this.okMsg = "", 2e3);
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18932,35 +19014,33 @@ ${codeFrame}` : message);
         async dlStatus(aid) {
           try {
             const r = await ctx.invoke("jmcomic.download.status", { aid });
-            this.err = "\u5DF2\u5B8C\u6210 " + (r.downloaded || 0) + "/" + (r.total || 0) + " (" + r.status + ")";
+            this.okMsg = "\u5DF2\u5B8C\u6210 " + (r.downloaded || 0) + "/" + (r.total || 0) + " (" + r.status + ")";
+            setTimeout(() => this.okMsg = "", 2500);
           } catch (e) {
             this.err = e && e.message || e;
           }
         }
-      },
-      unmounted() {
-        clearInterval(this.dlTimer);
       },
       render() {
         const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => {
           this.tab = k;
           if (k === "lib") this.loadLib();
         } }, l);
+        const spin = h("span", { class: "rcjm-spin" });
         const gridItems = this.tab === "search" ? this.results : this.lib;
         const grid = h(
           "div",
-          { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;" },
+          { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;" },
           gridItems.map((it) => {
             const id = String(it.id ?? it.aid ?? "");
             const cover = this.coverMap[id];
-            return h("div", { key: id, class: "card", style: "padding:6px;" }, [
-              h("a", { style: "cursor:pointer;", onclick: () => this.openAlbum(id) }, [
-                cover ? h("img", { src: cover, loading: "lazy", style: "width:100%;height:150px;object-fit:cover;display:block;background:#222;" }) : h("div", { style: "width:100%;height:150px;background:#1c2128;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px;" }, this.loadingCover.has(id) ? "\u52A0\u8F7D\u5C01\u9762\u2026" : "\u672A\u52A0\u8F7D")
-              ]),
-              h("div", { style: "font-size:12px;margin-top:4px;height:34px;overflow:hidden;" }, it.name || "ID " + id),
-              h("div", { class: "faint", style: "font-size:11px;" }, (it.author || "") + " \xB7 " + id),
-              h("div", { class: "flex", style: "gap:4px;margin-top:4px;" }, [
-                h("button", { class: "btn btn-sm", onclick: () => this.openAlbum(id) }, "\u8BE6\u60C5"),
+            const loading = !cover;
+            return h("div", { key: id, class: "card rcjm-card", style: "padding:6px;", onclick: () => this.openAlbum(id) }, [
+              loading ? h("div", { class: "rcjm-skel" }) : h("img", { src: cover, loading: "lazy", class: "rcjm-thumb", onerror: (e) => e.target.style.display = "none" }),
+              h("div", { style: "font-size:12px;margin-top:4px;height:34px;overflow:hidden;color:var(--text);" }, it.name || "ID " + id),
+              h("div", { class: "faint", style: "font-size:11px;" }, (it.author || "-") + " \xB7 " + id),
+              h("div", { class: "flex", style: "gap:4px;margin-top:4px;", onclick: (e) => e.stopPropagation() }, [
+                h("button", { class: "btn btn-sm btn-primary", onclick: () => this.openAlbum(id) }, "\u8BE6\u60C5"),
                 this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6")] : [h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(id) }, "\u5220")]
               ])
             ]);
@@ -18970,32 +19050,38 @@ ${codeFrame}` : message);
         if (this.tab === "album" && this.album) {
           const a = this.album, dl = this.dl, done = dl.status === "completed";
           const cover = this.coverMap[a.id];
-          const chapters = (a.chapters || []).map((c) => h("div", { key: c.cid, style: "padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;align-items:center;" }, [
+          const pct = dl.total ? Math.min(100, Math.round((dl.downloaded || 0) / dl.total * 100)) : 0;
+          const chapters = (a.chapters || []).map((c) => h("div", { key: c.cid, class: "rcjm-ch" }, [
             h("span", null, c.name || "\u7AE0\u8282 " + c.cid),
-            h("button", { class: "btn btn-sm", disabled: !done, onclick: () => this.openChapter(c.cid, c.aid) }, "\u9605\u8BFB")
+            h("button", { class: "btn btn-sm" + (done ? " btn-primary" : ""), disabled: !done, onclick: () => this.openChapter(c.cid, c.aid) }, done ? "\u9605\u8BFB" : "\u{1F512}")
           ]));
-          const dlBlock = done ? h("p", { style: "color:var(--success);font-size:13px;" }, "\u2705 \u5DF2\u4E0B\u8F7D(" + (dl.cached || dl.total || 0) + "\u9875)") : h("div", { class: "section", style: "margin:6px 0;" }, [
-            h("p", { style: "font-size:13px;" }, this.dl.status === "downloading" || this.dl.total ? "\u4E0B\u8F7D\u4E2D: " + (this.dl.downloaded || 0) + "/" + (this.dl.total || "?") + " \u9875" : "\u672C\u5B50\u5C1A\u672A\u4E0B\u8F7D\uFF0C\u4E0B\u8F7D\u540E\u624D\u80FD\u9605\u8BFB\u7AE0\u8282\u4E0E\u56FE\u7247"),
-            h("button", { class: "btn btn-primary", onclick: () => this.startDownload(a.id) }, "\u5148\u4E0B\u8F7D\u672C\u5B50"),
-            this.dl.total ? h("div", { style: "height:4px;background:#222;border-radius:2px;margin-top:6px;" }, h("div", { style: "height:4px;width:" + Math.min(100, (this.dl.downloaded || 0) / Math.max(1, this.dl.total) * 100) + "%;background:var(--accent);" })) : null
+          const dlBlock = done ? h("div", { style: "display:flex;align-items:center;gap:8px;margin:8px 0;" }, [
+            h("span", { style: "color:var(--success);font-size:14px;" }, "\u2705 \u5DF2\u4E0B\u8F7D"),
+            h("span", { class: "faint", style: "font-size:12px;" }, (dl.cached || dl.total || 0) + " \u9875"),
+            h("button", { class: "btn btn-sm", onclick: () => this.pollDl(a.id, true) }, "\u5237\u65B0")
+          ]) : h("div", { style: "margin:8px 0 4px;" }, [
+            h("div", { style: "display:flex;justify-content:space-between;align-items:center;" }, [
+              h("span", { style: "font-size:13px;color:var(--text-muted);" }, dl.total ? "\u4E0B\u8F7D\u4E2D: " + (dl.downloaded || 0) + "/" + dl.total + " \u9875 (" + pct + "%)" : "\u672C\u5B50\u5C1A\u672A\u4E0B\u8F7D\uFF0C\u4E0B\u8F7D\u540E\u624D\u80FD\u9605\u8BFB"),
+              h("button", { class: "btn btn-primary", disabled: this.dlBusy, onclick: () => this.startDownload(a.id) }, this.dlBusy ? [spin, "\u63D0\u4EA4\u4E2D\u2026"] : "\u26A1 \u5148\u4E0B\u8F7D\u672C\u5B50")
+            ]),
+            dl.total ? h("div", { class: "rcjm-bar" }, h("div", { style: "width:" + pct + "%" })) : null
           ]);
           v = h("div", null, [
-            h("div", { class: "flex", style: "gap:10px;align-items:flex-start;" }, [
-              cover ? h("img", { src: cover, style: "width:120px;height:170px;object-fit:cover;border-radius:6px;background:#222;" }) : null,
-              h("div", null, [
-                h("h3", { style: "margin:0;" }, a.name),
-                h("p", { class: "faint", style: "font-size:12px;" }, "\u4F5C\u8005 " + (a.author || "\u672A\u77E5") + " \xB7 " + (a.tags || []).join(" / ")),
-                h("p", { class: "faint", style: "font-size:12px;" }, "ID " + a.id + " \xB7 \u5171 " + chapters.length + " \u7AE0")
+            h("div", { class: "flex", style: "gap:12px;align-items:flex-start;" }, [
+              cover ? h("img", { src: cover, style: "width:120px;height:170px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);" }) : h("div", { class: "rcjm-skel", style: "width:120px;height:170px;border-radius:8px;" }),
+              h("div", { style: "flex:1;min-width:0;" }, [
+                h("h3", { style: "margin:0;font-size:16px;" }, a.name),
+                h("p", { class: "faint", style: "font-size:12px;margin:4px 0;" }, "\u4F5C\u8005 " + (a.author || "\u672A\u77E5") + " \xB7 ID " + a.id + " \xB7 " + (a.chapters || []).length + " \u7AE0"),
+                h("div", null, (a.tags || []).slice(0, 8).map((tg) => h("span", { class: "rcjm-tag" }, tg)))
               ])
             ]),
             h("div", { class: "flex", style: "gap:6px;margin:8px 0;" }, [
               h("button", { class: "btn btn-sm", onclick: () => {
-                this.tab = "search";
-              } }, "\u8FD4\u56DE"),
-              h("button", { class: "btn btn-sm", onclick: () => this.pollDl(a.id, false) }, "\u5237\u65B0\u72B6\u6001")
+                this.tab = this.tab === "album" ? "search" : "album";
+              } }, "\u2190 \u8FD4\u56DE")
             ]),
             dlBlock,
-            h("div", { class: "section-title", style: "margin-top:6px;" }, "\u7AE0\u8282" + (done ? "" : "(\u4E0B\u8F7D\u540E\u89E3\u9501)")),
+            h("div", { class: "section-title", style: "margin-top:4px;" }, "\u7AE0\u8282" + (done ? "" : "\uFF08\u4E0B\u8F7D\u540E\u89E3\u9501\uFF09")),
             chapters
           ]);
         }
@@ -19004,31 +19090,55 @@ ${codeFrame}` : message);
           const toolbar = h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center;" }, [
             h("button", { class: "btn btn-sm", onclick: () => {
               this.tab = "album";
-            } }, "\u8FD4\u56DE\u8BE6\u60C5"),
-            h("span", { class: "faint", style: "font-size:12px;" }, ch.name || "\u7AE0\u8282 " + ch.id + " \xB7 " + arr.length + " \u9875"),
-            h("button", { class: "btn btn-sm" + (this.view === "flow" ? " btn-primary" : ""), onclick: () => this.setView("flow") }, "\u6EDA\u52A8\u6A21\u5F0F"),
-            h("button", { class: "btn btn-sm" + (this.view === "single" ? " btn-primary" : ""), onclick: () => this.setView("single") }, "\u5355\u9875\u6A21\u5F0F")
+            } }, "\u2190 \u8BE6\u60C5"),
+            h("span", { class: "faint", style: "font-size:12px;" }, (ch.name || "\u7AE0\u8282 " + ch.id) + " \xB7 " + arr.length + " \u9875"),
+            h("div", { class: "flex", style: "gap:2px;margin-left:auto;" }, [
+              h("button", { class: "btn btn-sm" + (this.view === "flow" ? " btn-primary" : ""), onclick: () => this.setView("flow") }, "\u6EDA\u52A8"),
+              h("button", { class: "btn btn-sm" + (this.view === "single" ? " btn-primary" : ""), onclick: () => this.setView("single") }, "\u5355\u9875")
+            ])
           ]);
           if (this.view === "flow") {
             v = h("div", null, [
               toolbar,
-              this.pages.map((d, i) => d ? h("img", { key: i, src: d, loading: "lazy", style: "width:100%;max-width:520px;display:block;margin:6px auto;border:1px solid var(--border);border-radius:6px;" }) : null),
-              this.pages.length < arr.length ? h("button", { class: "btn", style: "display:block;margin:6px auto;", onclick: () => this.loadMore() }, "\u52A0\u8F7D\u66F4\u591A (" + this.pages.length + "/" + arr.length + ")") : h("p", { class: "hint" }, "\u5DF2\u5168\u90E8\u52A0\u8F7D")
+              this.pages.map((d, i) => {
+                if (this.imgState(i) === "ok") {
+                  return h("img", { key: i, src: d, loading: "lazy", class: "rcjm-page-img" + (this.imgReady[i] ? " live" : ""), onload: () => this.imgLoaded(i), style: "min-height:120px;" });
+                }
+                if (this.imgState(i) === "err") {
+                  return h("div", { key: i, style: "width:100%;max-width:520px;height:200px;margin:6px auto;background:#1c2128;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px;border-radius:6px;" }, "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25");
+                }
+                return h("div", { key: i, class: "rcjm-skel", style: "width:100%;max-width:520px;height:220px;margin:6px auto;border-radius:6px;" });
+              }),
+              this.pages.length < arr.length ? h("div", { style: "text-align:center;padding:14px;" }, [
+                this.loadingMore ? h("span", { class: "rcjm-spin" }) : h("button", { class: "btn", onclick: () => this.loadMore() }, "\u52A0\u8F7D\u66F4\u591A\uFF08" + this.pages.length + "/" + arr.length + "\uFF09"),
+                h("div", { class: "faint", style: "font-size:11px;margin-top:4px;" }, "\u6216\u4E0B\u62C9\u5230\u5E95\u81EA\u52A8\u52A0\u8F7D")
+              ]) : h("p", { class: "hint", style: "text-align:center;" }, "\u2014 \u5DF2\u5168\u90E8\u52A0\u8F7D\uFF08" + arr.length + " \u9875\uFF09\u2014")
             ]);
           } else {
             const img = this.pages[this.pageIdx];
+            const pageNav = h("div", { style: "display:flex;justify-content:center;align-items:center;gap:10px;margin:6px 0;" }, [
+              h("button", { class: "btn btn-sm", disabled: this.pageIdx <= 0, onclick: () => this.prevPage() }, "\u25C0 \u4E0A\u4E00\u9875"),
+              h("span", { class: "faint", style: "font-size:12px;" }, this.pageIdx + 1 + " / " + arr.length),
+              h("button", { class: "btn btn-sm", disabled: this.pageIdx >= arr.length - 1, onclick: () => this.nextPage() }, "\u4E0B\u4E00\u9875 \u25B6")
+            ]);
+            const st = this.imgState(this.pageIdx);
+            let imgNode;
+            if (st === "ok") imgNode = h("img", { src: img, class: "rcjm-page-img" + (this.imgReady[this.pageIdx] ? " live" : ""), onload: () => this.imgLoaded(this.pageIdx), style: "min-height:140px;" });
+            else if (st === "err") imgNode = h("div", { style: "max-width:560px;height:220px;margin:8px auto;background:#1c2128;display:flex;align-items:center;justify-content:center;color:#666;" }, "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25");
+            else imgNode = h("div", { class: "rcjm-skel", style: "max-width:560px;height:260px;margin:8px auto;border-radius:8px;" });
             v = h("div", null, [
               toolbar,
-              h("div", { style: "display:flex;justify-content:center;align-items:center;gap:10px;" }, [
-                h("button", { class: "btn btn-sm", disabled: this.pageIdx <= 0, onclick: () => this.prevPage() }, "\u4E0A\u4E00\u9875"),
-                h("span", { class: "faint", style: "font-size:12px;" }, this.pageIdx + 1 + " / " + arr.length),
-                h("button", { class: "btn btn-sm", disabled: this.pageIdx >= arr.length - 1, onclick: () => this.nextPage() }, "\u4E0B\u4E00\u9875")
-              ]),
-              img ? h("img", { src: img, style: "width:100%;max-width:560px;display:block;margin:8px auto;border:1px solid var(--border);border-radius:6px;" }) : h("p", { class: "hint", style: "text-align:center;padding:20px;" }, "\u52A0\u8F7D\u4E2D\u2026")
+              pageNav,
+              h("div", { style: "position:relative;cursor:pointer;", onclick: (e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                if (e.clientX < r.left + r.width / 3) this.prevPage();
+                else if (e.clientX > r.left + r.width / 3 * 2) this.nextPage();
+              } }, imgNode),
+              h("div", { class: "faint", style: "font-size:11px;text-align:center;" }, "\u70B9\u51FB\u56FE\u7247\u5DE6/\u53F3\u533A\u57DF\u7FFB\u9875 \xB7 \u952E\u76D8 \u2190 \u2192 \u7FFB\u9875")
             ]);
           }
         }
-        const head = h("div", { class: "section-title", style: "display:flex;justify-content:space-between;" }, [
+        const head = h("div", { class: "section-title", style: "display:flex;justify-content:space-between;align-items:center;" }, [
           h("span", null, "JMComic"),
           h("div", { class: "flex", style: "gap:6px;" }, [t("search", "\u641C\u7D22"), t("lib", "\u672C\u5B50\u5E93")])
         ]);
@@ -19036,12 +19146,13 @@ ${codeFrame}` : message);
           h("input", { class: "input", style: "flex:1;", placeholder: "\u5173\u952E\u8BCD", value: this.kw, oninput: (e) => this.kw = e.target.value, onkeyup: (e) => {
             if (e.key === "Enter") this.search();
           } }),
-          h("button", { class: "btn", onclick: () => this.search() }, "\u641C\u7D22"),
-          h("button", { class: "btn btn-sm", disabled: this.page <= 1, onclick: () => this.search(this.page - 1) }, "\u4E0A\u4E00\u9875"),
-          h("button", { class: "btn btn-sm", disabled: this.page >= this.pageCount, onclick: () => this.search(this.page + 1) }, "\u4E0B\u4E00\u9875")
+          h("button", { class: "btn btn-primary", disabled: this.loading, onclick: () => this.search() }, this.loading ? [spin, "\u641C\u7D22\u4E2D\u2026"] : "\u641C\u7D22"),
+          h("button", { class: "btn btn-sm", disabled: this.loading || this.page <= 1, onclick: () => this.search(this.page - 1) }, "\u4E0A\u4E00\u9875"),
+          h("button", { class: "btn btn-sm", disabled: this.loading || this.page >= this.pageCount, onclick: () => this.search(this.page + 1) }, "\u4E0B\u4E00\u9875")
         ]) : null;
+        const statusLine = this.okMsg ? h("p", { style: "color:var(--success);font-size:12px;margin:4px 0;" }, this.okMsg) : null;
         const body = this.tab === "album" || this.tab === "read" ? v : grid;
-        return h("div", null, [head, this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null, searchBar, body]);
+        return h("div", null, [head, statusLine, this.err ? h("p", { style: "color:var(--danger);font-size:12px;margin:4px 0;" }, this.err) : null, searchBar, body]);
       }
     };
     const vm = createApp(App);
