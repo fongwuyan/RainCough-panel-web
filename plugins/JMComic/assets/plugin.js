@@ -18833,15 +18833,18 @@ ${codeFrame}` : message);
           if (k === "lib") this.loadLib();
         } }, l);
         const list = this.tab === "album" && this.album ? [{ id: this.album.id, name: this.album.name }] : this.tab === "search" ? this.results : this.lib;
-        const rows = list.map((it) => h("tr", { key: it.id }, [
-          h("td", { class: "mono" }, it.id),
-          h("td", null, it.name + (it.author ? " \xB7 " + it.author : "")),
-          h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
-            h("button", { class: "btn btn-sm", onclick: () => this.openAlbum(it.id) }, "\u8BE6\u60C5"),
-            this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(it.id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(it.id) }, "\u8FDB\u5EA6")] : null,
-            this.tab === "lib" ? [h("button", { class: "btn btn-sm", onclick: () => this.dlStatus(it.id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(it.id) }, "\u5220")] : null
-          ]))
-        ]));
+        const rows = list.map((it) => {
+          const id = String(it.id ?? it.aid ?? "");
+          return h("tr", { key: id }, [
+            h("td", { class: "mono" }, id),
+            h("td", null, it.name + (it.author ? " \xB7 " + it.author : "")),
+            h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
+              h("button", { class: "btn btn-sm", onclick: () => this.openAlbum(id) }, "\u8BE6\u60C5"),
+              this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6")] : null,
+              this.tab === "lib" ? [h("button", { class: "btn btn-sm", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(id) }, "\u5220")] : null
+            ]))
+          ]);
+        });
         return h("div", null, [
           h("div", { class: "section-title", style: "display:flex;justify-content:space-between;" }, [
             h("span", null, "JMComic"),

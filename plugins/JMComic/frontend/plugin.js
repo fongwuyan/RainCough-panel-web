@@ -54,14 +54,14 @@ function mount(container, ctx) {
     render() {
       const t = (k, l) => h('button', { class: 'btn btn-sm' + (this.tab === k ? ' btn-primary' : ''), onclick: () => { this.tab = k; if (k === 'lib') this.loadLib() } }, l)
       const list = this.tab === 'album' && this.album ? [{ id: this.album.id, name: this.album.name }] : (this.tab === 'search' ? this.results : this.lib)
-      const rows = list.map((it) => h('tr', { key: it.id }, [
-        h('td', { class: 'mono' }, it.id), h('td', null, it.name + (it.author ? ' · ' + it.author : '')),
+      const rows = list.map((it) => { const id = String(it.id ?? it.aid ?? ''); return h('tr', { key: id }, [
+        h('td', { class: 'mono' }, id), h('td', null, it.name + (it.author ? ' · ' + it.author : '')),
         h('td', null, h('div', { class: 'flex', style: 'gap:4px;' }, [
-          h('button', { class: 'btn btn-sm', onclick: () => this.openAlbum(it.id) }, '详情'),
-          this.tab === 'search' ? [h('button', { class: 'btn btn-sm', onclick: () => this.download(it.id) }, '下载'), h('button', { class: 'btn btn-sm btn-ghost', onclick: () => this.dlStatus(it.id) }, '进度')] : null,
-          this.tab === 'lib' ? [h('button', { class: 'btn btn-sm', onclick: () => this.dlStatus(it.id) }, '进度'), h('button', { class: 'btn btn-sm btn-danger', onclick: () => this.rm(it.id) }, '删')] : null,
+          h('button', { class: 'btn btn-sm', onclick: () => this.openAlbum(id) }, '详情'),
+          this.tab === 'search' ? [h('button', { class: 'btn btn-sm', onclick: () => this.download(id) }, '下载'), h('button', { class: 'btn btn-sm btn-ghost', onclick: () => this.dlStatus(id) }, '进度')] : null,
+          this.tab === 'lib' ? [h('button', { class: 'btn btn-sm', onclick: () => this.dlStatus(id) }, '进度'), h('button', { class: 'btn btn-sm btn-danger', onclick: () => this.rm(id) }, '删')] : null,
         ])),
-      ]))
+      ]) })
       return h('div', null, [
         h('div', { class: 'section-title', style: 'display:flex;justify-content:space-between;' }, [
           h('span', null, 'JMComic'),

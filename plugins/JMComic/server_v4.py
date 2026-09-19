@@ -249,6 +249,8 @@ def jm_library_list(params):
     except (TypeError, ValueError):
         page, page_size = 1, 45
     items = M._sorted_library()
+    # 库条目键为 aid, 前端契约补 id(字符串数字)
+    items = [dict(it, id=str(it.get('aid', ''))) for it in items]
     total = len(items)
     start = (page - 1) * page_size
     paged = items[start:start + page_size]
