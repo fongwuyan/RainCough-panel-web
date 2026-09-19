@@ -88,7 +88,7 @@ function mount(container, ctx) {
         try {
           this.album = await ctx.invoke('jmcomic.album', { aid })
           this.tab = 'album'; this.chapter = null; this.pages = []; this.pageIdx = 0; this.view = 'flow'
-          this.pollDl(aid, true)
+          this.pollDl(aid, false)   // 详情页自动轮询下载进度, 已完成/失败自动停止
           if (!this.coverMap[aid]) {
             try { const r = await ctx.invoke('jmcomic.cover', { aid }); if (r && r.cover) this.coverMap[aid] = r.cover } catch (e) {}
           }
@@ -171,7 +171,7 @@ function mount(container, ctx) {
       async dlStatus(aid) { try { const r = await ctx.invoke('jmcomic.download.status', { aid }); this.okMsg = '已完成 ' + (r.downloaded || 0) + '/' + (r.total || 0) + ' (' + r.status + ')'; setTimeout(() => (this.okMsg = ''), 2500) } catch (e) { this.err = (e && e.message) || e } },
     },
     render() {
-      const t = (k, l) => h('button', { class: 'btn btn-sm' + (this.tab === k ? ' btn-primary' : ''), onclick: () => { this.tab = k; if (k === 'lib') this.loadLib() } }, l)
+      const t = (k, l) => h('button', { class: 'btn btn-sm' + (this.tab === k ? ' btn-primary' : ''), onclick: () => { clearInterval(this.dlTimer); this.tab = k; if (k === 'lib') this.loadLib() } }, l)
       // ---- 搜索/本子库: 封面宫格 ----
       const gridItems = this.tab === 'search' ? this.results : this.lib
       const grid = h('div', null, [
@@ -203,49 +203,69 @@ function mount(container, ctx) {
         const a = this.album, dl = this.dl, done = dl.status === 'completed'
         const cover = this.coverMap[a.id]
         const pct = dl.total ? Math.min(100, Math.round((dl.downloaded || 0) / dl.total * 100)) : 0
-        const chapters = (a.chapters || []).map((c) => h('div', { key: c.cid, class: 'rcjm-ch' }, [
-          h('span', null, c.name || ('章节 ' + c.cid)),
+        const first = (a.chapters || [])[0]
+        const chapters = (a.chapters || []).map((c, ci) => h('div', { key: c.cid, class: 'rcjm-ch' }, [
+          h('span', null, '第 ' + (ci + 1) + ' 话' + (c.name && c.name !== ('第' + (ci + 1) + '话') ? ' · ' + c.name : '')),
           h('button', { class: 'btn btn-sm' + (done ? ' btn-primary' : ''), disabled: !done, onclick: () => this.openChapter(c.cid, c.aid) }, done ? '阅读' : '需下载'),
         ]))
+        const statItems = []
+        if (a.views) statItems.push('浏览 ' + a.views)
+        if (a.likes) statItems.push('点赞 ' + a.likes)
+        if (a.comment_count) statItems.push('评论 ' + a.comment_count)
+        if (a.page_count) statItems.push('全本 ' + a.page_count + ' 页')
         const dlBlock = done
-          ? h('div', { style: 'display:flex;align-items:center;gap:10px;padding:8px 0;' }, [
+          ? h('div', { style: 'display:flex;align-items:center;gap:10px;padding:8px 0;flex-wrap:wrap;' }, [
               h('span', { style: 'color:var(--success);font-size:13px;' }, '已下载'),
               h('span', { class: 'faint', style: 'font-size:12px;' }, (dl.cached || dl.total || 0) + ' 页'),
+              first ? h('button', { class: 'btn btn-primary btn-sm', onclick: () => this.openChapter(first.cid, first.aid) }, '开始阅读（第 1 话）') : null,
               h('button', { class: 'btn btn-sm', onclick: () => this.pollDl(a.id, true) }, '刷新状态'),
             ])
-          : h('div', { class: 'section', style: 'margin:8px 0;padding:12px;' }, [
+          : h('div', { class: 'section', style: 'margin:10px 0;padding:12px;' }, [
               h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;' }, [
-                h('span', { style: 'font-size:13px;color:var(--text-muted);' }, dl.total ? '下载中: ' + (dl.downloaded || 0) + '/' + dl.total + ' 页 (' + pct + '%)' : '尚未下载，下载后解锁章节与阅读'),
+                h('div', null, [
+                  h('div', { style: 'font-size:13px;color:var(--text-muted);' }, dl.total ? '正在下载: ' + (dl.downloaded || 0) + '/' + dl.total + ' 页' : '尚未下载，下载后解锁章节与阅读'),
+                  dl.total ? h('div', { class: 'faint', style: 'font-size:11px;margin-top:2px;' }, '剩余 ' + Math.max(0, dl.total - (dl.downloaded || 0)) + ' 页 · ' + pct + '%') : null,
+                ]),
                 h('button', { class: 'btn btn-primary', disabled: this.dlBusy, onclick: () => this.startDownload(a.id) }, this.dlBusy ? '提交中…' : '先下载本子'),
               ]),
               dl.total ? h('div', { class: 'rcjm-bar' }, h('div', { style: 'width:' + pct + '%' })) : null,
             ])
+        const related = (a.related || []).slice(0, 6)
         v = h('div', null, [
-          h('div', { class: 'flex', style: 'gap:12px;align-items:flex-start;' }, [
-            cover
-              ? h('img', { src: cover, style: 'width:110px;height:156px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);' })
-              : h('div', { class: 'rcjm-skel', style: 'width:110px;height:156px;border-radius:8px;' }),
-            h('div', { style: 'flex:1;min-width:0;' }, [
-              h('h3', { style: 'margin:0;font-size:16px;line-height:1.4;' }, a.name),
-              h('p', { class: 'faint', style: 'font-size:12px;margin:4px 0;' }, '作者 ' + (a.author || '未知') + ' · ID ' + a.id + ' · ' + (a.chapters || []).length + ' 章'),
-              h('div', null, (a.tags || []).slice(0, 8).map((tg) => h('span', { class: 'rcjm-tag' }, tg))),
+          h('div', { class: 'section', style: 'padding:14px;' }, [
+            h('div', { class: 'flex', style: 'gap:14px;align-items:flex-start;' }, [
+              cover
+                ? h('img', { src: cover, style: 'width:138px;height:196px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);' })
+                : h('div', { class: 'rcjm-skel', style: 'width:138px;height:196px;border-radius:8px;' }),
+              h('div', { style: 'flex:1;min-width:0;' }, [
+                h('h3', { style: 'margin:0;font-size:17px;line-height:1.4;' }, a.name),
+                h('p', { class: 'faint', style: 'font-size:12px;margin:5px 0;' }, '作者 ' + (a.author || '未知') + ' · ID ' + a.id + ' · ' + (a.chapters || []).length + ' 话'),
+                statItems.length ? h('p', { style: 'font-size:12px;color:var(--text-muted);margin:4px 0;' }, statItems.join(' · ')) : null,
+                (a.tags || []).length ? h('div', null, (a.tags || []).slice(0, 10).map((tg) => h('span', { class: 'rcjm-tag' }, tg))) : null,
+                a.description ? h('p', { class: 'faint', style: 'font-size:12px;margin-top:6px;line-height:1.6;white-space:pre-wrap;' }, a.description.length > 220 ? a.description.slice(0, 220) + '…' : a.description) : null,
+              ]),
             ]),
           ]),
-          h('div', { class: 'flex', style: 'gap:6px;margin:10px 0;' }, [
-            h('button', { class: 'btn btn-sm', onclick: () => { this.tab = this.tab === 'album' ? 'search' : 'album' } }, '返回列表'),
+          h('div', { class: 'flex', style: 'gap:6px;margin:8px 0;' }, [
+            h('button', { class: 'btn btn-sm', onclick: () => { clearInterval(this.dlTimer); this.tab = 'search' } }, '返回列表'),
           ]),
           dlBlock,
           h('div', { class: 'section', style: 'padding:4px 12px 8px;' }, [
-            h('div', { class: 'section-title', style: 'margin-top:6px;' }, '章节' + (done ? '' : '（下载后解锁）')),
+            h('div', { class: 'section-title', style: 'margin-top:6px;' }, '章节（' + (a.chapters || []).length + '）' + (done ? '' : ' · 下载后解锁')),
             chapters,
           ]),
+          related.length ? h('div', { class: 'section', style: 'padding:4px 12px 8px;margin-top:8px;' }, [
+            h('div', { class: 'section-title', style: 'margin-top:6px;' }, '相关推荐'),
+            h('div', { style: 'display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;' }, related.map((r) =>
+              h('button', { key: r.id, class: 'btn btn-sm', onclick: () => this.openAlbum(r.id) }, (r.name || r.id).slice(0, 14) + (r.name && r.name.length > 14 ? '…' : '')))),
+          ]) : null,
         ])
       }
       // ---- 阅读器 ----
       if (this.tab === 'read' && this.chapter) {
         const ch = this.chapter, arr = ch.page_arr || []
         const toolbar = h('div', { class: 'rcjm-sticky' }, [
-          h('button', { class: 'btn btn-sm', onclick: () => { this.tab = 'album' } }, '返回详情'),
+          h('button', { class: 'btn btn-sm', onclick: () => { clearInterval(this.dlTimer); this.tab = 'album' } }, '返回详情'),
           h('span', { class: 'faint', style: 'font-size:12px;' }, (ch.name || ('章节 ' + ch.id)) + ' · ' + arr.length + ' 页'),
           h('div', { style: 'margin-left:auto;display:flex;gap:2px;' }, [
             h('button', { class: 'btn btn-sm' + (this.view === 'flow' ? ' btn-primary' : ''), onclick: () => this.setView('flow') }, '滚动'),

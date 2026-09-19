@@ -18858,7 +18858,7 @@ ${codeFrame}` : message);
             this.pages = [];
             this.pageIdx = 0;
             this.view = "flow";
-            this.pollDl(aid, true);
+            this.pollDl(aid, false);
             if (!this.coverMap[aid]) {
               try {
                 const r = await ctx.invoke("jmcomic.cover", { aid });
@@ -19019,6 +19019,7 @@ ${codeFrame}` : message);
       },
       render() {
         const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => {
+          clearInterval(this.dlTimer);
           this.tab = k;
           if (k === "lib") this.loadLib();
         } }, l);
@@ -19048,46 +19049,67 @@ ${codeFrame}` : message);
           const a = this.album, dl = this.dl, done = dl.status === "completed";
           const cover = this.coverMap[a.id];
           const pct = dl.total ? Math.min(100, Math.round((dl.downloaded || 0) / dl.total * 100)) : 0;
-          const chapters = (a.chapters || []).map((c) => h("div", { key: c.cid, class: "rcjm-ch" }, [
-            h("span", null, c.name || "\u7AE0\u8282 " + c.cid),
+          const first = (a.chapters || [])[0];
+          const chapters = (a.chapters || []).map((c, ci) => h("div", { key: c.cid, class: "rcjm-ch" }, [
+            h("span", null, "\u7B2C " + (ci + 1) + " \u8BDD" + (c.name && c.name !== "\u7B2C" + (ci + 1) + "\u8BDD" ? " \xB7 " + c.name : "")),
             h("button", { class: "btn btn-sm" + (done ? " btn-primary" : ""), disabled: !done, onclick: () => this.openChapter(c.cid, c.aid) }, done ? "\u9605\u8BFB" : "\u9700\u4E0B\u8F7D")
           ]));
-          const dlBlock = done ? h("div", { style: "display:flex;align-items:center;gap:10px;padding:8px 0;" }, [
+          const statItems = [];
+          if (a.views) statItems.push("\u6D4F\u89C8 " + a.views);
+          if (a.likes) statItems.push("\u70B9\u8D5E " + a.likes);
+          if (a.comment_count) statItems.push("\u8BC4\u8BBA " + a.comment_count);
+          if (a.page_count) statItems.push("\u5168\u672C " + a.page_count + " \u9875");
+          const dlBlock = done ? h("div", { style: "display:flex;align-items:center;gap:10px;padding:8px 0;flex-wrap:wrap;" }, [
             h("span", { style: "color:var(--success);font-size:13px;" }, "\u5DF2\u4E0B\u8F7D"),
             h("span", { class: "faint", style: "font-size:12px;" }, (dl.cached || dl.total || 0) + " \u9875"),
+            first ? h("button", { class: "btn btn-primary btn-sm", onclick: () => this.openChapter(first.cid, first.aid) }, "\u5F00\u59CB\u9605\u8BFB\uFF08\u7B2C 1 \u8BDD\uFF09") : null,
             h("button", { class: "btn btn-sm", onclick: () => this.pollDl(a.id, true) }, "\u5237\u65B0\u72B6\u6001")
-          ]) : h("div", { class: "section", style: "margin:8px 0;padding:12px;" }, [
+          ]) : h("div", { class: "section", style: "margin:10px 0;padding:12px;" }, [
             h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;" }, [
-              h("span", { style: "font-size:13px;color:var(--text-muted);" }, dl.total ? "\u4E0B\u8F7D\u4E2D: " + (dl.downloaded || 0) + "/" + dl.total + " \u9875 (" + pct + "%)" : "\u5C1A\u672A\u4E0B\u8F7D\uFF0C\u4E0B\u8F7D\u540E\u89E3\u9501\u7AE0\u8282\u4E0E\u9605\u8BFB"),
+              h("div", null, [
+                h("div", { style: "font-size:13px;color:var(--text-muted);" }, dl.total ? "\u6B63\u5728\u4E0B\u8F7D: " + (dl.downloaded || 0) + "/" + dl.total + " \u9875" : "\u5C1A\u672A\u4E0B\u8F7D\uFF0C\u4E0B\u8F7D\u540E\u89E3\u9501\u7AE0\u8282\u4E0E\u9605\u8BFB"),
+                dl.total ? h("div", { class: "faint", style: "font-size:11px;margin-top:2px;" }, "\u5269\u4F59 " + Math.max(0, dl.total - (dl.downloaded || 0)) + " \u9875 \xB7 " + pct + "%") : null
+              ]),
               h("button", { class: "btn btn-primary", disabled: this.dlBusy, onclick: () => this.startDownload(a.id) }, this.dlBusy ? "\u63D0\u4EA4\u4E2D\u2026" : "\u5148\u4E0B\u8F7D\u672C\u5B50")
             ]),
             dl.total ? h("div", { class: "rcjm-bar" }, h("div", { style: "width:" + pct + "%" })) : null
           ]);
+          const related = (a.related || []).slice(0, 6);
           v = h("div", null, [
-            h("div", { class: "flex", style: "gap:12px;align-items:flex-start;" }, [
-              cover ? h("img", { src: cover, style: "width:110px;height:156px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);" }) : h("div", { class: "rcjm-skel", style: "width:110px;height:156px;border-radius:8px;" }),
-              h("div", { style: "flex:1;min-width:0;" }, [
-                h("h3", { style: "margin:0;font-size:16px;line-height:1.4;" }, a.name),
-                h("p", { class: "faint", style: "font-size:12px;margin:4px 0;" }, "\u4F5C\u8005 " + (a.author || "\u672A\u77E5") + " \xB7 ID " + a.id + " \xB7 " + (a.chapters || []).length + " \u7AE0"),
-                h("div", null, (a.tags || []).slice(0, 8).map((tg) => h("span", { class: "rcjm-tag" }, tg)))
+            h("div", { class: "section", style: "padding:14px;" }, [
+              h("div", { class: "flex", style: "gap:14px;align-items:flex-start;" }, [
+                cover ? h("img", { src: cover, style: "width:138px;height:196px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);" }) : h("div", { class: "rcjm-skel", style: "width:138px;height:196px;border-radius:8px;" }),
+                h("div", { style: "flex:1;min-width:0;" }, [
+                  h("h3", { style: "margin:0;font-size:17px;line-height:1.4;" }, a.name),
+                  h("p", { class: "faint", style: "font-size:12px;margin:5px 0;" }, "\u4F5C\u8005 " + (a.author || "\u672A\u77E5") + " \xB7 ID " + a.id + " \xB7 " + (a.chapters || []).length + " \u8BDD"),
+                  statItems.length ? h("p", { style: "font-size:12px;color:var(--text-muted);margin:4px 0;" }, statItems.join(" \xB7 ")) : null,
+                  (a.tags || []).length ? h("div", null, (a.tags || []).slice(0, 10).map((tg) => h("span", { class: "rcjm-tag" }, tg))) : null,
+                  a.description ? h("p", { class: "faint", style: "font-size:12px;margin-top:6px;line-height:1.6;white-space:pre-wrap;" }, a.description.length > 220 ? a.description.slice(0, 220) + "\u2026" : a.description) : null
+                ])
               ])
             ]),
-            h("div", { class: "flex", style: "gap:6px;margin:10px 0;" }, [
+            h("div", { class: "flex", style: "gap:6px;margin:8px 0;" }, [
               h("button", { class: "btn btn-sm", onclick: () => {
-                this.tab = this.tab === "album" ? "search" : "album";
+                clearInterval(this.dlTimer);
+                this.tab = "search";
               } }, "\u8FD4\u56DE\u5217\u8868")
             ]),
             dlBlock,
             h("div", { class: "section", style: "padding:4px 12px 8px;" }, [
-              h("div", { class: "section-title", style: "margin-top:6px;" }, "\u7AE0\u8282" + (done ? "" : "\uFF08\u4E0B\u8F7D\u540E\u89E3\u9501\uFF09")),
+              h("div", { class: "section-title", style: "margin-top:6px;" }, "\u7AE0\u8282\uFF08" + (a.chapters || []).length + "\uFF09" + (done ? "" : " \xB7 \u4E0B\u8F7D\u540E\u89E3\u9501")),
               chapters
-            ])
+            ]),
+            related.length ? h("div", { class: "section", style: "padding:4px 12px 8px;margin-top:8px;" }, [
+              h("div", { class: "section-title", style: "margin-top:6px;" }, "\u76F8\u5173\u63A8\u8350"),
+              h("div", { style: "display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;" }, related.map((r) => h("button", { key: r.id, class: "btn btn-sm", onclick: () => this.openAlbum(r.id) }, (r.name || r.id).slice(0, 14) + (r.name && r.name.length > 14 ? "\u2026" : ""))))
+            ]) : null
           ]);
         }
         if (this.tab === "read" && this.chapter) {
           const ch = this.chapter, arr = ch.page_arr || [];
           const toolbar = h("div", { class: "rcjm-sticky" }, [
             h("button", { class: "btn btn-sm", onclick: () => {
+              clearInterval(this.dlTimer);
               this.tab = "album";
             } }, "\u8FD4\u56DE\u8BE6\u60C5"),
             h("span", { class: "faint", style: "font-size:12px;" }, (ch.name || "\u7AE0\u8282 " + ch.id) + " \xB7 " + arr.length + " \u9875"),
