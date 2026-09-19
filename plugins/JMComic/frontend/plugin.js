@@ -156,7 +156,17 @@ function mount(container, ctx) {
         } catch (e) { this.err = (e && e.message) || e }
       },
       loadCoversFromLib() { const saved = this.results; this.results = this.lib; this.loadCovers(); this.results = saved },
-      async rm(aid) { try { await ctx.invoke('jmcomic.library.delete', { aid }); this.loadLib() } catch (e) { this.err = (e && e.message) || e } },
+      async rm(aid) {
+        try {
+          await ctx.invoke('jmcomic.library.delete', { aid })
+          // 即时移除本地条目(不等后端缓存刷新), 后台 loadLib 校准
+          this.lib = this.lib.filter((it) => String(it.id ?? it.aid) !== String(aid))
+          this.results = this.results.filter((it) => String(it.id ?? it.aid) !== String(aid))
+          delete this.coverMap[String(aid)]
+          this.okMsg = '已删除 ' + aid; setTimeout(() => (this.okMsg = ''), 2000)
+          this.loadLib()
+        } catch (e) { this.err = (e && e.message) || e }
+      },
       async download(aid) { try { const r = await ctx.invoke('jmcomic.download', { aid }); this.okMsg = r.message; setTimeout(() => (this.okMsg = ''), 2000) } catch (e) { this.err = (e && e.message) || e } },
       async dlStatus(aid) { try { const r = await ctx.invoke('jmcomic.download.status', { aid }); this.okMsg = '已完成 ' + (r.downloaded || 0) + '/' + (r.total || 0) + ' (' + r.status + ')'; setTimeout(() => (this.okMsg = ''), 2500) } catch (e) { this.err = (e && e.message) || e } },
     },

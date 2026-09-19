@@ -317,6 +317,8 @@ def jm_library_delete(params):
     if aid in lib:
         del lib[aid]
         M.save_library(lib)
+    # 立即失效 5s 库缓存, 删除后列表立即反映
+    M._library_cache = {'ts': 0, 'data': None}
     return {'message': '已删除 %s' % aid}
 
 

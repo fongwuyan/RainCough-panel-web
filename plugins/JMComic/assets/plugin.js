@@ -18988,6 +18988,11 @@ ${codeFrame}` : message);
         async rm(aid) {
           try {
             await ctx.invoke("jmcomic.library.delete", { aid });
+            this.lib = this.lib.filter((it) => String(it.id ?? it.aid) !== String(aid));
+            this.results = this.results.filter((it) => String(it.id ?? it.aid) !== String(aid));
+            delete this.coverMap[String(aid)];
+            this.okMsg = "\u5DF2\u5220\u9664 " + aid;
+            setTimeout(() => this.okMsg = "", 2e3);
             this.loadLib();
           } catch (e) {
             this.err = e && e.message || e;
