@@ -111,6 +111,24 @@
       "visibility": "main",
       "version": "1",
       "description": "取消下载(排队立即/下载中标记后清残留)"
+    },
+    {
+      "id": "jmcomic.covers",
+      "visibility": "all",
+      "version": "1",
+      "description": "批量封面(一次取N个)"
+    },
+    {
+      "id": "jmcomic.prefetch",
+      "visibility": "all",
+      "version": "1",
+      "description": "章节图片批量预取(URL化)"
+    },
+    {
+      "id": "jmcomic.perf.stats",
+      "visibility": "all",
+      "version": "1",
+      "description": "性能统计(命中/解码/耗时采样)"
     }
   ]
 }

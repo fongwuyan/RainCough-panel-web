@@ -154,6 +154,12 @@ def jm():
     return _jm_client
 
 
+def reset_client():
+    """客户端失效后重置(被墙/异常时下次请求重建)。"""
+    global _jm_client
+    _jm_client = None
+
+
 # ---- 本地库(磁盘 JSON, 旧插件原样) ----
 def album_dir(aid):
     for base in storage_paths():

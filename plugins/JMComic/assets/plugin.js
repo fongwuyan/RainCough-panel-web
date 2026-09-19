@@ -18737,6 +18737,7 @@ ${codeFrame}` : message);
   // plugins/JMComic/frontend/plugin.js
   var NAME = "JMComic";
   var STYLE_ID = "rc-jmcomic-style";
+  var RECENT_KEY = "rc_jmcomic_recent";
   var CSS = `
 .rcjm-card{transition:transform .15s ease, box-shadow .15s ease;cursor:pointer}
 .rcjm-card:hover{transform:translateY(-3px);box-shadow:0 6px 18px rgba(0,0,0,.35)}
@@ -18744,13 +18745,15 @@ ${codeFrame}` : message);
 .rcjm-thumb{background:#1c2128;width:100%;height:150px;object-fit:cover;display:block}
 .rcjm-skel{width:100%;height:150px;background:linear-gradient(90deg,#1c2128 25%,#242a33 37%,#1c2128 63%);background-size:400% 100%;animation:rcjm-shine 1.2s infinite}
 @keyframes rcjm-shine{0%{background-position:100% 0}100%{background-position:-100% 0}}
-.rcjm-page-img{max-width:560px;width:100%;display:block;margin:8px auto;border:1px solid var(--border);border-radius:6px}
+.rcjm-page-img{max-width:560px;width:100%;display:block;margin:10px auto;border:1px solid var(--border);border-radius:6px}
 .rcjm-bar{height:6px;background:#1f242c;border-radius:3px;overflow:hidden;margin-top:6px}
 .rcjm-bar>div{height:100%;background:var(--accent,#58a6ff);transition:width .3s ease;border-radius:3px}
 .rcjm-ch{border-bottom:1px solid var(--border);padding:8px 6px;display:flex;justify-content:space-between;align-items:center;font-size:13px}
 .rcjm-ch:hover{background:rgba(58,120,168,.06);transition:background .15s}
 .rcjm-tag{display:inline-block;font-size:11px;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px 4px 0 0}
 .rcjm-sticky{position:sticky;top:0;background:var(--bg,#0d1117);z-index:20;padding:8px 0;margin:-2px 0 8px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.rcjm-recent{display:inline-block;font-size:11px;padding:2px 10px;border:1px solid var(--border);border-radius:12px;margin:2px 6px 0 0;color:var(--text-muted);cursor:pointer}
+.rcjm-recent:hover{border-color:var(--accent);color:var(--accent)}
 `;
   function mount(container, ctx) {
     const App = {
@@ -18764,11 +18767,12 @@ ${codeFrame}` : message);
           dl: { status: "unknown" },
           chapter: null,
           pages: [],
-          loadIdx: 6,
+          pageArr: [],
           pageIdx: 0,
           view: "flow",
           coverMap: {},
           dlTimer: null,
+          searchTimer: null,
           loading: false,
           loadingMore: false,
           dlBusy: false,
@@ -18777,9 +18781,14 @@ ${codeFrame}` : message);
           okMsg: "",
           page: 1,
           pageCount: 1,
-          loadingCover: /* @__PURE__ */ new Set(),
+          recent: [],
+          coverQueueStop: false,
+          coverLoaded: 0,
+          coverLoadedLib: 0,
+          searchMs: 0,
           keyHandler: null,
-          scrollHandler: null
+          scrollRaf: null,
+          prefetchIdx: 0
         };
       },
       mounted() {
@@ -18788,6 +18797,11 @@ ${codeFrame}` : message);
           st.id = STYLE_ID;
           st.textContent = CSS;
           document.head.appendChild(st);
+        }
+        try {
+          this.recent = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+        } catch (e) {
+          this.recent = [];
         }
         this.keyHandler = (e) => {
           if (this.tab !== "read" || this.view !== "single") return;
@@ -18802,71 +18816,125 @@ ${codeFrame}` : message);
         };
         window.addEventListener("keydown", this.keyHandler);
         this.scrollHandler = () => {
-          if (this.tab !== "read" || this.view !== "flow") return;
-          const arr = (this.chapter || {}).page_arr || [];
-          if (this.pages.length >= arr.length || this.loadingMore) return;
-          if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 700) this.loadMore();
+          if (this.scrollRaf) return;
+          this.scrollRaf = requestAnimationFrame(() => {
+            this.scrollRaf = null;
+            if (this.tab === "read" && this.view === "flow") {
+              const total = this.pageArr.length;
+              if (this.prefetchIdx < total && !this.loadingMore && window.innerHeight + window.scrollY >= document.body.scrollHeight - 700) this.prefetchNext();
+            } else if (this.tab === "search" && this.results.length && this.coverLoaded < Math.min(this.results.length, 60)) {
+              if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 600) this.loadNextCoverBatch();
+            } else if (this.tab === "lib" && this.lib.length && (this.coverLoadedLib || 0) < Math.min(this.lib.length, 60)) {
+              if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 600) this.loadNextCoverBatchLib();
+            }
+          });
         };
         window.addEventListener("scroll", this.scrollHandler, { passive: true });
       },
       unmounted() {
         clearInterval(this.dlTimer);
+        clearTimeout(this.searchTimer);
+        this.coverQueueStop = true;
         if (this.keyHandler) window.removeEventListener("keydown", this.keyHandler);
         if (this.scrollHandler) window.removeEventListener("scroll", this.scrollHandler);
+        if (this.scrollRaf) cancelAnimationFrame(this.scrollRaf);
         const st = document.getElementById(STYLE_ID);
         if (st) st.remove();
       },
       methods: {
+        // ---------- 搜索 ----------
+        onKwInput(e) {
+          this.kw = e.target.value;
+          clearTimeout(this.searchTimer);
+          if (this.kw.trim().length) {
+            this.searchTimer = setTimeout(() => this.search(1), 300);
+          } else {
+            this.results = [];
+            this.coverQueueStop = true;
+          }
+        },
+        clearKw() {
+          clearTimeout(this.searchTimer);
+          this.kw = "";
+          this.results = [];
+          this.coverQueueStop = true;
+          this.coverLoaded = 0;
+        },
+        saveRecent() {
+          const kw = this.kw.trim();
+          if (!kw) return;
+          const r = [kw].concat(this.recent.filter((x) => x !== kw)).slice(0, 10);
+          this.recent = r;
+          try {
+            localStorage.setItem(RECENT_KEY, JSON.stringify(r));
+          } catch (e) {
+          }
+        },
+        delRecent(kw) {
+          this.recent = this.recent.filter((x) => x !== kw);
+          try {
+            localStorage.setItem(RECENT_KEY, JSON.stringify(this.recent));
+          } catch (e) {
+          }
+        },
         async search(p2 = 1) {
           if (!this.kw.trim() || this.loading) return;
+          clearTimeout(this.searchTimer);
           this.loading = true;
           this.err = "";
+          this.coverQueueStop = true;
+          const t0 = Date.now();
           try {
             const r = await ctx.invoke("jmcomic.search", { keyword: this.kw, page: p2, mode: "keyword" });
             this.results = r && r.items || [];
             this.page = p2;
             this.pageCount = r && r.page_count || 1;
-            this.loadCovers();
+            this.searchMs = Date.now() - t0;
+            this.saveRecent();
+            this.coverQueueStop = false;
+            this.coverLoaded = 0;
+            this.loadNextCoverBatch();
           } catch (e) {
             this.err = e && e.message || e;
           }
           this.loading = false;
         },
-        // 封面懒加载(全部条目, 并发<=4)
-        loadCovers() {
-          const queue2 = this.results.map((it) => String(it.id)).filter((id) => !this.coverMap[id] && !this.loadingCover.has(id));
-          const run = async () => {
-            while (queue2.length) {
-              const id = queue2.shift();
-              if (this.coverMap[id]) continue;
-              this.loadingCover.add(id);
-              try {
-                const r = await ctx.invoke("jmcomic.cover", { aid: id });
-                if (r && r.cover) this.coverMap[id] = r.cover;
-              } catch (e) {
-              }
-              this.loadingCover.delete(id);
-            }
-          };
-          for (let i = 0; i < 4 && queue2.length; i++) run();
+        jumpPage(p2) {
+          if (!p2 || p2 < 1 || p2 > this.pageCount || p2 === this.page) return;
+          this.search(p2);
         },
+        // 封面: 批量 covers(首屏1批开取, 滚动续补)
+        async loadNextCoverBatch() {
+          const queue2 = this.results.slice(this.coverLoaded, this.coverLoaded + 12).map((it) => String(it.id));
+          if (!queue2.length) return;
+          this.coverLoaded += queue2.length;
+          try {
+            const r = await ctx.invoke("jmcomic.covers", { aids: queue2 });
+            const covers = r && r.covers || {};
+            for (const k in covers) {
+              if (!this.coverMap[k]) this.coverMap[k] = covers[k];
+            }
+          } catch (e) {
+          }
+        },
+        // ---------- 详情 ----------
         async openAlbum(aid) {
           this.err = "";
           try {
-            this.album = await ctx.invoke("jmcomic.album", { aid });
+            const [a, st, cv] = await Promise.all([
+              ctx.invoke("jmcomic.album", { aid }),
+              ctx.invoke("jmcomic.download.status", { aid }),
+              ctx.invoke("jmcomic.cover", { aid }).catch(() => null)
+            ]);
+            this.album = a;
+            this.dl = st || {};
+            if (cv && cv.cover) this.coverMap[String(aid)] = cv.cover;
             this.tab = "album";
             this.chapter = null;
             this.pages = [];
             this.pageIdx = 0;
             this.view = "flow";
-            this.pollDl(aid, false);
-            if (!this.coverMap[aid]) {
-              try {
-                const r = await ctx.invoke("jmcomic.cover", { aid });
-                if (r && r.cover) this.coverMap[aid] = r.cover;
-              } catch (e) {
-              }
-            }
+            if (this.dl.status !== "completed" && this.dl.status !== "failed" && this.dl.status !== "cancelled") this.pollDl(aid, false);
           } catch (e) {
             this.err = e && e.message || e;
           }
@@ -18877,15 +18945,13 @@ ${codeFrame}` : message);
             try {
               const r = await ctx.invoke("jmcomic.download.status", { aid });
               this.dl = r || {};
-              if (this.dl.status === "completed" || this.dl.status === "failed") clearInterval(this.dlTimer);
+              if (["completed", "failed", "cancelled"].includes(this.dl.status)) clearInterval(this.dlTimer);
             } catch (e) {
               clearInterval(this.dlTimer);
             }
           };
           await tick();
-          if (!once && this.dl.status !== "completed" && this.dl.status !== "failed") {
-            this.dlTimer = setInterval(tick, 2e3);
-          }
+          if (!once && !["completed", "failed", "cancelled"].includes(this.dl.status)) this.dlTimer = setInterval(tick, 3e3);
         },
         async startDownload(aid) {
           if (this.dlBusy) return;
@@ -18913,6 +18979,7 @@ ${codeFrame}` : message);
             this.err = e && e.message || e;
           }
         },
+        // ---------- 阅读 ----------
         async openChapter(cid, aid) {
           if (this.dl.status !== "completed") {
             this.err = "\u8BF7\u5148\u5B8C\u6210\u4E0B\u8F7D\u518D\u9605\u8BFB";
@@ -18920,12 +18987,14 @@ ${codeFrame}` : message);
           }
           this.err = "";
           try {
-            this.chapter = await ctx.invoke("jmcomic.chapter", { cid, aid });
+            const ch = await ctx.invoke("jmcomic.chapter", { cid, aid });
+            this.chapter = ch;
+            this.pageArr = ch && ch.page_arr || [];
             this.pages = [];
             this.pageIdx = 0;
-            this.loadIdx = 6;
+            this.prefetchIdx = 0;
             this.tab = "read";
-            this.view === "flow" ? this.loadMore() : this.loadOnePage();
+            this.view === "flow" ? this.prefetchNext() : this.loadPageAt(0);
             window.scrollTo(0, 0);
           } catch (e) {
             this.err = e && e.message || e;
@@ -18933,74 +19002,81 @@ ${codeFrame}` : message);
         },
         setView(v) {
           this.view = v;
-          this.pageIdx = 0;
-          if (v === "single") this.loadOnePage();
-        },
-        async loadOnePage() {
-          const ch = this.chapter || {};
-          const arr = ch.page_arr || [];
-          if (!arr.length) return;
-          const idx = Math.min(this.pageIdx, arr.length - 1);
-          if (this.pages[idx]) return;
-          try {
-            const r = await ctx.invoke("jmcomic.image", { aid: this.album.id, cid: ch.id, filename: arr[idx] });
-            this.pages[idx] = r.data;
-          } catch (e) {
-            this.pages[idx] = "err";
+          if (v === "single") {
+            this.loadPageAt(this.pageIdx);
+            this.loadPageAt(this.pageIdx + 1);
           }
         },
-        async loadMore() {
-          const ch = this.chapter || {};
-          const arr = ch.page_arr || [];
-          if (!arr.length || this.loadingMore) return;
+        prefetchNext() {
+          const total = this.pageArr.length;
+          if (this.prefetchIdx >= total || this.loadingMore) return;
           this.loadingMore = true;
-          for (const f of arr.slice(this.pages.length, this.loadIdx)) {
-            try {
-              const r = await ctx.invoke("jmcomic.image", { aid: this.album.id, cid: ch.id, filename: f });
-              this.pages.push(r.data);
-            } catch (e) {
-              this.pages.push("");
-            }
+          const start = this.prefetchIdx;
+          const cid = this.chapter.id;
+          ctx.invoke("jmcomic.prefetch", { aid: this.album.id, cid, start, count: 12 }).then((r) => {
+            const urls = r && r.urls || [];
+            urls.forEach((u, i) => {
+              const idx = start + i;
+              if (idx < this.pageArr.length && u) this.pages[idx] = u;
+            });
+            this.prefetchIdx = start + 12;
+          }).catch(() => {
+            this.prefetchIdx = start + 12;
+            this.pages.length = Math.max(this.pages.length, Math.min(start + 6, total));
+          }).finally(() => {
+            this.loadingMore = false;
+          });
+        },
+        async loadPageAt(i) {
+          if (i < 0 || i >= this.pageArr.length || this.pages[i]) return;
+          try {
+            const r = await ctx.invoke("jmcomic.image", { aid: this.album.id, cid: this.chapter.id, filename: this.pageArr[i] });
+            if (r && r.url) this.pages[i] = r.url;
+          } catch (e) {
+            this.pages[i] = "err";
           }
-          this.loadIdx += 6;
-          this.loadingMore = false;
         },
         prevPage() {
           if (this.pageIdx > 0) {
             this.pageIdx--;
-            this.loadOnePage();
+            this.loadPageAt(this.pageIdx);
           }
         },
         nextPage() {
-          const n = ((this.chapter || {}).page_arr || []).length;
+          const n = this.pageArr.length;
           if (this.pageIdx < n - 1) {
             this.pageIdx++;
-            this.loadOnePage();
+            this.loadPageAt(this.pageIdx);
           }
         },
         imgState(i) {
           return this.pages[i] === void 0 ? "loading" : this.pages[i] === "" || this.pages[i] === "err" ? "err" : "ok";
         },
+        // ---------- 库 ----------
         async loadLib() {
           try {
             const r = await ctx.invoke("jmcomic.library.list", { page: 1, page_size: 60 });
             this.lib = (r && r.items || []).map((it) => ({ ...it, id: String(it.id ?? it.aid ?? "") }));
-            this.loadCoversFromLib();
+            this.coverLoadedLib = 0;
+            this.loadNextCoverBatchLib();
           } catch (e) {
             this.err = e && e.message || e;
           }
         },
-        loadCoversFromLib() {
-          const saved = this.results;
-          this.results = this.lib;
-          this.loadCovers();
-          this.results = saved;
+        loadNextCoverBatchLib() {
+          const queue2 = this.lib.slice(this.coverLoadedLib || 0, (this.coverLoadedLib || 0) + 12).map((it) => String(it.id));
+          this.coverLoadedLib = (this.coverLoadedLib || 0) + queue2.length;
+          if (!queue2.length) return;
+          ctx.invoke("jmcomic.covers", { aids: queue2 }).then((r) => {
+            const c = r && r.covers || {};
+            for (const k in c) if (!this.coverMap[k]) this.coverMap[k] = c[k];
+          }).catch(() => {
+          });
         },
         async rm(aid) {
           try {
             await ctx.invoke("jmcomic.library.delete", { aid });
             this.lib = this.lib.filter((it) => String(it.id ?? it.aid) !== String(aid));
-            this.results = this.results.filter((it) => String(it.id ?? it.aid) !== String(aid));
             delete this.coverMap[String(aid)];
             this.okMsg = "\u5DF2\u5220\u9664 " + aid;
             setTimeout(() => this.okMsg = "", 2e3);
@@ -19021,7 +19097,7 @@ ${codeFrame}` : message);
         async dlStatus(aid) {
           try {
             const r = await ctx.invoke("jmcomic.download.status", { aid });
-            this.okMsg = "\u5DF2\u5B8C\u6210 " + (r.downloaded || 0) + "/" + (r.total || 0) + " (" + r.status + ")";
+            this.okMsg = "\u5B8C\u6210 " + (r.downloaded || 0) + "/" + (r.total || "?") + " (" + r.status + ")";
             setTimeout(() => this.okMsg = "", 2500);
           } catch (e) {
             this.err = e && e.message || e;
@@ -19031,30 +19107,40 @@ ${codeFrame}` : message);
       render() {
         const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => {
           clearInterval(this.dlTimer);
+          this.coverQueueStop = true;
           this.tab = k;
           if (k === "lib") this.loadLib();
         } }, l);
         const gridItems = this.tab === "search" ? this.results : this.lib;
-        const grid = h("div", null, [
-          this.tab === "search" ? h("p", { class: "faint", style: "font-size:12px;margin:2px 0 8px;" }, this.results.length + " \u6761\u7ED3\u679C \xB7 \u7B2C " + this.page + "/" + this.pageCount + " \u9875") : h("p", { class: "faint", style: "font-size:12px;margin:2px 0 8px;" }, this.lib.length + " \u672C\u5DF2\u5165\u5E93"),
-          h(
+        let grid;
+        if (this.loading && !gridItems.length) {
+          grid = h(
             "div",
             { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;" },
-            gridItems.map((it) => {
-              const id = String(it.id ?? it.aid ?? "");
-              const cover = this.coverMap[id];
-              return h("div", { key: id, class: "card rcjm-card", style: "padding:6px;", onclick: () => this.openAlbum(id) }, [
-                cover ? h("img", { src: cover, loading: "lazy", class: "rcjm-thumb" }) : h("div", { class: "rcjm-skel" }),
-                h("div", { style: "font-size:12px;margin-top:4px;height:32px;overflow:hidden;line-height:16px;color:var(--text);" }, it.name || "ID " + id),
-                h("div", { class: "faint", style: "font-size:11px;margin-top:2px;" }, (it.author || "-") + " \xB7 " + id),
-                h("div", { class: "flex", style: "gap:4px;margin-top:5px;", onclick: (e) => e.stopPropagation() }, [
-                  h("button", { class: "btn btn-sm btn-primary", onclick: () => this.openAlbum(id) }, "\u8BE6\u60C5"),
-                  this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6")] : [h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(id) }, "\u5220\u9664")]
-                ])
-              ]);
-            })
-          )
-        ]);
+            Array.from({ length: 12 }).map((_, i) => h("div", { key: "s" + i, class: "card", style: "padding:6px;" }, h("div", { class: "rcjm-skel" })))
+          );
+        } else {
+          grid = h("div", null, [
+            h("p", { class: "faint", style: "font-size:12px;margin:2px 0 8px;" }, this.tab === "search" ? this.results.length + " \u6761\u7ED3\u679C \xB7 \u7B2C " + this.page + "/" + this.pageCount + " \u9875" + (this.searchMs ? " \xB7 " + (this.searchMs / 1e3).toFixed(1) + "s" : "") : this.lib.length + " \u672C\u5DF2\u5165\u5E93"),
+            h(
+              "div",
+              { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;" },
+              gridItems.map((it) => {
+                const id = String(it.id ?? it.aid ?? "");
+                const cover = this.coverMap[id];
+                return h("div", { key: id, class: "card rcjm-card", style: "padding:6px;", onclick: () => this.openAlbum(id) }, [
+                  cover ? h("img", { src: cover, loading: "lazy", class: "rcjm-thumb" }) : h("div", { class: "rcjm-skel" }),
+                  h("div", { style: "font-size:12px;margin-top:4px;height:32px;overflow:hidden;line-height:16px;color:var(--text);" }, it.name || "ID " + id),
+                  h("div", { class: "faint", style: "font-size:11px;margin-top:2px;" }, (it.author || "-") + " \xB7 " + id),
+                  h("div", { class: "flex", style: "gap:4px;margin-top:5px;", onclick: (e) => e.stopPropagation() }, [
+                    h("button", { class: "btn btn-sm btn-primary", onclick: () => this.openAlbum(id) }, "\u8BE6\u60C5"),
+                    this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6")] : [h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(id) }, "\u5220\u9664")]
+                  ])
+                ]);
+              })
+            )
+          ]);
+        }
         let v = null;
         if (this.tab === "album" && this.album) {
           const a = this.album, dl = this.dl, done = dl.status === "completed";
@@ -19089,9 +19175,7 @@ ${codeFrame}` : message);
                   h("div", { style: "font-size:13px;color:var(--text-muted);" }, cancelling ? "\u6B63\u5728\u53D6\u6D88\u2026" : "\u6B63\u5728\u4E0B\u8F7D: " + (dl.downloaded || 0) + "/" + dl.total + " \u9875"),
                   h("div", { class: "faint", style: "font-size:11px;margin-top:2px;" }, cancelling ? "\u5F53\u524D\u6574\u672C\u6536\u5C3E\u540E\u5C06\u6E05\u7406\uFF0C\u7A0D\u5019" : "\u5269\u4F59 " + Math.max(0, dl.total - (dl.downloaded || 0)) + " \u9875 \xB7 " + pct + "%")
                 ]),
-                h("div", { class: "flex", style: "gap:6px;" }, [
-                  h("button", { class: "btn btn-sm btn-danger", disabled: cancelling, onclick: () => this.cancelDownload(a.id) }, cancelling ? "\u53D6\u6D88\u4E2D\u2026" : "\u53D6\u6D88\u4E0B\u8F7D")
-                ])
+                h("button", { class: "btn btn-sm btn-danger", disabled: cancelling, onclick: () => this.cancelDownload(a.id) }, cancelling ? "\u53D6\u6D88\u4E2D\u2026" : "\u53D6\u6D88\u4E0B\u8F7D")
               ]),
               h("div", { class: "rcjm-bar" }, h("div", { style: "width:" + pct + "%" }))
             ]);
@@ -19103,7 +19187,6 @@ ${codeFrame}` : message);
           }
           const related = (a.related || []).slice(0, 8);
           v = h("div", null, [
-            // 顶栏(sticky)
             h("div", { class: "rcjm-sticky" }, [
               h("button", { class: "btn btn-sm", onclick: () => {
                 clearInterval(this.dlTimer);
@@ -19113,7 +19196,6 @@ ${codeFrame}` : message);
               h("span", { class: "faint", style: "font-size:12px;" }, "> \u672C\u5B50\u8BE6\u60C5"),
               h("button", { class: "btn btn-sm", style: "margin-left:auto;", onclick: () => this.pollDl(a.id, true) }, "\u5237\u65B0\u72B6\u6001")
             ]),
-            // 信息主卡
             h("div", { class: "section", style: "padding:14px;" }, [
               h("div", { class: "flex", style: "gap:14px;align-items:flex-start;" }, [
                 cover ? h("img", { src: cover, style: "width:134px;height:200px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);" }) : h("div", { class: "rcjm-skel", style: "width:134px;height:200px;border-radius:8px;" }),
@@ -19136,18 +19218,18 @@ ${codeFrame}` : message);
             ]),
             related.length ? h("div", { class: "section", style: "padding:4px 12px 8px;margin-top:10px;" }, [
               h("div", { class: "section-title", style: "margin-top:6px;" }, "\u76F8\u5173\u63A8\u8350"),
-              h("div", { style: "display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;" }, related.map((r) => h("button", { key: r.id, class: "btn btn-sm", onclick: () => this.openAlbum(r.id) }, (r.name || r.id).slice(0, 16) + ((r.name || r.id).length > 16 ? "\u2026" : ""))))
+              h("div", { style: "display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;" }, related.map((r) => h("button", { key: r.id, class: "btn btn-sm", onclick: () => this.openAlbum(r.id) }, (r.name || r.id).slice(0, 16) + ((r.name || r.id || "").length > 16 ? "\u2026" : ""))))
             ]) : null
           ]);
         }
         if (this.tab === "read" && this.chapter) {
-          const ch = this.chapter, arr = ch.page_arr || [];
+          const total = this.pageArr.length;
           const toolbar = h("div", { class: "rcjm-sticky" }, [
             h("button", { class: "btn btn-sm", onclick: () => {
               clearInterval(this.dlTimer);
               this.tab = "album";
             } }, "\u8FD4\u56DE\u8BE6\u60C5"),
-            h("span", { class: "faint", style: "font-size:12px;" }, (ch.name || "\u7AE0\u8282 " + ch.id) + " \xB7 " + arr.length + " \u9875"),
+            h("span", { class: "faint", style: "font-size:12px;" }, (this.chapter.name || "\u7AE0\u8282 " + this.chapter.id) + " \xB7 " + total + " \u9875"),
             h("div", { style: "margin-left:auto;display:flex;gap:2px;" }, [
               h("button", { class: "btn btn-sm" + (this.view === "flow" ? " btn-primary" : ""), onclick: () => this.setView("flow") }, "\u6EDA\u52A8"),
               h("button", { class: "btn btn-sm" + (this.view === "single" ? " btn-primary" : ""), onclick: () => this.setView("single") }, "\u5355\u9875")
@@ -19156,26 +19238,25 @@ ${codeFrame}` : message);
           if (this.view === "flow") {
             v = h("div", null, [
               toolbar,
-              this.pages.map((d, i) => {
-                if (this.imgState(i) === "ok") return h("img", { key: i, src: d, loading: "lazy", class: "rcjm-page-img" });
-                if (this.imgState(i) === "err") return h("div", { key: i, style: "width:100%;max-width:520px;height:180px;margin:8px auto;background:#1c2128;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px;border-radius:6px;" }, "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25");
-                return h("div", { key: i, class: "rcjm-skel", style: "width:100%;max-width:520px;height:200px;margin:8px auto;border-radius:6px;" });
+              Array.from({ length: Math.max(total, this.pages.length) }).map((_, i) => {
+                if (this.imgState(i) === "ok") return h("img", { key: i, src: this.pages[i], loading: "lazy", class: "rcjm-page-img", style: "min-height:100px;" });
+                if (this.imgState(i) === "err") return h("div", { key: i, style: "width:100%;max-width:520px;height:180px;margin:10px auto;background:#1c2128;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px;border-radius:6px;" }, "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25");
+                return h("div", { key: i, class: "rcjm-skel", style: "width:100%;max-width:520px;height:200px;margin:10px auto;border-radius:6px;" });
               }),
-              h("div", { style: "text-align:center;padding:16px;" }, this.pages.length < arr.length ? h("button", { class: "btn", disabled: this.loadingMore, onclick: () => this.loadMore() }, this.loadingMore ? "\u52A0\u8F7D\u4E2D\u2026" : "\u52A0\u8F7D\u66F4\u591A\uFF08" + this.pages.length + "/" + arr.length + "\uFF09") : h("span", { class: "faint", style: "font-size:12px;" }, "\u5DF2\u5168\u90E8\u52A0\u8F7D\uFF08" + arr.length + " \u9875\uFF09"))
+              h("div", { style: "text-align:center;padding:14px;" }, this.prefetchIdx >= total ? h("span", { class: "faint", style: "font-size:12px;" }, "\u5DF2\u5168\u90E8\u52A0\u8F7D\uFF08" + total + " \u9875\uFF09") : h("span", { class: "faint", style: "font-size:12px;" }, "\u6EDA\u52A8\u5230\u5E95\u81EA\u52A8\u52A0\u8F7D " + this.prefetchIdx + "/" + total))
             ]);
           } else {
             const st = this.imgState(this.pageIdx);
-            const img = this.pages[this.pageIdx];
             let imgNode;
-            if (st === "ok") imgNode = h("img", { src: img, class: "rcjm-page-img", style: "max-width:640px;min-height:140px;" });
+            if (st === "ok") imgNode = h("img", { src: this.pages[this.pageIdx], class: "rcjm-page-img", style: "max-width:640px;min-height:140px;" });
             else if (st === "err") imgNode = h("div", { style: "max-width:640px;height:220px;margin:8px auto;background:#1c2128;display:flex;align-items:center;justify-content:center;color:#666;" }, "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25");
             else imgNode = h("div", { class: "rcjm-skel", style: "max-width:640px;height:260px;margin:8px auto;border-radius:8px;" });
             v = h("div", null, [
               toolbar,
               h("div", { style: "display:flex;justify-content:center;align-items:center;gap:12px;margin:6px 0;" }, [
                 h("button", { class: "btn btn-sm", disabled: this.pageIdx <= 0, onclick: () => this.prevPage() }, "\u4E0A\u4E00\u9875"),
-                h("span", { class: "faint", style: "font-size:13px;" }, this.pageIdx + 1 + " / " + arr.length),
-                h("button", { class: "btn btn-sm", disabled: this.pageIdx >= arr.length - 1, onclick: () => this.nextPage() }, "\u4E0B\u4E00\u9875")
+                h("span", { class: "faint", style: "font-size:13px;" }, this.pageIdx + 1 + " / " + total),
+                h("button", { class: "btn btn-sm", disabled: this.pageIdx >= total - 1, onclick: () => this.nextPage() }, "\u4E0B\u4E00\u9875")
               ]),
               h("div", { style: "position:relative;cursor:pointer;", onclick: (e) => {
                 const r = e.currentTarget.getBoundingClientRect();
@@ -19190,13 +19271,20 @@ ${codeFrame}` : message);
           h("span", null, "JMComic"),
           h("div", { class: "flex", style: "gap:6px;" }, [t("search", "\u641C\u7D22"), t("lib", "\u672C\u5B50\u5E93")])
         ]);
-        const searchBar = this.tab === "search" ? h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
-          h("input", { class: "input", style: "flex:1;", placeholder: "\u8F93\u5165\u5173\u952E\u8BCD\uFF0C\u56DE\u8F66\u6216\u70B9\u51FB\u641C\u7D22", value: this.kw, oninput: (e) => this.kw = e.target.value, onkeyup: (e) => {
-            if (e.key === "Enter") this.search();
-          } }),
-          h("button", { class: "btn btn-primary", disabled: this.loading, onclick: () => this.search() }, this.loading ? "\u641C\u7D22\u4E2D\u2026" : "\u641C\u7D22"),
-          h("button", { class: "btn btn-sm", disabled: this.loading || this.page <= 1, onclick: () => this.search(this.page - 1) }, "\u4E0A\u4E00\u9875"),
-          h("button", { class: "btn btn-sm", disabled: this.loading || this.page >= this.pageCount, onclick: () => this.search(this.page + 1) }, "\u4E0B\u4E00\u9875")
+        const searchBar = this.tab === "search" ? h("div", null, [
+          h("div", { class: "flex", style: "gap:6px;margin-bottom:6px;" }, [
+            h("input", { class: "input", style: "flex:1;", placeholder: "\u8F93\u5165\u5173\u952E\u8BCD\uFF0C\u81EA\u52A8\u641C\u7D22", value: this.kw, oninput: (e) => this.onKwInput(e), onkeyup: (e) => {
+              if (e.key === "Enter") this.search(1);
+            } }),
+            this.kw ? h("button", { class: "btn btn-sm", onclick: () => this.clearKw() }, "\u6E05\u9664") : null,
+            h("button", { class: "btn btn-primary", disabled: this.loading, onclick: () => this.search(1) }, this.loading ? "\u641C\u7D22\u4E2D\u2026" : "\u641C\u7D22"),
+            h("button", { class: "btn btn-sm", disabled: this.loading || this.page <= 1, onclick: () => this.search(this.page - 1) }, "\u4E0A\u4E00\u9875"),
+            h("button", { class: "btn btn-sm", disabled: this.loading || this.page >= this.pageCount, onclick: () => this.search(this.page + 1) }, "\u4E0B\u4E00\u9875")
+          ]),
+          this.recent.length && !this.results.length ? h("div", { style: "margin-bottom:6px;" }, this.recent.map((kw) => h("span", { key: kw, class: "rcjm-recent", onclick: () => {
+            this.kw = kw;
+            this.search(1);
+          }, title: "\u70B9\u51FB\u641C\u7D22" }, kw))) : null
         ]) : null;
         const statusLine = this.okMsg ? h("p", { style: "color:var(--success);font-size:12px;margin:4px 0;" }, this.okMsg) : null;
         const body = this.tab === "album" || this.tab === "read" ? v : grid;

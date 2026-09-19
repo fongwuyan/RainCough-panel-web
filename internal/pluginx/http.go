@@ -448,7 +448,7 @@ func (x *PluginX) ServePluginFile(w http.ResponseWriter, r *http.Request, name, 
 		w.Header().Set("Content-Type", ct)
 	}
 	if w.Header().Get("Cache-Control") == "" {
-		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
 	}
 	http.ServeFile(w, r, filepath.Join(base, clean))
 }
