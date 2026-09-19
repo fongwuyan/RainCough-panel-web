@@ -18772,6 +18772,7 @@ ${codeFrame}` : message);
           loading: false,
           loadingMore: false,
           dlBusy: false,
+          descOpen: false,
           err: "",
           okMsg: "",
           page: 1,
@@ -18901,6 +18902,16 @@ ${codeFrame}` : message);
             this.dlBusy = false;
             this.okMsg = "";
           }, 1500);
+        },
+        async cancelDownload(aid) {
+          this.err = "";
+          try {
+            const r = await ctx.invoke("jmcomic.download.cancel", { aid });
+            this.dl = { ...this.dl || {}, status: r && r.status === "cancelling" ? "cancelling" : "cancelled" };
+            this.pollDl(aid, false);
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
         },
         async openChapter(cid, aid) {
           if (this.dl.status !== "completed") {
@@ -19047,11 +19058,13 @@ ${codeFrame}` : message);
         let v = null;
         if (this.tab === "album" && this.album) {
           const a = this.album, dl = this.dl, done = dl.status === "completed";
+          const cancelling = dl.status === "cancelling" || dl.status === "downloading" && dl.cancel;
+          const cancelled = dl.status === "cancelled";
           const cover = this.coverMap[a.id];
           const pct = dl.total ? Math.min(100, Math.round((dl.downloaded || 0) / dl.total * 100)) : 0;
           const first = (a.chapters || [])[0];
           const chapters = (a.chapters || []).map((c, ci) => h("div", { key: c.cid, class: "rcjm-ch" }, [
-            h("span", null, "\u7B2C " + (ci + 1) + " \u8BDD" + (c.name && c.name !== "\u7B2C" + (ci + 1) + "\u8BDD" ? " \xB7 " + c.name : "")),
+            h("span", null, "\u7B2C " + (ci + 1) + " \u8BDD" + (c.name && !("\u7B2C" + (ci + 1) + "\u8BDD").includes(c.name) ? " \xB7 " + c.name : "")),
             h("button", { class: "btn btn-sm" + (done ? " btn-primary" : ""), disabled: !done, onclick: () => this.openChapter(c.cid, c.aid) }, done ? "\u9605\u8BFB" : "\u9700\u4E0B\u8F7D")
           ]));
           const statItems = [];
@@ -19059,49 +19072,71 @@ ${codeFrame}` : message);
           if (a.likes) statItems.push("\u70B9\u8D5E " + a.likes);
           if (a.comment_count) statItems.push("\u8BC4\u8BBA " + a.comment_count);
           if (a.page_count) statItems.push("\u5168\u672C " + a.page_count + " \u9875");
-          const dlBlock = done ? h("div", { style: "display:flex;align-items:center;gap:10px;padding:8px 0;flex-wrap:wrap;" }, [
-            h("span", { style: "color:var(--success);font-size:13px;" }, "\u5DF2\u4E0B\u8F7D"),
-            h("span", { class: "faint", style: "font-size:12px;" }, (dl.cached || dl.total || 0) + " \u9875"),
-            first ? h("button", { class: "btn btn-primary btn-sm", onclick: () => this.openChapter(first.cid, first.aid) }, "\u5F00\u59CB\u9605\u8BFB\uFF08\u7B2C 1 \u8BDD\uFF09") : null,
-            h("button", { class: "btn btn-sm", onclick: () => this.pollDl(a.id, true) }, "\u5237\u65B0\u72B6\u6001")
-          ]) : h("div", { class: "section", style: "margin:10px 0;padding:12px;" }, [
-            h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;" }, [
-              h("div", null, [
-                h("div", { style: "font-size:13px;color:var(--text-muted);" }, dl.total ? "\u6B63\u5728\u4E0B\u8F7D: " + (dl.downloaded || 0) + "/" + dl.total + " \u9875" : "\u5C1A\u672A\u4E0B\u8F7D\uFF0C\u4E0B\u8F7D\u540E\u89E3\u9501\u7AE0\u8282\u4E0E\u9605\u8BFB"),
-                dl.total ? h("div", { class: "faint", style: "font-size:11px;margin-top:2px;" }, "\u5269\u4F59 " + Math.max(0, dl.total - (dl.downloaded || 0)) + " \u9875 \xB7 " + pct + "%") : null
-              ]),
-              h("button", { class: "btn btn-primary", disabled: this.dlBusy, onclick: () => this.startDownload(a.id) }, this.dlBusy ? "\u63D0\u4EA4\u4E2D\u2026" : "\u5148\u4E0B\u8F7D\u672C\u5B50")
-            ]),
-            dl.total ? h("div", { class: "rcjm-bar" }, h("div", { style: "width:" + pct + "%" })) : null
-          ]);
-          const related = (a.related || []).slice(0, 6);
-          v = h("div", null, [
-            h("div", { class: "section", style: "padding:14px;" }, [
-              h("div", { class: "flex", style: "gap:14px;align-items:flex-start;" }, [
-                cover ? h("img", { src: cover, style: "width:138px;height:196px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);" }) : h("div", { class: "rcjm-skel", style: "width:138px;height:196px;border-radius:8px;" }),
-                h("div", { style: "flex:1;min-width:0;" }, [
-                  h("h3", { style: "margin:0;font-size:17px;line-height:1.4;" }, a.name),
-                  h("p", { class: "faint", style: "font-size:12px;margin:5px 0;" }, "\u4F5C\u8005 " + (a.author || "\u672A\u77E5") + " \xB7 ID " + a.id + " \xB7 " + (a.chapters || []).length + " \u8BDD"),
-                  statItems.length ? h("p", { style: "font-size:12px;color:var(--text-muted);margin:4px 0;" }, statItems.join(" \xB7 ")) : null,
-                  (a.tags || []).length ? h("div", null, (a.tags || []).slice(0, 10).map((tg) => h("span", { class: "rcjm-tag" }, tg))) : null,
-                  a.description ? h("p", { class: "faint", style: "font-size:12px;margin-top:6px;line-height:1.6;white-space:pre-wrap;" }, a.description.length > 220 ? a.description.slice(0, 220) + "\u2026" : a.description) : null
+          const desc = a.description || "";
+          const descShort = desc.length > 220;
+          const showDesc = descShort && !this.descOpen ? desc.slice(0, 220) + "\u2026" : desc;
+          let dlBlock;
+          if (done) {
+            dlBlock = h("div", { style: "display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(46,158,91,.08);border:1px solid rgba(46,158,91,.35);border-radius:8px;flex-wrap:wrap;" }, [
+              h("span", { style: "color:var(--success);font-size:13px;font-weight:600;" }, "\u5DF2\u4E0B\u8F7D"),
+              h("span", { class: "faint", style: "font-size:12px;" }, (dl.cached || dl.total || 0) + " \u9875"),
+              first ? h("button", { class: "btn btn-primary btn-sm", onclick: () => this.openChapter(first.cid, first.aid) }, "\u5F00\u59CB\u9605\u8BFB\uFF08\u7B2C 1 \u8BDD\uFF09") : null
+            ]);
+          } else if (dl.total) {
+            dlBlock = h("div", { style: "padding:10px 12px;background:rgba(58,120,168,.08);border:1px solid rgba(58,120,168,.35);border-radius:8px;" }, [
+              h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;" }, [
+                h("div", null, [
+                  h("div", { style: "font-size:13px;color:var(--text-muted);" }, cancelling ? "\u6B63\u5728\u53D6\u6D88\u2026" : "\u6B63\u5728\u4E0B\u8F7D: " + (dl.downloaded || 0) + "/" + dl.total + " \u9875"),
+                  h("div", { class: "faint", style: "font-size:11px;margin-top:2px;" }, cancelling ? "\u5F53\u524D\u6574\u672C\u6536\u5C3E\u540E\u5C06\u6E05\u7406\uFF0C\u7A0D\u5019" : "\u5269\u4F59 " + Math.max(0, dl.total - (dl.downloaded || 0)) + " \u9875 \xB7 " + pct + "%")
+                ]),
+                h("div", { class: "flex", style: "gap:6px;" }, [
+                  h("button", { class: "btn btn-sm btn-danger", disabled: cancelling, onclick: () => this.cancelDownload(a.id) }, cancelling ? "\u53D6\u6D88\u4E2D\u2026" : "\u53D6\u6D88\u4E0B\u8F7D")
                 ])
-              ])
-            ]),
-            h("div", { class: "flex", style: "gap:6px;margin:8px 0;" }, [
+              ]),
+              h("div", { class: "rcjm-bar" }, h("div", { style: "width:" + pct + "%" }))
+            ]);
+          } else {
+            dlBlock = h("div", { style: "padding:10px 12px;background:rgba(217,82,78,.06);border:1px solid rgba(217,82,78,.3);border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;" }, [
+              h("span", { style: "font-size:13px;color:var(--text-muted);" }, cancelled ? "\u5DF2\u53D6\u6D88\u672C\u6B21\u4E0B\u8F7D\uFF0C\u53EF\u91CD\u65B0\u5F00\u59CB" : "\u5C1A\u672A\u4E0B\u8F7D\uFF0C\u4E0B\u8F7D\u540E\u89E3\u9501\u7AE0\u8282\u4E0E\u9605\u8BFB"),
+              h("button", { class: "btn btn-primary", disabled: this.dlBusy, onclick: () => this.startDownload(a.id) }, this.dlBusy ? "\u63D0\u4EA4\u4E2D\u2026" : "\u5148\u4E0B\u8F7D\u672C\u5B50")
+            ]);
+          }
+          const related = (a.related || []).slice(0, 8);
+          v = h("div", null, [
+            // 顶栏(sticky)
+            h("div", { class: "rcjm-sticky" }, [
               h("button", { class: "btn btn-sm", onclick: () => {
                 clearInterval(this.dlTimer);
                 this.tab = "search";
-              } }, "\u8FD4\u56DE\u5217\u8868")
+              } }, "\u8FD4\u56DE\u5217\u8868"),
+              h("span", { class: "faint", style: "font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%;" }, this.kw ? this.kw + " \u7684\u641C\u7D22\u7ED3\u679C" : "\u672C\u5B50\u5E93"),
+              h("span", { class: "faint", style: "font-size:12px;" }, "> \u672C\u5B50\u8BE6\u60C5"),
+              h("button", { class: "btn btn-sm", style: "margin-left:auto;", onclick: () => this.pollDl(a.id, true) }, "\u5237\u65B0\u72B6\u6001")
+            ]),
+            // 信息主卡
+            h("div", { class: "section", style: "padding:14px;" }, [
+              h("div", { class: "flex", style: "gap:14px;align-items:flex-start;" }, [
+                cover ? h("img", { src: cover, style: "width:134px;height:200px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);" }) : h("div", { class: "rcjm-skel", style: "width:134px;height:200px;border-radius:8px;" }),
+                h("div", { style: "flex:1;min-width:0;" }, [
+                  h("h3", { style: "margin:0;font-size:17px;line-height:1.45;" }, a.name),
+                  h("p", { class: "faint", style: "font-size:12px;margin:6px 0;" }, "\u4F5C\u8005 " + (a.author || "\u672A\u77E5") + " \xB7 ID " + a.id + " \xB7 " + (a.chapters || []).length + " \u8BDD"),
+                  statItems.length ? h("p", { style: "font-size:12px;color:var(--text-muted);margin:4px 0;" }, statItems.join(" \xB7 ")) : null,
+                  (a.tags || []).length ? h("div", null, (a.tags || []).slice(0, 10).map((tg) => h("span", { class: "rcjm-tag" }, tg))) : null,
+                  desc ? h("div", { style: "margin-top:6px;" }, [
+                    h("p", { class: "faint", style: "font-size:12px;line-height:1.65;white-space:pre-wrap;margin:0;" }, showDesc),
+                    descShort ? h("button", { class: "btn btn-sm btn-ghost", style: "margin-top:2px;", onclick: () => this.descOpen = !this.descOpen }, this.descOpen ? "\u6536\u8D77" : "\u5C55\u5F00") : null
+                  ]) : null
+                ])
+              ])
             ]),
             dlBlock,
-            h("div", { class: "section", style: "padding:4px 12px 8px;" }, [
+            h("div", { class: "section", style: "padding:4px 12px 8px;margin-top:10px;" }, [
               h("div", { class: "section-title", style: "margin-top:6px;" }, "\u7AE0\u8282\uFF08" + (a.chapters || []).length + "\uFF09" + (done ? "" : " \xB7 \u4E0B\u8F7D\u540E\u89E3\u9501")),
               chapters
             ]),
-            related.length ? h("div", { class: "section", style: "padding:4px 12px 8px;margin-top:8px;" }, [
+            related.length ? h("div", { class: "section", style: "padding:4px 12px 8px;margin-top:10px;" }, [
               h("div", { class: "section-title", style: "margin-top:6px;" }, "\u76F8\u5173\u63A8\u8350"),
-              h("div", { style: "display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;" }, related.map((r) => h("button", { key: r.id, class: "btn btn-sm", onclick: () => this.openAlbum(r.id) }, (r.name || r.id).slice(0, 14) + (r.name && r.name.length > 14 ? "\u2026" : ""))))
+              h("div", { style: "display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;" }, related.map((r) => h("button", { key: r.id, class: "btn btn-sm", onclick: () => this.openAlbum(r.id) }, (r.name || r.id).slice(0, 16) + ((r.name || r.id).length > 16 ? "\u2026" : ""))))
             ]) : null
           ]);
         }

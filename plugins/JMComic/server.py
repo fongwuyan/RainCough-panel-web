@@ -449,8 +449,16 @@ def download_one(aid):
     tmp = os.path.join(base, f'_tmp_{aid}')
     tmp_album = os.path.join(tmp, aid)
     dst = os.path.join(base, aid)
+
+    def _cancelled():
+        return _manager.is_cancelled(aid) if _manager else False
+
     ok = False
     try:
+        if _cancelled():
+            if os.path.isdir(tmp):
+                shutil.rmtree(tmp, ignore_errors=True)
+            return False
         detail = jm().get_album_detail(aid)
         lib = load_library()
         entry = lib.get(aid, {})
@@ -472,6 +480,10 @@ def download_one(aid):
         opt = JmOption.default()
         opt.dir_rule = DirRule('Bd_Aid', tmp)
         opt.download_album(aid)
+        if _cancelled():
+            if os.path.isdir(tmp):
+                shutil.rmtree(tmp, ignore_errors=True)
+            return False
         if not os.path.isdir(tmp_album):
             return False
         dest = os.path.join(dst, aid)
@@ -539,6 +551,27 @@ class DownloadManager:
             self._queue.append(aid)
             self._ensure_worker_locked()
         return 'queued'
+
+    def cancel(self, aid):
+        """取消下载: 队列中立即移除; 下载中标记取消(整本收尾后不落地)。"""
+        aid = str(aid)
+        with self._lock:
+            t = self._tasks.get(aid)
+            if not t:
+                return 'not_found'
+            if t['status'] == 'downloading':
+                t['cancel'] = True
+                return 'cancelling'
+            if t['status'] == 'queued' and aid in self._queue:
+                self._queue.remove(aid)
+                t['status'] = 'cancelled'
+                return 'cancelled'
+            return t['status']
+
+    def is_cancelled(self, aid):
+        with self._lock:
+            t = self._tasks.get(str(aid))
+            return bool(t and t.get('cancel'))
 
     def status(self, aid):
         with self._lock:
@@ -644,15 +677,27 @@ class DownloadManager:
                     t['status'] = 'downloading'
                 if aid in self._batch['results']:
                     self._batch['results'][aid]['status'] = 'downloading'
+            if t and t.get('cancel'):
+                with self._lock:
+                    t['status'] = 'cancelled'
+                    self._current = None
+                    try:
+                        tmp = os.path.join(pick_dir(), f'_tmp_{aid}')
+                        if os.path.isdir(tmp):
+                            shutil.rmtree(tmp, ignore_errors=True)
+                    except Exception:
+                        pass
+                continue
             ok = download_one(aid)
             with self._lock:
                 self._current = None
                 t = self._tasks.get(aid)
+                cancelled = bool(t and t.get('cancel'))
                 if t:
-                    t['status'] = 'completed' if ok else 'failed'
+                    t['status'] = 'cancelled' if cancelled else ('completed' if ok else 'failed')
                 if aid in self._batch['results']:
-                    self._batch['results'][aid]['status'] = 'completed' if ok else 'failed'
-                    if ok:
+                    self._batch['results'][aid]['status'] = 'cancelled' if cancelled else ('completed' if ok else 'failed')
+                    if ok and not cancelled:
                         self._batch['done'] += 1
                     else:
                         self._batch['fail'] += 1

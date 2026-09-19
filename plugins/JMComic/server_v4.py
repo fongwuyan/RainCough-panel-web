@@ -173,6 +173,21 @@ def jm_download(params):
     return {'message': '开始下载 %s' % aid, 'status': 'downloading'}
 
 
+@rc.interface("jmcomic.download.cancel")
+def jm_download_cancel(params):
+    import shutil
+    aid = _s(params, 'aid')
+    if not aid or not aid.isdigit():
+        _err('缺少漫画ID')
+    r = M._manager.cancel(aid)
+    # 清理临时目录(下载中被取消时清残留)
+    for base in M.storage_paths():
+        tmp = os.path.join(base, '_tmp_%s' % aid)
+        if os.path.isdir(tmp):
+            shutil.rmtree(tmp, ignore_errors=True)
+    return {'ok': True, 'status': r}
+
+
 @rc.interface("jmcomic.download.status")
 def jm_download_status(params):
     aid = _s(params, 'aid')
@@ -200,6 +215,8 @@ def jm_download_status(params):
     task = M._manager.status(aid)
     if task and task['status'] in ('queued', 'downloading'):
         status = 'downloading'
+    elif task and task['status'] == 'cancelled':
+        status = 'cancelled'
     elif task and task['status'] == 'failed':
         status = 'failed'
     elif cached >= total and total > 0:
@@ -365,7 +382,7 @@ if __name__ == "__main__":
         frontend={"pages": [{"path": "", "title": "JMComic"}]},
         iface_ids=["jmcomic.search", "jmcomic.meta", "jmcomic.album", "jmcomic.chapter",
                    "jmcomic.cover", "jmcomic.image", "jmcomic.download", "jmcomic.download.status",
-                   "jmcomic.library.list", "jmcomic.library.delete",
+                   "jmcomic.download.cancel", "jmcomic.library.list", "jmcomic.library.delete",
                    "jmcomic.config.get", "jmcomic.config.save", "jmcomic.info"],
         plugin_dir=os.path.dirname(os.path.abspath(__file__)),
     )

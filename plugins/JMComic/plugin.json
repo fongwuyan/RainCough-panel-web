@@ -105,6 +105,12 @@
       "visibility": "all",
       "version": "1",
       "description": "本子封面(缓存 cache/ 直出)"
+    },
+    {
+      "id": "jmcomic.download.cancel",
+      "visibility": "main",
+      "version": "1",
+      "description": "取消下载(排队立即/下载中标记后清残留)"
     }
   ]
 }
