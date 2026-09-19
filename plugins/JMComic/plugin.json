@@ -101,10 +101,10 @@
       "description": "按需取单张漫画图(base64)"
     },
     {
-      "id": "jmcomic.download.status",
+      "id": "jmcomic.cover",
       "visibility": "all",
       "version": "1",
-      "description": "下载进度"
+      "description": "本子封面(缓存 cache/ 直出)"
     }
   ]
 }

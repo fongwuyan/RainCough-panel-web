@@ -18739,7 +18739,25 @@ ${codeFrame}` : message);
   function mount(container, ctx) {
     const App = {
       data() {
-        return { tab: "search", kw: "", results: [], lib: [], album: null, chapter: null, pages: [], loadIdx: 6, err: "", page: 1, pageCount: 1, dl: {} };
+        return {
+          tab: "search",
+          kw: "",
+          results: [],
+          lib: [],
+          album: null,
+          dl: { status: "unknown" },
+          chapter: null,
+          pages: [],
+          loadIdx: 6,
+          pageIdx: 0,
+          view: "flow",
+          coverMap: {},
+          dlTimer: null,
+          err: "",
+          page: 1,
+          pageCount: 1,
+          loadingCover: /* @__PURE__ */ new Set()
+        };
       },
       methods: {
         async search(p2 = 1) {
@@ -18750,9 +18768,28 @@ ${codeFrame}` : message);
             this.results = r && r.items || [];
             this.page = p2;
             this.pageCount = r && r.page_count || 1;
+            this.loadCovers();
           } catch (e) {
             this.err = e && e.message || e;
           }
+        },
+        // 封面懒加载(并发≤4)
+        loadCovers() {
+          const queue2 = this.results.slice(0, 24).map((it) => String(it.id)).filter((id) => !this.coverMap[id] && !this.loadingCover.has(id));
+          const run = async () => {
+            while (queue2.length) {
+              const id = queue2.shift();
+              if (this.coverMap[id]) continue;
+              this.loadingCover.add(id);
+              try {
+                const r = await ctx.invoke("jmcomic.cover", { aid: id });
+                if (r && r.cover) this.coverMap[id] = r.cover;
+              } catch (e) {
+              }
+              this.loadingCover.delete(id);
+            }
+          };
+          for (let i = 0; i < 4 && queue2.length; i++) run();
         },
         async openAlbum(aid) {
           this.err = "";
@@ -18761,59 +18798,120 @@ ${codeFrame}` : message);
             this.tab = "album";
             this.chapter = null;
             this.pages = [];
+            this.pageIdx = 0;
+            this.view = "flow";
+            this.pollDl(aid, true);
+            if (!this.coverMap[aid]) {
+              try {
+                const r = await ctx.invoke("jmcomic.cover", { aid });
+                if (r && r.cover) this.coverMap[aid] = r.cover;
+              } catch (e) {
+              }
+            }
           } catch (e) {
             this.err = e && e.message || e;
           }
         },
-        async download(aid) {
-          try {
-            const r = await ctx.invoke("jmcomic.download", { aid });
-            this.dl[aid] = r.message;
-          } catch (e) {
-            this.err = e && e.message || e;
+        async pollDl(aid, once = false) {
+          clearInterval(this.dlTimer);
+          const tick = async () => {
+            try {
+              const r = await ctx.invoke("jmcomic.download.status", { aid });
+              this.dl = r || {};
+              if (this.dl.status === "completed" || this.dl.status === "failed") clearInterval(this.dlTimer);
+            } catch (e) {
+              clearInterval(this.dlTimer);
+            }
+          };
+          await tick();
+          if (!once && this.dl.status !== "completed" && this.dl.status !== "failed") {
+            this.dlTimer = setInterval(tick, 2e3);
           }
         },
-        async dlStatus(aid) {
+        async startDownload(aid) {
+          this.err = "";
           try {
-            const r = await ctx.invoke("jmcomic.download.status", { aid });
-            this.dl[aid] = "\u5DF2\u5B8C\u6210 " + (r.downloaded || 0) + "/" + (r.total || 0) + " (" + r.status + ")";
+            await ctx.invoke("jmcomic.download", { aid });
+            this.pollDl(aid, false);
           } catch (e) {
             this.err = e && e.message || e;
           }
         },
         async openChapter(cid, aid) {
+          if (this.dl.status !== "completed") {
+            this.err = "\u8BF7\u5148\u5B8C\u6210\u4E0B\u8F7D\u518D\u9605\u8BFB";
+            return;
+          }
           this.err = "";
           try {
             this.chapter = await ctx.invoke("jmcomic.chapter", { cid, aid });
             this.pages = [];
+            this.pageIdx = 0;
             this.loadIdx = 6;
             this.tab = "read";
-            this.loadPages();
+            this.view === "flow" ? this.loadMore() : this.loadOnePage();
           } catch (e) {
             this.err = e && e.message || e;
           }
         },
-        async loadPages() {
+        setView(v) {
+          this.view = v;
+          this.pageIdx = 0;
+          if (v === "single") this.loadOnePage();
+        },
+        async loadOnePage() {
+          const ch = this.chapter || {};
+          const arr = ch.page_arr || [];
+          if (!arr.length) return;
+          const idx = Math.min(this.pageIdx, arr.length - 1);
+          const f = arr[idx];
+          if (this.pages[idx]) return;
+          try {
+            const r = await ctx.invoke("jmcomic.image", { aid: this.album.id, cid: ch.id, filename: f });
+            this.pages[idx] = r.data;
+          } catch (e) {
+          }
+        },
+        async loadMore() {
           const ch = this.chapter || {};
           const arr = ch.page_arr || [];
           const batch2 = arr.slice(this.pages.length, this.loadIdx);
           for (const f of batch2) {
             try {
-              const r = await ctx.invoke("jmcomic.image", { aid: ch.id || this.album.id, cid: ch.id, filename: f });
-              this.pages.push({ name: f, data: r.data });
+              const r = await ctx.invoke("jmcomic.image", { aid: this.album.id, cid: ch.id, filename: f });
+              this.pages.push(r.data);
             } catch (e) {
-              this.pages.push({ name: f, data: "" });
+              this.pages.push("");
             }
           }
           this.loadIdx += 6;
         },
+        prevPage() {
+          if (this.pageIdx > 0) {
+            this.pageIdx--;
+            this.loadOnePage();
+          }
+        },
+        nextPage() {
+          const n = ((this.chapter || {}).page_arr || []).length;
+          if (this.pageIdx < n - 1) {
+            this.pageIdx++;
+            this.loadOnePage();
+          }
+        },
         async loadLib() {
           try {
             const r = await ctx.invoke("jmcomic.library.list", { page: 1, page_size: 60 });
-            this.lib = r && r.items || [];
+            this.lib = (r && r.items || []).map((it) => ({ ...it, id: String(it.id ?? it.aid ?? "") }));
+            this.loadCoversFromLib();
           } catch (e) {
             this.err = e && e.message || e;
           }
+        },
+        loadCoversFromLib() {
+          this.results = this.lib;
+          this.loadCovers();
+          this.results = [];
         },
         async rm(aid) {
           try {
@@ -18822,68 +18920,137 @@ ${codeFrame}` : message);
           } catch (e) {
             this.err = e && e.message || e;
           }
+        },
+        async download(aid) {
+          try {
+            const r = await ctx.invoke("jmcomic.download", { aid });
+            this.err = r.message;
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
+        },
+        async dlStatus(aid) {
+          try {
+            const r = await ctx.invoke("jmcomic.download.status", { aid });
+            this.err = "\u5DF2\u5B8C\u6210 " + (r.downloaded || 0) + "/" + (r.total || 0) + " (" + r.status + ")";
+          } catch (e) {
+            this.err = e && e.message || e;
+          }
         }
       },
-      mounted() {
-        this.loadLib();
+      unmounted() {
+        clearInterval(this.dlTimer);
       },
       render() {
         const t = (k, l) => h("button", { class: "btn btn-sm" + (this.tab === k ? " btn-primary" : ""), onclick: () => {
           this.tab = k;
           if (k === "lib") this.loadLib();
         } }, l);
-        const list = this.tab === "album" && this.album ? [{ id: this.album.id, name: this.album.name }] : this.tab === "search" ? this.results : this.lib;
-        const rows = list.map((it) => {
-          const id = String(it.id ?? it.aid ?? "");
-          return h("tr", { key: id }, [
-            h("td", { class: "mono" }, id),
-            h("td", null, it.name + (it.author ? " \xB7 " + it.author : "")),
-            h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
-              h("button", { class: "btn btn-sm", onclick: () => this.openAlbum(id) }, "\u8BE6\u60C5"),
-              this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6")] : null,
-              this.tab === "lib" ? [h("button", { class: "btn btn-sm", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(id) }, "\u5220")] : null
-            ]))
+        const gridItems = this.tab === "search" ? this.results : this.lib;
+        const grid = h(
+          "div",
+          { class: "card-grid", style: "grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;" },
+          gridItems.map((it) => {
+            const id = String(it.id ?? it.aid ?? "");
+            const cover = this.coverMap[id];
+            return h("div", { key: id, class: "card", style: "padding:6px;" }, [
+              h("a", { style: "cursor:pointer;", onclick: () => this.openAlbum(id) }, [
+                cover ? h("img", { src: cover, loading: "lazy", style: "width:100%;height:150px;object-fit:cover;display:block;background:#222;" }) : h("div", { style: "width:100%;height:150px;background:#1c2128;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px;" }, this.loadingCover.has(id) ? "\u52A0\u8F7D\u5C01\u9762\u2026" : "\u672A\u52A0\u8F7D")
+              ]),
+              h("div", { style: "font-size:12px;margin-top:4px;height:34px;overflow:hidden;" }, it.name || "ID " + id),
+              h("div", { class: "faint", style: "font-size:11px;" }, (it.author || "") + " \xB7 " + id),
+              h("div", { class: "flex", style: "gap:4px;margin-top:4px;" }, [
+                h("button", { class: "btn btn-sm", onclick: () => this.openAlbum(id) }, "\u8BE6\u60C5"),
+                this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6")] : [h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(id) }, "\u5220")]
+              ])
+            ]);
+          })
+        );
+        let v = null;
+        if (this.tab === "album" && this.album) {
+          const a = this.album, dl = this.dl, done = dl.status === "completed";
+          const cover = this.coverMap[a.id];
+          const chapters = (a.chapters || []).map((c) => h("div", { key: c.cid, style: "padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;align-items:center;" }, [
+            h("span", null, c.name || "\u7AE0\u8282 " + c.cid),
+            h("button", { class: "btn btn-sm", disabled: !done, onclick: () => this.openChapter(c.cid, c.aid) }, "\u9605\u8BFB")
+          ]));
+          const dlBlock = done ? h("p", { style: "color:var(--success);font-size:13px;" }, "\u2705 \u5DF2\u4E0B\u8F7D(" + (dl.cached || dl.total || 0) + "\u9875)") : h("div", { class: "section", style: "margin:6px 0;" }, [
+            h("p", { style: "font-size:13px;" }, this.dl.status === "downloading" || this.dl.total ? "\u4E0B\u8F7D\u4E2D: " + (this.dl.downloaded || 0) + "/" + (this.dl.total || "?") + " \u9875" : "\u672C\u5B50\u5C1A\u672A\u4E0B\u8F7D\uFF0C\u4E0B\u8F7D\u540E\u624D\u80FD\u9605\u8BFB\u7AE0\u8282\u4E0E\u56FE\u7247"),
+            h("button", { class: "btn btn-primary", onclick: () => this.startDownload(a.id) }, "\u5148\u4E0B\u8F7D\u672C\u5B50"),
+            this.dl.total ? h("div", { style: "height:4px;background:#222;border-radius:2px;margin-top:6px;" }, h("div", { style: "height:4px;width:" + Math.min(100, (this.dl.downloaded || 0) / Math.max(1, this.dl.total) * 100) + "%;background:var(--accent);" })) : null
           ]);
-        });
-        return h("div", null, [
-          h("div", { class: "section-title", style: "display:flex;justify-content:space-between;" }, [
-            h("span", null, "JMComic"),
-            h("div", { class: "flex", style: "gap:6px;" }, [t("search", "\u641C\u7D22"), t("lib", "\u672C\u5B50\u5E93")])
-          ]),
-          this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null,
-          this.tab === "search" ? h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
-            h("input", { class: "input", style: "flex:1;", placeholder: "\u5173\u952E\u8BCD", value: this.kw, oninput: (e) => this.kw = e.target.value, onkeyup: (e) => {
-              if (e.key === "Enter") this.search();
-            } }),
-            h("button", { class: "btn", onclick: () => this.search() }, "\u641C\u7D22"),
-            h("button", { class: "btn btn-sm", disabled: this.page <= 1, onclick: () => this.search(this.page - 1) }, "\u4E0A\u4E00\u9875"),
-            h("button", { class: "btn btn-sm", disabled: this.page >= this.pageCount, onclick: () => this.search(this.page + 1) }, "\u4E0B\u4E00\u9875")
-          ]) : null,
-          this.tab === "album" && this.album ? h("div", { class: "section", style: "margin-bottom:8px;" }, [
-            h("h3", null, this.album.name),
-            h("p", { class: "faint", style: "font-size:12px;" }, "\u4F5C\u8005 " + (this.album.author || "\u672A\u77E5") + " \xB7 " + (this.album.tags || []).join(", ")),
-            h("button", { class: "btn btn-sm", onclick: () => this.download(this.album.id) }, "\u4E0B\u8F7D\u672C\u5B50"),
-            h("div", { class: "section-title", style: "margin-top:8px;" }, "\u7AE0\u8282"),
-            (this.album.chapters || []).map((c) => h("div", { key: c.cid, style: "padding:4px 0;border-bottom:1px solid var(--border);font-size:13px;" }, [
-              c.name || "\u7AE0\u8282 " + c.cid,
-              h("button", { class: "btn btn-sm", style: "float:right;", onclick: () => this.openChapter(c.cid, c.aid) }, "\u9605\u8BFB")
-            ]))
-          ]) : null,
-          this.tab === "read" && this.chapter ? h("div", null, [
-            h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
-              h("button", { class: "btn btn-sm", onclick: () => this.tab = "album" }, "\u8FD4\u56DE\u8BE6\u60C5"),
-              h("span", { class: "faint" }, this.pages.length + "/" + (this.chapter.page_arr || []).length + " \u9875")
+          v = h("div", null, [
+            h("div", { class: "flex", style: "gap:10px;align-items:flex-start;" }, [
+              cover ? h("img", { src: cover, style: "width:120px;height:170px;object-fit:cover;border-radius:6px;background:#222;" }) : null,
+              h("div", null, [
+                h("h3", { style: "margin:0;" }, a.name),
+                h("p", { class: "faint", style: "font-size:12px;" }, "\u4F5C\u8005 " + (a.author || "\u672A\u77E5") + " \xB7 " + (a.tags || []).join(" / ")),
+                h("p", { class: "faint", style: "font-size:12px;" }, "ID " + a.id + " \xB7 \u5171 " + chapters.length + " \u7AE0")
+              ])
             ]),
-            this.pages.map((pg) => pg.data ? h("img", { key: pg.name, src: pg.data, loading: "lazy", style: "width:100%;max-width:520px;display:block;margin:6px auto;border:1px solid var(--border);border-radius:6px;" }) : null),
-            this.pages.length < (this.chapter.page_arr || []).length ? h("button", { class: "btn", style: "margin-top:6px;", onclick: () => this.loadPages() }, "\u52A0\u8F7D\u66F4\u591A") : h("p", { class: "hint" }, "\u5DF2\u5168\u90E8\u52A0\u8F7D")
-          ]) : null,
-          (this.tab === "search" || this.tab === "lib") && !this.err ? h("table", { class: "table" }, [h("thead", null, h("tr", null, ["ID", "\u540D\u79F0", "\u64CD\u4F5C"].map((x) => h("th", null, x)))), h("tbody", null, rows)]) : null
+            h("div", { class: "flex", style: "gap:6px;margin:8px 0;" }, [
+              h("button", { class: "btn btn-sm", onclick: () => {
+                this.tab = "search";
+              } }, "\u8FD4\u56DE"),
+              h("button", { class: "btn btn-sm", onclick: () => this.pollDl(a.id, false) }, "\u5237\u65B0\u72B6\u6001")
+            ]),
+            dlBlock,
+            h("div", { class: "section-title", style: "margin-top:6px;" }, "\u7AE0\u8282" + (done ? "" : "(\u4E0B\u8F7D\u540E\u89E3\u9501)")),
+            chapters
+          ]);
+        }
+        if (this.tab === "read" && this.chapter) {
+          const ch = this.chapter, arr = ch.page_arr || [];
+          const toolbar = h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center;" }, [
+            h("button", { class: "btn btn-sm", onclick: () => {
+              this.tab = "album";
+            } }, "\u8FD4\u56DE\u8BE6\u60C5"),
+            h("span", { class: "faint", style: "font-size:12px;" }, ch.name || "\u7AE0\u8282 " + ch.id + " \xB7 " + arr.length + " \u9875"),
+            h("button", { class: "btn btn-sm" + (this.view === "flow" ? " btn-primary" : ""), onclick: () => this.setView("flow") }, "\u6EDA\u52A8\u6A21\u5F0F"),
+            h("button", { class: "btn btn-sm" + (this.view === "single" ? " btn-primary" : ""), onclick: () => this.setView("single") }, "\u5355\u9875\u6A21\u5F0F")
+          ]);
+          if (this.view === "flow") {
+            v = h("div", null, [
+              toolbar,
+              this.pages.map((d, i) => d ? h("img", { key: i, src: d, loading: "lazy", style: "width:100%;max-width:520px;display:block;margin:6px auto;border:1px solid var(--border);border-radius:6px;" }) : null),
+              this.pages.length < arr.length ? h("button", { class: "btn", style: "display:block;margin:6px auto;", onclick: () => this.loadMore() }, "\u52A0\u8F7D\u66F4\u591A (" + this.pages.length + "/" + arr.length + ")") : h("p", { class: "hint" }, "\u5DF2\u5168\u90E8\u52A0\u8F7D")
+            ]);
+          } else {
+            const img = this.pages[this.pageIdx];
+            v = h("div", null, [
+              toolbar,
+              h("div", { style: "display:flex;justify-content:center;align-items:center;gap:10px;" }, [
+                h("button", { class: "btn btn-sm", disabled: this.pageIdx <= 0, onclick: () => this.prevPage() }, "\u4E0A\u4E00\u9875"),
+                h("span", { class: "faint", style: "font-size:12px;" }, this.pageIdx + 1 + " / " + arr.length),
+                h("button", { class: "btn btn-sm", disabled: this.pageIdx >= arr.length - 1, onclick: () => this.nextPage() }, "\u4E0B\u4E00\u9875")
+              ]),
+              img ? h("img", { src: img, style: "width:100%;max-width:560px;display:block;margin:8px auto;border:1px solid var(--border);border-radius:6px;" }) : h("p", { class: "hint", style: "text-align:center;padding:20px;" }, "\u52A0\u8F7D\u4E2D\u2026")
+            ]);
+          }
+        }
+        const head = h("div", { class: "section-title", style: "display:flex;justify-content:space-between;" }, [
+          h("span", null, "JMComic"),
+          h("div", { class: "flex", style: "gap:6px;" }, [t("search", "\u641C\u7D22"), t("lib", "\u672C\u5B50\u5E93")])
         ]);
+        const searchBar = this.tab === "search" ? h("div", { class: "flex", style: "gap:6px;margin-bottom:8px;" }, [
+          h("input", { class: "input", style: "flex:1;", placeholder: "\u5173\u952E\u8BCD", value: this.kw, oninput: (e) => this.kw = e.target.value, onkeyup: (e) => {
+            if (e.key === "Enter") this.search();
+          } }),
+          h("button", { class: "btn", onclick: () => this.search() }, "\u641C\u7D22"),
+          h("button", { class: "btn btn-sm", disabled: this.page <= 1, onclick: () => this.search(this.page - 1) }, "\u4E0A\u4E00\u9875"),
+          h("button", { class: "btn btn-sm", disabled: this.page >= this.pageCount, onclick: () => this.search(this.page + 1) }, "\u4E0B\u4E00\u9875")
+        ]) : null;
+        const body = this.tab === "album" || this.tab === "read" ? v : grid;
+        return h("div", null, [head, this.err ? h("p", { style: "color:var(--danger);font-size:12px;" }, this.err) : null, searchBar, body]);
       }
     };
     const vm = createApp(App);
+    const stop2 = () => {
+      if (App.unmounted) App.unmounted();
+      vm.unmount();
+    };
     vm.mount(container);
-    return () => vm.unmount();
+    return stop2;
   }
   function register(g) {
     g.__rcPluginV4__ = g.__rcPluginV4__ || {};

@@ -211,6 +211,50 @@ def jm_download_status(params):
     return {'aid': aid, 'total': total, 'downloaded': downloaded, 'cached': cached, 'status': status}
 
 
+@rc.interface("jmcomic.cover")
+def jm_cover(params):
+    """本子封面(本地 cache/ 优先, 缺失则在线取第 1 章第 1 页解码缓存), 返回主系统代发 URL。"""
+    aid = _s(params, 'aid')
+    if not aid or not aid.isdigit():
+        _err('缺少漫画ID')
+    _CACHE = os.path.join(M.PLUGIN_DIR, 'cache')
+
+    def _find():
+        for ext in ('jpg', 'jpeg', 'webp', 'png', 'gif'):
+            p = os.path.join(_CACHE, '%s.%s' % (aid, ext))
+            if os.path.isfile(p):
+                return p
+        return None
+
+    try:
+        p = _find()
+        if not p:
+            client = M.jm()
+            album = client.get_album_detail(aid)
+            photo_id = str(album.episode_list[0][0])
+            if photo_id == '1' and len(album.episode_list) == 1:
+                photo_id = str(album.album_id)
+            photo = client.get_photo_detail(photo_id)
+            if not photo.page_arr:
+                _err('该漫画无图片')
+            filename = photo.page_arr[0]
+            ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else 'jpg'
+            save_path = os.path.join(_CACHE, '%s.%s' % (aid, ext))
+            os.makedirs(_CACHE, exist_ok=True)
+            with M._cdn_lock:
+                p = _find()
+                if not p:
+                    data = M._download_image(aid, photo_id, filename, save_path)
+                    if not data:
+                        _err('封面下载失败')
+                    M.decode_jm_image(data, photo.scramble_id, photo_id, filename, save_path)
+                    p = save_path
+        ext = os.path.splitext(p)[1][1:] or 'jpg'
+        return {'ok': True, 'cover': '/api/plugins/JMComic/cache/%s.%s' % (aid, ext)}
+    except Exception as e:
+        _err('获取封面失败: %s' % e)
+
+
 @rc.interface("jmcomic.image")
 def jm_image(params):
     """按需取单张漫画图(本地优先, 缺失则下载+解码), 返回 base64 data URL。"""
@@ -318,7 +362,7 @@ if __name__ == "__main__":
         manifest={"label": "JMComic", "description": "禁漫搜索/阅读/库"},
         frontend={"pages": [{"path": "", "title": "JMComic"}]},
         iface_ids=["jmcomic.search", "jmcomic.meta", "jmcomic.album", "jmcomic.chapter",
-                   "jmcomic.image", "jmcomic.download", "jmcomic.download.status",
+                   "jmcomic.cover", "jmcomic.image", "jmcomic.download", "jmcomic.download.status",
                    "jmcomic.library.list", "jmcomic.library.delete",
                    "jmcomic.config.get", "jmcomic.config.save", "jmcomic.info"],
         plugin_dir=os.path.dirname(os.path.abspath(__file__)),
