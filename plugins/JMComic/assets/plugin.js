@@ -18773,9 +18773,9 @@ ${codeFrame}` : message);
             this.err = e && e.message || e;
           }
         },
-        // 封面懒加载(并发≤4)
+        // 封面懒加载(全部条目, 并发≤4)
         loadCovers() {
-          const queue2 = this.results.slice(0, 24).map((it) => String(it.id)).filter((id) => !this.coverMap[id] && !this.loadingCover.has(id));
+          const queue2 = this.results.map((it) => String(it.id)).filter((id) => !this.coverMap[id] && !this.loadingCover.has(id));
           const run = async () => {
             while (queue2.length) {
               const id = queue2.shift();
