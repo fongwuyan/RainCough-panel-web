@@ -18754,7 +18754,7 @@ ${codeFrame}` : message);
             this.err = e && e.message || e;
           }
         },
-        async album(aid) {
+        async openAlbum(aid) {
           this.err = "";
           try {
             this.album = await ctx.invoke("jmcomic.album", { aid });
@@ -18837,7 +18837,7 @@ ${codeFrame}` : message);
           h("td", { class: "mono" }, it.id),
           h("td", null, it.name + (it.author ? " \xB7 " + it.author : "")),
           h("td", null, h("div", { class: "flex", style: "gap:4px;" }, [
-            h("button", { class: "btn btn-sm", onclick: () => this.album(it.id) }, "\u8BE6\u60C5"),
+            h("button", { class: "btn btn-sm", onclick: () => this.openAlbum(it.id) }, "\u8BE6\u60C5"),
             this.tab === "search" ? [h("button", { class: "btn btn-sm", onclick: () => this.download(it.id) }, "\u4E0B\u8F7D"), h("button", { class: "btn btn-sm btn-ghost", onclick: () => this.dlStatus(it.id) }, "\u8FDB\u5EA6")] : null,
             this.tab === "lib" ? [h("button", { class: "btn btn-sm", onclick: () => this.dlStatus(it.id) }, "\u8FDB\u5EA6"), h("button", { class: "btn btn-sm btn-danger", onclick: () => this.rm(it.id) }, "\u5220")] : null
           ]))

@@ -16,7 +16,7 @@ function mount(container, ctx) {
           this.page = p; this.pageCount = (r && r.page_count) || 1
         } catch (e) { this.err = (e && e.message) || e }
       },
-      async album(aid) {
+      async openAlbum(aid) {
         this.err = ''
         try { this.album = await ctx.invoke('jmcomic.album', { aid }); this.tab = 'album'; this.chapter = null; this.pages = [] }
         catch (e) { this.err = (e && e.message) || e }
@@ -57,7 +57,7 @@ function mount(container, ctx) {
       const rows = list.map((it) => h('tr', { key: it.id }, [
         h('td', { class: 'mono' }, it.id), h('td', null, it.name + (it.author ? ' · ' + it.author : '')),
         h('td', null, h('div', { class: 'flex', style: 'gap:4px;' }, [
-          h('button', { class: 'btn btn-sm', onclick: () => this.album(it.id) }, '详情'),
+          h('button', { class: 'btn btn-sm', onclick: () => this.openAlbum(it.id) }, '详情'),
           this.tab === 'search' ? [h('button', { class: 'btn btn-sm', onclick: () => this.download(it.id) }, '下载'), h('button', { class: 'btn btn-sm btn-ghost', onclick: () => this.dlStatus(it.id) }, '进度')] : null,
           this.tab === 'lib' ? [h('button', { class: 'btn btn-sm', onclick: () => this.dlStatus(it.id) }, '进度'), h('button', { class: 'btn btn-sm btn-danger', onclick: () => this.rm(it.id) }, '删')] : null,
         ])),
