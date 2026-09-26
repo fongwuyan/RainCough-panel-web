@@ -4,6 +4,29 @@ import { DOC } from './docsData.js'
 
 const active = ref(0)
 function setDoc(i) { active.value = i }
+
+function exportMd() {
+  const md = chapters.map((c) => {
+    const parts = ['# ' + c.title, '']
+    for (const it of c.items) {
+      if (it.t === 'h') { parts.push('## ' + it.x, '') }
+      else if (it.t === 'p') { parts.push(it.x, '') }
+      else if (it.t === 'ul') { it.x.forEach((l) => parts.push('- ' + l)); parts.push('') }
+      else if (it.t === 'ol') { it.x.forEach((l, i) => parts.push((i + 1) + '. ' + l)); parts.push('') }
+      else { parts.push('```', it.x, '```', '') }
+    }
+    return parts.join('\n')
+  }).join('\n\n---\n\n')
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'raincough-plugin-docs.md'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
 const chapters = DOC
 </script>
 
@@ -15,6 +38,8 @@ const chapters = DOC
     </div>
     <div class="sub-tabs">
       <button v-for="(c, i) in chapters" :key="i" class="tab" :class="{ active: active === i }" @click="setDoc(i)">{{ c.label }}</button>
+      <span class="grow"></span>
+      <button class="btn btn-sm btn-primary" @click="exportMd">导出 .md</button>
     </div>
     <div class="sf-body">
       <div v-for="(c, ci) in chapters" :key="ci">

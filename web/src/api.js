@@ -69,57 +69,57 @@ export const api = {
   // 解压压缩 (decompress)
   dcList: (file) => {
     const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/plugins/yulotool/decompress/list', fd)
+    return reqForm('/api/plugins/compress/list', fd)
   },
   dcExtract: (file, password, organize) => {
     const fd = new FormData(); fd.append('file', file)
     fd.append('password', password || ''); fd.append('organize', organize || 'none')
-    return reqForm('/api/plugins/yulotool/decompress/extract', fd)
+    return reqForm('/api/plugins/compress/extract', fd)
   },
   dcCompress: (files, fmt, level, password, name) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('format', fmt); fd.append('level', String(level))
     fd.append('password', password || ''); fd.append('name', name || 'archive')
-    return reqForm('/api/plugins/yulotool/decompress/compress', fd)
+    return reqForm('/api/plugins/compress/compress', fd)
   },
   dcConvert: (file, fmt) => {
     const fd = new FormData(); fd.append('file', file); fd.append('format', fmt)
-    return reqForm('/api/plugins/yulotool/decompress/convert', fd)
+    return reqForm('/api/plugins/compress/convert', fd)
   },
   dcCompare: (a, b) => {
     const fd = new FormData(); fd.append('files', a); fd.append('files', b)
-    return reqForm('/api/plugins/yulotool/decompress/compare', fd)
+    return reqForm('/api/plugins/compress/compare', fd)
   },
 
   // 目录分析 (diranalyze)
   daStats: (files) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
-    return reqForm('/api/plugins/yulotool/diranalyze/stats', fd)
+    return reqForm('/api/plugins/filehash/stats', fd)
   },
   daDuplicate: (files) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
-    return reqForm('/api/plugins/yulotool/diranalyze/duplicate', fd)
+    return reqForm('/api/plugins/filehash/duplicate', fd)
   },
 
   // 文件哈希 (hash)
   hashCalc: (files) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
-    return reqForm('/api/plugins/yulotool/hash/hash', fd)
+    return reqForm('/api/plugins/filehash/hash', fd)
   },
   hashGenerate: (files, algo) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('algo', algo)
-    return reqForm('/api/plugins/yulotool/hash/generate', fd)
+    return reqForm('/api/plugins/filehash/generate', fd)
   },
   hashVerify: (files) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
-    return reqForm('/api/plugins/yulotool/hash/verify', fd)
+    return reqForm('/api/plugins/filehash/verify', fd)
   },
 
   // 媒体工具 (mediatools)
@@ -130,60 +130,60 @@ export const api = {
     fd.append('resize', opts.resize || '')
     fd.append('quality', opts.quality || '')
     fd.append('rotate', opts.rotate || '')
-    return reqForm('/api/plugins/yulotool/mediatools/image', fd)
+    return reqForm('/api/media/tool/image', fd)
   },
   mtPdf: (files, action, extra) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('action', action)
     if (extra) for (const k in extra) fd.append(k, String(extra[k]))
-    return reqForm('/api/plugins/yulotool/mediatools/pdf', fd)
+    return reqForm('/api/media/tool/pdf', fd)
   },
   mtMedia: (files, action, extra) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('action', action)
     if (extra) for (const k in extra) fd.append(k, String(extra[k]))
-    return reqForm('/api/plugins/yulotool/mediatools/media', fd)
+    return reqForm('/api/media/tool/media', fd)
   },
   mtInfo: (file) => {
     const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/plugins/yulotool/mediatools/info', fd)
+    return reqForm('/api/media/tool/info', fd)
   },
 
   // 文档转换 (docconvert)
-  docCheck: () => req('GET', '/api/plugins/yulotool/docconvert/check'),
+  docCheck: () => req('GET', '/api/plugins/dltool/check'),
   docConvert: (files, to) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('to', to)
-    return reqForm('/api/plugins/yulotool/docconvert/convert', fd)
+    return reqForm('/api/plugins/dltool/convert', fd)
   },
 
   // 网络工具 (networktools)
-  ntDownload: (urls, pack) => req('POST', '/api/plugins/yulotool/networktools/download', { urls, pack }),
+  ntDownload: (urls, pack) => req('POST', '/api/plugins/dltool/download', { urls, pack }),
   ntSplit: (file, chunkMB) => {
     const fd = new FormData(); fd.append('file', file); fd.append('chunkSize', String(chunkMB))
-    return reqForm('/api/plugins/yulotool/networktools/split', fd)
+    return reqForm('/api/plugins/dltool/split', fd)
   },
   ntJoin: (files, name) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('name', name || 'joined')
-    return reqForm('/api/plugins/yulotool/networktools/join', fd)
+    return reqForm('/api/plugins/dltool/join', fd)
   },
   ntRename: (files, mode, value, value2, index) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('mode', mode); fd.append('value', value || '')
     fd.append('value2', value2 || ''); fd.append('index', String(index || 1))
-    return reqForm('/api/plugins/yulotool/networktools/rename', fd)
+    return reqForm('/api/plugins/dltool/rename', fd)
   },
   ntDelete: (files, passes) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('passes', String(passes || 3))
-    return reqForm('/api/plugins/yulotool/networktools/delete', fd)
+    return reqForm('/api/plugins/dltool/delete', fd)
   },
 
   // 文件管理 (系统级模块)
@@ -375,31 +375,31 @@ export const api = {
   vmMerge: (video, archive, name) => {
     const fd = new FormData(); fd.append('files', video); fd.append('files', archive)
     fd.append('name', name || '')
-    return reqForm('/api/plugins/yulotool/videomerge/merge', fd)
+    return reqForm('/api/media/tool/vmerge?action=merge', fd)
   },
   vmInfo: (file) => {
     const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/plugins/yulotool/videomerge/info', fd)
+    return reqForm('/api/media/tool/vmerge?action=info', fd)
   },
   vmExtract: (file) => {
     const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/plugins/yulotool/videomerge/extract', fd)
+    return reqForm('/api/media/tool/vmerge?action=extract', fd)
   },
 
   // 全能工具箱 (toolbox)
   tbOcr: (file) => {
     const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/plugins/toolbox/ocr', fd)
+    return reqForm('/api/plugins/ocrqr/ocr', fd)
   },
-  tbOcrCheck: () => req('GET', '/api/plugins/toolbox/ocr/check'),
+  tbOcrCheck: () => req('GET', '/api/plugins/ocrqr/ocr/check'),
   tbQrGen: (text, size) => req('GET', `/api/plugins/toolbox/qr/gen?text=${encodeURIComponent(text)}&size=${size || 300}`),
   tbQrDecode: (file) => {
     const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/plugins/toolbox/qr/decode', fd)
+    return reqForm('/api/plugins/ocrqr/qr/decode', fd)
   },
   tbImgSimilar: (a, b) => {
     const fd = new FormData(); fd.append('files', a); fd.append('files', b)
-    return reqForm('/api/plugins/toolbox/image/similar', fd)
+    return reqForm('/api/plugins/imagetool/image/similar', fd)
   },
   tbImgProcess: (files, opts) => {
     const fd = new FormData()
@@ -408,42 +408,42 @@ export const api = {
     fd.append('resize', opts.resize || '')
     fd.append('quality', opts.quality || '')
     fd.append('rotate', opts.rotate || '')
-    return reqForm('/api/plugins/toolbox/image/process', fd)
+    return reqForm('/api/plugins/imagetool/image/process', fd)
   },
   tbMediaInfo: (file) => {
     const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/plugins/toolbox/media/info', fd)
+    return reqForm('/api/media/tool/media?action=info', fd)
   },
   tbMediaProcess: (files, action, extra) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('action', action)
     if (extra) for (const k in extra) fd.append(k, String(extra[k]))
-    return reqForm('/api/plugins/toolbox/media/process', fd)
+    return reqForm('/api/media/tool/media?action=convert', fd)
   },
   tbMediaMerge: (files) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
-    return reqForm('/api/plugins/toolbox/media/merge', fd)
+    return reqForm('/api/media/tool/media?action=merge', fd)
   },
   tbSearch: (q, limit) => req('GET', `/api/plugins/toolbox/search?q=${encodeURIComponent(q)}&limit=${limit || 10}`),
-  tbUrlCheck: (urls) => req('POST', '/api/plugins/toolbox/urlcheck', { urls }),
-  tbRssList: () => req('GET', '/api/plugins/toolbox/rss/feeds'),
-  tbRssAdd: (url, name) => req('POST', '/api/plugins/toolbox/rss/feeds', { url, name }),
-  tbRssDelete: (idx) => req('POST', '/api/plugins/toolbox/rss/feeds/delete', { idx }),
-  tbRssFetch: (url) => req('POST', '/api/plugins/toolbox/rss/fetch', { url }),
-  tbReadability: (url) => req('POST', '/api/plugins/toolbox/readability', { url }),
-  tbRegex: (pattern, text, flags) => req('POST', '/api/plugins/toolbox/text/regex', { pattern, text, flags }),
+  tbUrlCheck: (urls) => req('POST', '/api/plugins/webspy/urlcheck', { urls }),
+  tbRssList: () => req('GET', '/api/plugins/webspy/rss/feeds'),
+  tbRssAdd: (url, name) => req('POST', '/api/plugins/webspy/rss/feeds', { url, name }),
+  tbRssDelete: (idx) => req('POST', '/api/plugins/webspy/rss/feeds/delete', { idx }),
+  tbRssFetch: (url) => req('POST', '/api/plugins/webspy/rss/fetch', { url }),
+  tbReadability: (url) => req('POST', '/api/plugins/webspy/readability', { url }),
+  tbRegex: (pattern, text, flags) => req('POST', '/api/plugins/texttool/text/regex', { pattern, text, flags }),
   tbTextReplace: (files, find, replace, regex) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     fd.append('find', find); fd.append('replace', replace); fd.append('regex', regex ? '1' : '0')
-    return reqForm('/api/plugins/toolbox/text/replace', fd)
+    return reqForm('/api/plugins/texttool/text/replace', fd)
   },
-  tbConvert: (action, content) => req('POST', '/api/plugins/toolbox/text/convert', { action, content }),
+  tbConvert: (action, content) => req('POST', '/api/plugins/texttool/text/convert', { action, content }),
   tbTextStats: (file) => {
     const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/plugins/toolbox/text/stats', fd)
+    return reqForm('/api/plugins/texttool/text/stats', fd)
   },
 
   // 终端 (WebSocket, PHP 后端 :23080)
@@ -549,6 +549,12 @@ export const api = {
   kvDomainStats: (name) => req('GET', `/api/plugins/kvm/domain/stats?name=${encodeURIComponent(name)}`),
   kvDomainNote: (name) => req('GET', `/api/plugins/kvm/domain/note?name=${encodeURIComponent(name)}`),
   kvSaveNote: (name, note) => req('POST', '/api/plugins/kvm/domain/note', { name, note }),
+
+  // ---- 终端 SSE 适配(新后端) ----
+  tmOpen: (rows, cols) => req('POST', '/api/terminal/open', { rows: rows || 24, cols: cols || 100 }),
+  tmInput: (sid, data) => req('POST', '/api/terminal/input', { sid, data }),
+  tmResize: (sid, rows, cols) => req('POST', '/api/terminal/resize', { sid, rows, cols }),
+  tmClose: (sid) => req('POST', '/api/terminal/close', { sid }),
 
   // MC 服务器
   mcStatus: () => req('GET', '/api/plugins/mcserver/status'),

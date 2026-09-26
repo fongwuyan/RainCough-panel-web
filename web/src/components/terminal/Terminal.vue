@@ -60,61 +60,28 @@ function openSocket(s) {
   s.connecting = true
   s.status = 'info'
   closeSocket(s)
-  wsUrl()
-    .then((url) => {
-      const ws = new WebSocket(url)
-      s.ws = ws
-      ws.binaryType = 'arraybuffer'
-      ws.onopen = () => {
-        reconnectDelays[s.label] = undefined
-        const init = {
-          type: 'init',
-          target: s.spec.target || 'local',
-          rows: s.term.rows, cols: s.term.cols,
-        }
-        if (init.target === 'ssh') {
-          init.host = s.spec.host || ''
-          init.port = s.spec.port || '22'
-          init.username = s.spec.username || ''
-          init.password = s.spec.password || ''
-          init.pkey = s.spec.pkey || ''
-          init.passphrase = s.spec.passphrase || ''
-        }
-        sendMsg(s, init)
-        // 状态图标：连接中(黄) -> 成功(绿) 短暂脉冲
-        s.status = 'warning'
-        setTimeout(() => { if (s.ws && s.ws.readyState === 1) s.status = 'success' }, 200)
-        s.connecting = false
+  // 新后端: SSE 流 + HTTP 输入(本地会话)
+  api.tmOpen(24, 100)
+    .then((d) => {
+      s.wsId = d.sid
+      s.status = 'success'
+      s.connecting = false
+      if (s._es) { try { s._es.close() } catch (e) {} }
+      const es = new EventSource('/api/terminal/stream?sid=' + d.sid)
+      s._es = es
+      es.onmessage = (ev) => {
+        try {
+          const text = atob(ev.data)
+          if (s.term) { s.term.write(text) }
+          if (s._canvas && typeof s._canvas.forceDraw === 'function') { try { s._canvas.forceDraw() } catch (e) {} }
+        } catch (e) {}
       }
-      ws.onmessage = (ev) => {
-        let text
-        if (ev.data instanceof ArrayBuffer) {
-          text = new TextDecoder('utf-8').decode(new Uint8Array(ev.data))
-        } else {
-          text = String(ev.data)
-        }
-        if (!text) return
-        if (text[0] === '{') {
-          try {
-            const j = JSON.parse(text)
-            if (j.type === 'exit') {
-              s.closed = true
-              s.status = 'warning'
-              try { s.ws && s.ws.close() } catch (e) {}
-              return
-            }
-          } catch (e) {}
-        }
-        if (s.term) { try { s.term.write(text) } catch (e) {} }
-        if (s._canvas && typeof s._canvas.forceDraw === 'function') {
-          try { s._canvas.forceDraw() } catch (e) {}
-        }
-      }
-      ws.onclose = () => { if (!s.closed && !s._userClose) scheduleReconnect(s) }
-      ws.onerror = () => { try { ws.close() } catch (e) {} }
+      es.onerror = () => {} // EventSource 自动重连
     })
     .catch((e) => {
-      errMsg.value = e.message
+      s.status = 'err'
+      s.errMsg = e.message
+      s.connecting = false
       scheduleReconnect(s)
     })
 }
@@ -131,15 +98,19 @@ function scheduleReconnect(s) {
 }
 
 function closeSocket(s) {
-  if (s.ws) {
-    s._userClose = false
-    try { s.ws.onclose = null; s.ws.close(); s.ws = null } catch (e) {}
+  if (s._es) {
+    try { s._es.close() } catch (e) {}
+    s._es = null
   }
 }
 
 function sendMsg(s, obj) {
-  if (s.ws && s.ws.readyState === 1) {
-    try { s.ws.send(JSON.stringify(obj)) } catch (e) {}
+  if (!s || !s.wsId) return
+  if (obj && obj.type === 'input' && obj.data != null) {
+    const b64 = btoa(unescape(encodeURIComponent(obj.data)))
+    api.tmInput(s.wsId, b64).catch(() => {})
+  } else if (obj && obj.type === 'resize') {
+    api.tmResize(s.wsId, obj.rows, obj.cols).catch(() => {})
   }
 }
 
@@ -155,8 +126,9 @@ function activate(i) {
 function closeSession(s) {
   s._userClose = true
   s.closed = true
-  try { s.ws && s.ws.close() } catch (e) {}
-  s.ws = null
+  closeSocket(s)
+  if (s.wsId) { api.tmClose(s.wsId).catch(() => {}) }
+  s.wsId = ''
   const idx = sessions.value.indexOf(s)
   if (idx >= 0) sessions.value.splice(idx, 1)
   if (sessions.value.length === 0) {
@@ -172,8 +144,7 @@ function closeRight(id) {
   const right = sessions.value.slice(idx + 1)
   for (const s of right) {
     s._userClose = true; s.closed = true
-    try { s.ws && s.ws.close() } catch (e) {}
-    s.ws = null
+    closeSocket(s)
   }
   sessions.value = sessions.value.slice(0, idx + 1)
   activeIdx.value = idx
@@ -184,8 +155,7 @@ function closeOthers(id) {
   for (const s of sessions.value) {
     if (s.spec.id === id) continue
     s._userClose = true; s.closed = true
-    try { s.ws && s.ws.close() } catch (e) {}
-    s.ws = null
+    closeSocket(s)
   }
   sessions.value = keep
   activeIdx.value = 0
@@ -395,12 +365,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  for (const s of sessions.value) { try { s.ws && s.ws.close() } catch (e) {} }
+  for (const s of sessions.value) { closeSocket(s) }
   document.removeEventListener('keydown', onDocKey)
   document.removeEventListener('fullscreenchange', onFsChange)
   for (const u of unregTermCtx) { try { u() } catch (e) {} }
   unregTermCtx = []
 })
+let unregTermCtx = []
 </script>
 
 <template>

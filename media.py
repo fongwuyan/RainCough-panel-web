@@ -5,7 +5,11 @@ import csv
 import hashlib
 import threading
 import subprocess
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, g
+import glob
+import re
+import struct
+import zlib
 from PIL import Image
 
 try:
@@ -476,3 +480,445 @@ def dedup():
                 groups.append(grp)
                 used.add(i)
     return jsonify({'groups': groups, 'scanned': scanned})
+
+
+# ================= 并入工具: 图片/PDF 处理(yulotool.mediatools 迁入) =================
+import uuid as _uuid
+import zipfile as _zipfile
+import shutil as _shutil
+
+
+def _yt_session():
+    d = os.path.join(DATA_DIR, 'sessions')
+    os.makedirs(d, exist_ok=True)
+    sess = getattr(g, '_yt_sess', None)
+    if not sess or not os.path.isdir(sess):
+        sess = os.path.join(d, _uuid.uuid4().hex)
+        os.makedirs(sess, exist_ok=True)
+        g._yt_sess = sess
+    return sess
+
+
+def _yt_save_uploads(fields=('files',)):
+    sess = _yt_session()
+    saved = []
+    for f in request.files.getlist(fields[0] if fields else 'files'):
+        if not f or not f.filename:
+            continue
+        safe = os.path.basename(f.filename)
+        path = os.path.join(sess, safe)
+        f.save(path)
+        saved.append({'path': path, 'filename': safe})
+    return saved
+
+
+def _yt_run(cmd, timeout=600):
+    try:
+        r = subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout)
+        return {'ok': r.returncode == 0, 'rc': r.returncode, 'out': r.stdout, 'err': r.stderr}
+    except Exception as e:
+        return {'ok': False, 'rc': 1, 'out': '', 'err': str(e)}
+
+
+def _yt_tool(name):
+    return _shutil.which(name)
+
+
+def _yt_clean_err(r, sess):
+    try:
+        _shutil.rmtree(sess)
+    except Exception:
+        pass
+    return ((r.get('err') or '') + ' ' + (r.get('out') or '')).strip()[-200:]
+
+
+def _yt_zip(files, out):
+    with _zipfile.ZipFile(out, 'w') as z:
+        for f in files:
+            z.write(f, arcname=os.path.basename(f))
+
+
+def _yt_count_pdf(path):
+    tool = _yt_tool('qpdf')
+    if not tool:
+        return 0
+    r = _yt_run([tool, '--show-npages', path])
+    try:
+        return int((r['out'] or '').strip())
+    except Exception:
+        return 0
+
+
+@media.route('/tool/download', methods=['GET'])
+def media_tool_file():
+    """受限下载: 仅允许取 sessions 目录内文件。"""
+    sess = request.args.get('session', '')
+    name = request.args.get('file', '')
+    if not re.fullmatch(r'[0-9a-fA-F]{32}', sess) or not re.match(r'^[\w. -]{1,120}$', name):
+        return jsonify({'error': '非法参数'}), 400
+    base = os.path.join(DATA_DIR, 'sessions', sess)
+    target = os.path.abspath(os.path.join(base, name))
+    if not target.startswith(os.path.abspath(base) + os.sep) or not os.path.isfile(target):
+        return jsonify({'error': '文件不存在'}), 404
+    return send_file(target, as_attachment=True, download_name=name)
+
+
+@media.route('/tool/image', methods=['POST'])
+def media_tool_image():
+    magick = _yt_tool('convert')
+    if not magick:
+        return jsonify({'ok': False, 'error': '未安装 ImageMagick (imagemagick)'}), 400
+    saved = _yt_save_uploads(('files',))
+    if not saved:
+        return jsonify({'ok': False, 'error': '请上传图片'}), 400
+    fmt = (request.form.get('format') or '').lower()
+    resize = (request.form.get('resize') or '').strip()
+    quality = request.form.get('quality')
+    rotate = request.form.get('rotate')
+    sess = _yt_session()
+    outputs = []
+    results = []
+    for item in saved:
+        src = item['path']
+        base, ext = os.path.splitext(item['filename'])
+        out_ext = fmt or ext.lstrip('.').lower()
+        out = os.path.join(sess, base + '.' + out_ext)
+        cmd = [magick, src]
+        if resize:
+            cmd += ['-resize', resize]
+        if quality:
+            try:
+                cmd += ['-quality', str(int(quality))]
+            except (TypeError, ValueError):
+                pass
+        if rotate:
+            try:
+                cmd += ['-rotate', str(int(rotate))]
+            except (TypeError, ValueError):
+                pass
+        cmd.append(out)
+        r = _yt_run(cmd)
+        ok = os.path.isfile(out)
+        results.append({'name': item['filename'], 'ok': ok,
+                        'error': '' if ok else _yt_clean_err(r, sess),
+                        'output': os.path.basename(out) if ok else ''})
+        if ok:
+            outputs.append(out)
+    if len(outputs) == 1:
+        return jsonify({'ok': True, 'results': results, 'single': True,
+                        'download': '/api/media/tool/download?session=%s&file=%s' % (os.path.basename(sess), os.path.basename(outputs[0]))})
+    zpath = os.path.join(sess, 'images_processed.zip')
+    _yt_zip(outputs, zpath)
+    return jsonify({'ok': True, 'results': results,
+                    'download': '/api/media/tool/download?session=%s&file=images_processed.zip' % os.path.basename(sess)})
+
+
+@media.route('/tool/pdf', methods=['POST'])
+def media_tool_pdf():
+    qpdf = _yt_tool('qpdf')
+    gs = _yt_tool('gs')
+    if not qpdf or not gs:
+        return jsonify({'ok': False, 'error': '未安装 qpdf 或 ghostscript'}), 400
+    action = request.form.get('action') or request.args.get('action') or 'merge'
+    saved = _yt_save_uploads(('files',))
+    if not saved:
+        return jsonify({'ok': False, 'error': '请上传 PDF 文件'}), 400
+    files = [f['path'] for f in saved if f['path'].lower().endswith('.pdf')]
+    if not files:
+        return jsonify({'ok': False, 'error': '未找到 PDF 文件'}), 400
+    sess = _yt_session()
+    dl = '/api/media/tool/download?session=%s&file=%%s' % os.path.basename(sess)
+    if action == 'merge':
+        out = os.path.join(sess, 'merged.pdf')
+        r = _yt_run([qpdf, '--empty', '--pages'] + files + ['--', out])
+        if not r['ok'] or not os.path.isfile(out):
+            return jsonify({'ok': False, 'error': _yt_clean_err(r, sess)}), 400
+        return jsonify({'ok': True, 'pages': _yt_count_pdf(out), 'download': dl % 'merged.pdf'})
+    if action == 'split':
+        out_dir = os.path.join(sess, 'pages')
+        os.makedirs(out_dir, exist_ok=True)
+        r = _yt_run([qpdf, '--split-pages', files[0], os.path.join(out_dir, 'page.pdf')])
+        pages = sorted(glob.glob(os.path.join(out_dir, 'page*.pdf')))
+        if not r['ok'] or not pages:
+            return jsonify({'ok': False, 'error': _yt_clean_err(r, sess)}), 400
+        zpath = os.path.join(sess, 'pages.zip')
+        _yt_zip(pages, zpath)
+        return jsonify({'ok': True, 'pages': len(pages), 'download': dl % 'pages.zip'})
+    if action == 'compress':
+        try:
+            dpi = int(request.form.get('dpi') or 150)
+        except (TypeError, ValueError):
+            dpi = 150
+        out = os.path.join(sess, 'compressed.pdf')
+        r = _yt_run([gs, '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4',
+                     '-dPDFSETTINGS=/ebook', '-dNOPAUSE', '-dBATCH',
+                     '-dDownsampleColorImages=true', '-dColorImageResolution=%d' % dpi,
+                     '-sOutputFile=' + out, files[0]])
+        if not r['ok'] or not os.path.isfile(out):
+            return jsonify({'ok': False, 'error': _yt_clean_err(r, sess)}), 400
+        return jsonify({'ok': True, 'input_size': os.path.getsize(files[0]),
+                        'output_size': os.path.getsize(out), 'download': dl % 'compressed.pdf'})
+    if action == 'extract':
+        fmt = (request.form.get('format') or 'png').lower()
+        out_dir = os.path.join(sess, 'images')
+        os.makedirs(out_dir, exist_ok=True)
+        r = _yt_run([gs, '-sDEVICE=png16m', '-r150', '-o',
+                     os.path.join(out_dir, 'page_%d.' + fmt), files[0]])
+        imgs = sorted(glob.glob(os.path.join(out_dir, 'page_*.' + fmt)))
+        if not r['ok'] or not imgs:
+            return jsonify({'ok': False, 'error': _yt_clean_err(r, sess)}), 400
+        zpath = os.path.join(sess, 'pdf_images.zip')
+        _yt_zip(imgs, zpath)
+        return jsonify({'ok': True, 'pages': len(imgs), 'download': dl % 'pdf_images.zip'})
+    return jsonify({'ok': False, 'error': '未知操作'}), 400
+
+
+
+# ================= 并入工具: 媒体(ffmpeg) 与视频融合(videomerge) =================
+_YT_MAGIC = b'YLVFUSN1'
+_YT_FOOTER = 48
+_YT_ZIP = 1
+
+
+def _yt_stream_copy(src, dst, start=0, size=None):
+    with open(src, 'rb') as f:
+        if start:
+            f.seek(start)
+        remain = size if size is not None else -1
+        while True:
+            if remain == 0:
+                break
+            b = f.read(min(1024 * 1024, remain if remain > 0 else 1024 * 1024))
+            if not b:
+                break
+            dst.write(b)
+            if remain > 0:
+                remain -= len(b)
+
+
+def _yt_crc32_file(path, start=0, size=None):
+    h = 0
+    with open(path, 'rb') as f:
+        if start:
+            f.seek(start)
+        remain = size if size is not None else -1
+        while True:
+            if remain == 0:
+                break
+            b = f.read(min(1024 * 1024, remain if remain > 0 else 1024 * 1024))
+            if not b:
+                break
+            h = zlib.crc32(b, h)
+            if remain > 0:
+                remain -= len(b)
+    return h & 0xFFFFFFFF
+
+
+def _yt_detect_archive(path):
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(4)
+    except Exception:
+        return None
+    if head[:2] == b'PK':
+        return 'zip'
+    if head == b'7z\xbc\xaf':
+        return '7z'
+    if head[:4] == b'Rar!':
+        return 'rar'
+    if head[:2] == b'\x1f\x8b':
+        return 'tgz'
+    return None
+
+
+def _yt_build_footer(arch_type, arch_size, crc):
+    return _YT_MAGIC + struct.pack('<BIQ', int(arch_type), int(arch_size), int(crc & 0xFFFFFFFF))
+
+
+def _yt_parse_footer(data):
+    if len(data) < 13 or data[:8] != _YT_MAGIC:
+        return None
+    try:
+        at, size, crc = struct.unpack('<BIQ', data[8:21])
+        return {'arch_type': at, 'arch_size': size, 'crc32': crc}
+    except Exception:
+        return None
+
+
+def _yt_fix_zip_offsets(fh, video_size, zip_size):
+    eocd_off = video_size + zip_size - 22
+    if eocd_off < 0:
+        return 'no-eocd'
+    try:
+        fh.seek(eocd_off)
+        if fh.read(4) != b'PK\x05\x06':
+            return 'eocd-not-found'
+        fh.seek(eocd_off)
+        eocd = bytearray(fh.read(22))
+        cd_off = struct.unpack_from('<I', eocd, 16)[0]
+        new_cd = cd_off + video_size
+        struct.pack_into('<I', eocd, 16, new_cd)
+        fh.seek(eocd_off)
+        fh.write(eocd)
+        return None
+    except Exception as e:
+        return str(e)
+
+
+@media.route('/tool/media', methods=['POST'])
+def media_tool_media():
+    ffmpeg = _yt_tool('ffmpeg')
+    ffprobe = _yt_tool('ffprobe')
+    saved = _yt_save_uploads(('file', 'files'))
+    if not saved:
+        return jsonify({'ok': False, 'error': '请上传媒体文件'}), 400
+    action = request.form.get('action') or request.args.get('action') or 'convert'
+    sess = _yt_session()
+    dl = '/api/media/tool/download?session=%s&file=%%s' % os.path.basename(sess)
+
+    if action == 'info':
+        if not ffprobe:
+            return jsonify({'ok': False, 'error': '未安装 ffprobe'}), 400
+        path = saved[0]['path']
+        r = _yt_run([ffprobe, '-v', 'error', '-show_format', '-show_streams', '-of', 'json', path])
+        try:
+            import json as _j
+            data = _j.loads(r.get('out') or '{}')
+            streams = data.get('streams', [])
+            fmt = data.get('format', {})
+            video = next((s for s in streams if s.get('codec_type') == 'video'), None)
+            audio = next((s for s in streams if s.get('codec_type') == 'audio'), None)
+            info = {'name': saved[0]['filename'], 'size': os.path.getsize(path),
+                    'duration': fmt.get('duration'), 'bitrate': fmt.get('bit_rate'),
+                    'format': fmt.get('format_name'),
+                    'video': video.get('codec_name') if video else None,
+                    'resolution': '%sx%s' % (video.get('width'), video.get('height')) if video else None,
+                    'audio': audio.get('codec_name') if audio else None}
+        except Exception as e:
+            info = {'error': str(e)[:160], 'raw': (r.get('out') or r.get('err') or '')[:200]}
+        return jsonify({'ok': True, 'info': info})
+
+    if not ffmpeg:
+        return jsonify({'ok': False, 'error': '未安装 ffmpeg'}), 400
+    if action == 'merge':
+        files = [f['path'] for f in saved]
+        if len(files) < 2:
+            return jsonify({'ok': False, 'error': '合并需要至少 2 个文件'}), 400
+        lst = os.path.join(sess, 'list.txt')
+        with open(lst, 'w') as f:
+            for fp in files:
+                f.write("file '%s'\n" % fp.replace("'", "'\\''"))
+        out = os.path.join(sess, 'merged.mp4')
+        r = _yt_run([ffmpeg, '-f', 'concat', '-safe', '0', '-i', lst,
+                     '-c', 'copy', '-y', out], 1800)
+        if not r['ok'] or not os.path.isfile(out):
+            return jsonify({'ok': False, 'error': _yt_clean_err(r, sess)}), 400
+        return jsonify({'ok': True, 'download': dl % 'merged.mp4'})
+
+    results = []
+    outputs = []
+    try:
+        try:
+            crf = int(request.form.get('crf') or 28)
+        except (TypeError, ValueError):
+            crf = 28
+        fmt = (request.form.get('format') or '').lower()
+        for item in saved:
+            src = item['path']
+            base, ext = os.path.splitext(item['filename'])
+            if action == 'extract_audio':
+                out_ext = fmt or 'mp3'
+                out = os.path.join(sess, base + '.' + out_ext)
+                codec = 'libmp3lame' if out_ext == 'mp3' else 'copy'
+                cmd = [ffmpeg, '-i', src, '-vn', '-acodec', codec, '-y', out]
+            elif action == 'compress':
+                out_ext = fmt or ext.lstrip('.').lower() or 'mp4'
+                out = os.path.join(sess, base + '_compressed.' + out_ext)
+                cmd = [ffmpeg, '-i', src, '-c:v', 'libx264', '-crf', str(crf),
+                       '-c:a', 'aac', '-b:a', '128k', '-y', out]
+            else:
+                out_ext = fmt or ext.lstrip('.').lower() or 'mp4'
+                out = os.path.join(sess, base + '.' + out_ext)
+                cmd = [ffmpeg, '-i', src, '-c:v', 'libx264', '-crf', str(crf), '-y', out]
+            r = _yt_run(cmd, 1800)
+            ok = os.path.isfile(out) and os.path.getsize(out) > 0
+            results.append({'name': item['filename'], 'ok': ok,
+                            'error': '' if ok else _yt_clean_err(r, sess),
+                            'output': os.path.basename(out) if ok else ''})
+            if ok:
+                outputs.append(out)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
+    if len(outputs) == 1:
+        return jsonify({'ok': True, 'results': results, 'single': True,
+                        'download': dl % os.path.basename(outputs[0])})
+    zpath = os.path.join(sess, 'media_processed.zip')
+    _yt_zip(outputs, zpath)
+    return jsonify({'ok': True, 'results': results, 'download': dl % 'media_processed.zip'})
+
+
+@media.route('/tool/vmerge', methods=['POST'])
+def media_tool_vmerge():
+    sess = _yt_session()
+    dl = '/api/media/tool/download?session=%s&file=%%s' % os.path.basename(sess)
+    action = request.form.get('action') or 'merge'
+    saved = _yt_save_uploads(('file', 'files'))
+
+    if action in ('info', 'extract'):
+        if not saved:
+            return jsonify({'ok': False, 'error': '请上传融合文件'}), 400
+        path = saved[0]['path']
+        total = os.path.getsize(path)
+        with open(path, 'rb') as f:
+            f.seek(max(0, total - _YT_FOOTER))
+            fmeta = _yt_parse_footer(f.read(_YT_FOOTER))
+        if not fmeta:
+            return jsonify({'ok': False, 'error': '未检测到 YLVFUSN1 融合尾部'}), 400
+        arch_offset = total - _YT_FOOTER - fmeta['arch_size']
+        types = {_YT_ZIP: 'ZIP'}
+        if action == 'info':
+            crc = _yt_crc32_file(path, arch_offset, fmeta['arch_size'])
+            return jsonify({'ok': True, 'arch_type': types.get(fmeta['arch_type'], '?'),
+                            'arch_size': fmeta['arch_size'], 'arch_offset': arch_offset,
+                            'video_size': arch_offset, 'total_size': total,
+                            'crc32': '%08x' % fmeta['crc32'],
+                            'crc_ok': crc == fmeta['crc32']})
+        ext = {_YT_ZIP: 'zip'}.get(fmeta['arch_type'], 'bin')
+        out = os.path.join(sess, 'extracted.' + ext)
+        with open(out, 'wb') as o:
+            _yt_stream_copy(path, o, start=arch_offset, size=fmeta['arch_size'])
+        return jsonify({'ok': True, 'arch_type': ext, 'arch_size': fmeta['arch_size'],
+                        'download': dl % ('extracted.' + ext)})
+
+    if len(saved) < 2:
+        return jsonify({'ok': False, 'error': '请上传视频和压缩包'}), 400
+    video = archive = None
+    for item in saved:
+        if _yt_detect_archive(item['path']):
+            archive = item
+        else:
+            video = item
+    if not video or not archive:
+        return jsonify({'ok': False, 'error': '需要同时上传一个视频和一个压缩包 (zip/7z/rar)'}), 400
+    arch_type = _YT_ZIP
+    video_size = os.path.getsize(video['path'])
+    arch_size = os.path.getsize(archive['path'])
+    out_name = (request.form.get('name') or '').strip() or (os.path.splitext(video['filename'])[0] + '_merged')
+    out = os.path.join(sess, out_name + '.mp4')
+    crc = _yt_crc32_file(archive['path'])
+    with open(out, 'wb') as o:
+        _yt_stream_copy(video['path'], o)
+        _yt_stream_copy(archive['path'], o)
+        o.write(_yt_build_footer(_YT_ZIP, arch_size, crc))
+    with open(out, 'r+b') as o:
+        err = _yt_fix_zip_offsets(o, video_size, arch_size)
+        if err:
+            return jsonify({'ok': False, 'error': 'ZIP 偏移修正失败: %s' % err}), 400
+    crc = _yt_crc32_file(out, video_size, arch_size)
+    with open(out, 'r+b') as o:
+        o.seek(video_size + arch_size + 24)
+        o.write(struct.pack('<I', crc))
+    return jsonify({'ok': True, 'video': video['filename'], 'archive': archive['filename'],
+                    'arch_type': 'ZIP', 'arch_size': arch_size,
+                    'output_size': os.path.getsize(out), 'crc32': '%08x' % crc,
+                    'download': dl % (out_name + '.mp4')})
