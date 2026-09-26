@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -238,7 +240,15 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 			task.Update(tid, "", 0, "安装失败: "+err.Error())
 			return
 		}
-		_ = pluginDir
+		// 插件依赖在【安装插件时】安装: 读 plugin.json 的 requirements -> pip
+		if deps := readPluginRequirements(filepath.Join(pluginDir, "plugin.json")); len(deps) > 0 {
+			task.Update(tid, "", 70, "安装插件依赖: "+strings.Join(deps, " "))
+			if err := s.installRequirements(deps); err != nil {
+				_ = os.RemoveAll(pluginDir) // 失败回滚: 移除已解压目录
+				task.Update(tid, "", 0, "插件依赖安装失败: "+err.Error())
+				return
+			}
+		}
 		if s.onInstalled != nil {
 			s.onInstalled()
 		}
@@ -401,4 +411,146 @@ func (s *Store) secretKey() []byte {
 	rand.Read(key)
 	s.ns.Set("store:key", base64.StdEncoding.EncodeToString(key))
 	return key
+}
+
+// ---- 插件依赖安装(安装插件时执行; 设计: 插件依赖不属于面板环境包) ----
+
+// readPluginRequirements 读取 plugin.json 声明的 requirements 列表。
+func readPluginRequirements(path string) []string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var m struct {
+		Requirements []string `json:"requirements"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	return m.Requirements
+}
+
+// aiDepsPresent 依赖是否含 AI 重依赖(torch 系, 需优先走 env-ai 离线轮子)。
+func aiDepsPresent(deps []string) bool {
+	for _, d := range deps {
+		n := strings.ToLower(strings.TrimSpace(d))
+		for _, p := range []string{"torch", "diffusers", "transformers"} {
+			if strings.HasPrefix(n, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// installRequirements 安装插件依赖:
+// AI 依赖优先用主仓 Release 的 env-ai-offline 轮子(避免 PyPI 默认 CUDA 版数 GB 下载),
+// 失败/无资产回退 PyPI; 非 AI 依赖直接 PyPI。
+func (s *Store) installRequirements(deps []string) error {
+	var aiErr error
+	if aiDepsPresent(deps) {
+		if dir, cleanup, err := s.aiWheels(); err == nil {
+			err = pipInstall(append([]string{"--no-index", "--find-links", dir}, deps...)...)
+			cleanup()
+			if err == nil {
+				return nil
+			}
+			aiErr = err
+		} else {
+			aiErr = err
+		}
+	}
+	if err := pipInstall(deps...); err != nil {
+		if aiErr != nil {
+			return fmt.Errorf("离线轮子失败(%v); PyPI 也失败: %v", aiErr, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// pipInstall 执行 python3 -m pip install <args...>。
+// Debian12 PEP668: 自动带 --break-system-packages; 旧 pip 不识别时去重试。
+func pipInstall(args ...string) error {
+	if _, err := exec.LookPath("python3"); err != nil {
+		return fmt.Errorf("未找到 python3")
+	}
+	base := append([]string{"-m", "pip", "install", "--no-input", "--disable-pip-version-check"}, args...)
+	run := func(extra string) (string, error) {
+		full := append([]string{}, base...)
+		if extra != "" {
+			full = append(full, extra)
+		}
+		out, err := exec.Command("python3", full...).CombinedOutput()
+		return string(out), err
+	}
+	out, err := run("--break-system-packages")
+	if err != nil && strings.Contains(out, "no such option") {
+		out, err = run("")
+	}
+	if err != nil {
+		if len(out) > 600 {
+			out = out[len(out)-600:]
+		}
+		return fmt.Errorf("pip 失败: %s", strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// aiWheels 下载并解压主仓 Release 的 env-ai-offline 轮子资产, 返回 wheels 目录。
+func (s *Store) aiWheels() (string, func(), error) {
+	repo := s.config.PanelRepo
+	resp, err := s.ghGet(fmt.Sprintf("/repos/%s/%s/releases/latest", repo.Owner, repo.Repo))
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", nil, fmt.Errorf("releases/latest HTTP %d", resp.StatusCode)
+	}
+	var rel struct {
+		Assets []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return "", nil, err
+	}
+	for _, a := range rel.Assets {
+		if !strings.HasPrefix(a.Name, "env-ai-offline") || !strings.HasSuffix(a.Name, ".tar.gz") {
+			continue
+		}
+		data, err := s.ghDownload(a.BrowserDownloadURL)
+		if err != nil {
+			return "", nil, err
+		}
+		tmp, err := os.MkdirTemp("", "rc-ai-*")
+		if err != nil {
+			return "", nil, err
+		}
+		cleanup := func() { _ = os.RemoveAll(tmp) }
+		tgz := filepath.Join(tmp, "ai.tar.gz")
+		if err := os.WriteFile(tgz, data, 0o644); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		if err := extractArchive(tgz, tmp); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		_ = os.Remove(tgz)
+		// 资产布局: staging/wheels/*.whl (兼容直接 wheels/)
+		for _, pat := range []string{
+			filepath.Join(tmp, "*", "wheels"),
+			filepath.Join(tmp, "wheels"),
+		} {
+			if m, _ := filepath.Glob(pat); len(m) > 0 {
+				return m[0], cleanup, nil
+			}
+		}
+		cleanup()
+		return "", nil, fmt.Errorf("env-ai 资产中未找到 wheels/")
+	}
+	return "", nil, fmt.Errorf("未找到 env-ai-offline Release 资产")
 }

@@ -12,6 +12,11 @@
     "description": { "type": "string", "maxLength": 1024 },
     "author": { "type": "string", "maxLength": 128 },
     "icon": { "type": "string", "maxLength": 512 },
+    "requirements": {
+      "type": "array",
+      "description": "python 依赖(安装插件时由面板 pip install; AI 重依赖走 env-ai 离线轮子)",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
     "frontend": {
       "type": "object",
       "required": ["entry"],
