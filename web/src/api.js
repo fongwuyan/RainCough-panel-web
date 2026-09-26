@@ -25,6 +25,7 @@ export const api = {
   listPlugins: () => req('GET', '/api/plugins'),
   removePlugin: (name) => req('DELETE', `/api/plugins/${name}`),
   sysInfo: () => req('GET', '/api/system'),
+  sysGpus: () => req('GET', '/api/system/gpus'),
   sysStorage: () => req('GET', '/api/storage'),
   disks: () => req('GET', '/api/disks'),
   diskUnmount: (device) => req('POST', '/api/disks/unmount', { device }),

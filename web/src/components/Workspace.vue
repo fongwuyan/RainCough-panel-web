@@ -22,6 +22,38 @@ const funcCount = computed(() =>
 const sys = ref(null)
 let sysTimer = null
 
+// --- GPU (全部核显/独显) ---
+const gpus = ref([])
+const gpuLoaded = ref(false)
+let gpuTimer = null
+
+async function loadGpus() {
+  try {
+    const d = await api.sysGpus()
+    gpus.value = (d && d.gpus) || []
+  } catch (e) {
+  } finally {
+    gpuLoaded.value = true
+  }
+}
+
+function gpuKindStyle(kind) {
+  if (kind === '独显') return { background: '#f85149', color: '#fff' }
+  if (kind === '核显') return { background: '#3fb950', color: '#fff' }
+  if (kind === '虚拟') return { background: '#58a6ff', color: '#fff' }
+  return { background: 'var(--text-faint)', color: '#fff' }
+}
+
+function gpuVramText(g) {
+  if (g.vram > 0) return (g.vram_used || 0) + ' / ' + g.vram + ' MiB'
+  if (g.kind === '核显') return '共享系统内存'
+  return '—'
+}
+
+function gpuUsageColor(u) {
+  return u >= 85 ? '#f85149' : u >= 60 ? '#f0b429' : '#3fb950'
+}
+
 // --- 滚动时间序列（仿任务管理器性能页）---
 const MAX = 200
 const hist = reactive({
@@ -221,14 +253,17 @@ async function loadSys() {
 onMounted(() => {
   loadSys()
   loadDisks()
+  loadGpus()
   sysTimer = setInterval(loadSys, 1000)
   diskTimer = setInterval(loadDisks, 5000)
+  gpuTimer = setInterval(loadGpus, 5000)
   clockTimer = setInterval(() => { nowClock.value = fmtClock(Date.now() / 1000) }, 1000)
 })
 
 onUnmounted(() => {
   if (sysTimer) clearInterval(sysTimer)
   if (diskTimer) clearInterval(diskTimer)
+  if (gpuTimer) clearInterval(gpuTimer)
   if (clockTimer) clearInterval(clockTimer)
 })</script>
 
@@ -447,6 +482,40 @@ onUnmounted(() => {
         <div v-else style="margin-top:6px;margin-left:18px;color:var(--text-faint);font-size:12px;">无分区</div>
       </div>
     </div>
+
+    <!-- GPU: 全部核显与显卡 -->
+    <div class="section">
+      <div class="section-title">GPU
+        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">
+          {{ gpus.length }} 个显示核心
+        </span>
+        <button class="btn btn-sm btn-ghost" style="float:right;margin-right:10px;" @click="loadGpus">刷新</button>
+      </div>
+      <div v-if="!gpuLoaded" class="status-line">加载中...</div>
+      <div v-else-if="!gpus.length" class="hint">未检测到显卡 / 核显 (无显示设备的服务器属正常)</div>
+      <div v-else class="gpu-grid">
+        <div v-for="(g, i) in gpus" :key="g.pci || i" class="perf-card">
+          <div class="perf-head">
+            <span style="display:flex;align-items:center;gap:8px;min-width:0;">
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ g.name || ('GPU ' + (i + 1)) }}</span>
+              <span class="tag-chip" :style="gpuKindStyle(g.kind)">{{ g.kind || '未知' }}</span>
+            </span>
+            <span class="perf-val" v-if="g.usage >= 0">{{ g.usage.toFixed(0) }}%</span>
+          </div>
+          <div class="gpu-meta">
+            <div><span class="gpu-label">厂商</span>{{ g.vendor || '-' }}</div>
+            <div><span class="gpu-label">驱动</span>{{ g.driver || '-' }}</div>
+            <div><span class="gpu-label">PCI</span>{{ g.pci || '-' }}</div>
+            <div><span class="gpu-label">显存</span>{{ gpuVramText(g) }}</div>
+            <div><span class="gpu-label">温度</span>{{ g.temp ? g.temp + '°C' : '—' }}</div>
+            <div><span class="gpu-label">利用率</span>{{ g.usage >= 0 ? g.usage.toFixed(1) + '%' : '—' }}</div>
+          </div>
+          <div v-if="g.usage >= 0" class="progress" style="margin-top:8px;">
+            <div :style="{ width: Math.min(100, g.usage) + '%', background: gpuUsageColor(g.usage) }"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -522,5 +591,29 @@ onUnmounted(() => {
 @media (max-width: 720px) {
   .perf-grid { grid-template-columns: 1fr; }
   .perf-card-wide { grid-column: span 1; }
+}
+/* GPU 卡 */
+.gpu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+}
+.gpu-meta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+.gpu-meta > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gpu-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 2px;
 }
 </style>

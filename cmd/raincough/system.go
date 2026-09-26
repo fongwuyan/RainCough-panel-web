@@ -2,7 +2,7 @@ package main
 
 import (
 	"net/http"
-	"time"
+	"strings"
 
 	"raincough/internal/core"
 )
@@ -21,8 +21,16 @@ func (s *server) handleSystem(w http.ResponseWriter, r *http.Request) {
 
 // handleSystemSub 细分端点。
 func (s *server) handleSystemSub(w http.ResponseWriter, r *http.Request) {
-	// 预留: /api/system/processes /api/system/net 等(M4 展开)
-	writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not implemented"})
+	sub := strings.TrimPrefix(r.URL.Path, "/api/system/")
+	switch sub {
+	case "gpus":
+		// 工作台 GPU 卡: 全部核显/独显(lspci + nvidia-smi + sysfs, 3s 缓存)
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "仅支持 GET"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"gpus": core.GPUs()})
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not implemented"})
+	}
 }
-
-var _ = time.Now // 保留 time 依赖位(未来扩展)
