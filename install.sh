@@ -48,17 +48,17 @@ confirm_yes() {   # 必须输入 yes 才返回 0
     a="$(read_tty)"
     case "$a" in yes|YES|Yes|y|Y) return 0 ;; *) return 1 ;; esac
 }
-ask_default() {   # $1 提示 $2 默认值 -> 输出答案
+ask_default() {   # $1 提示 $2 默认值 -> 输出答案; 提示走 stderr(避免被 $( ) 捕获吞掉)
     local a
-    printf '%s [%s]: ' "$1" "$2"
+    printf '%s [%s]: ' "$1" "$2" >&2
     a="$(read_tty)"
     printf '%s' "${a:-$2}"
 }
-fetch() {         # $1 仓库相对路径 $2 输出文件; 镜像失败回退直连
+fetch() {         # $1 仓库相对路径 $2 输出文件; 镜像失败回退直连; ?ts 防镜像缓存旧资产
     local rel="$1" out="$2" base
     for base in "$MIRROR" "https://github.com"; do
         info "下载 $base/$rel"
-        if curl -fL --connect-timeout 20 --retry 2 -o "$out" "$base/$rel"; then
+        if curl -fL --connect-timeout 20 --retry 2 -o "$out" "$base/$rel?ts=$(date +%s)"; then
             return 0
         fi
         warn "镜像失败, 尝试下一个源..."
@@ -180,6 +180,7 @@ if [ -f "/etc/systemd/system/$UNIT_NAME" ]; then
 fi
 $SUDO mkdir -p "$APP_DIR"
 $SUDO tar xzf "$TMPD/$BODY_ASSET" -C "$APP_DIR" --strip-components=1
+$SUDO chmod +x "$APP_DIR/raincough"   # Windows 侧打包可能丢执行位, 防御性补回
 $SUDO chown -R "$RUN_USER:$RUN_USER" "$APP_DIR" 2>/dev/null || true
 ok "面板文件解压至 $APP_DIR"
 if [ "$INSTALL_TOOLS" = "yes" ]; then
