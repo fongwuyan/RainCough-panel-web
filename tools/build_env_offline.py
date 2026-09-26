@@ -101,20 +101,32 @@ def pip_download_wheels(pybin, dest, pkgs=None, req=None, ai_indexes=False):
         cpu_indexes.append(env_idx)
     cpu_indexes += [i for i in AI_INDEXES if i not in cpu_indexes]
     if cpu_list:
-        last = None
-        for idx in cpu_indexes:
-            try:
-                # 纯 CPU 源, 不带 extra-index, 防止 PyPI CUDA 版胜出
-                run(base + cpu_list + ['--index-url', idx])
-                last = None
-                break
-            except subprocess.CalledProcessError as e:
-                last = e
-                print('  CPU 源失败, 尝试下一个:', idx)
-        if last is not None:
-            raise last
-    if rest:
-        run(base + rest + ['--index-url', pypi])
+        local_tw = os.environ.get('TORCH_WHEEL')
+        if local_tw and os.path.isfile(local_tw):
+            # 本地预下载的 torch CPU 轮子(弱网: CDN 慢时用镜像直链先下好)
+            print('  使用本地 torch 轮子:', local_tw)
+            for _p in cpu_list:
+                shutil.copyfile(local_tw, os.path.join(dest, os.path.basename(local_tw)))
+        else:
+            last = None
+            for idx in cpu_indexes:
+                try:
+                    # --no-deps 直取 CPU wheel: pytorch 索引上解析依赖会踩
+                    # flit_core 缺失/typing-extensions 元数据不一致等坑
+                    run(base + cpu_list + ['--no-deps', '--index-url', idx])
+                    last = None
+                    break
+                except subprocess.CalledProcessError as e:
+                    last = e
+                    print('  CPU 源失败, 尝试下一个:', idx)
+            if last is not None:
+                raise last
+    # torch 的通用依赖(纯 PyPI 包) + 其余 AI 包, 全部走 PyPI 源
+    generic = ['filelock', 'typing-extensions', 'sympy', 'networkx',
+               'jinja2', 'fsspec', 'setuptools'] if cpu_list else []
+    want = list(rest) + generic
+    if want:
+        run(base + want + ['--index-url', pypi])
 
 
 def package_staging(staging, out_path):
@@ -188,9 +200,10 @@ def build(version):
             raise SystemExit('依赖验证失败: ' + r.stderr)
         print('依赖验证通过:', r.stdout.strip())
 
-        # wheels 离线轮子仓库(GO 面板安装器 pip install --no-index --find-links 用)
-        print('下载 wheels 轮子仓库...')
-        pip_download_wheels(pybin, os.path.join(staging, 'wheels'), req=REQ)
+        # wheels 离线轮子仓库: 面向【系统 python3】(插件运行时, Debian12=3.11),
+        # 必须用系统解释器下载, 否则拿到 cp312 轮子系统装不了
+        print('下载 wheels 轮子仓库(系统 python)...')
+        pip_download_wheels(sys.executable, os.path.join(staging, 'wheels'), req=REQ)
 
         # 清理缓存减小体积(兼容任意 python3.x 目录名)
         for sp in glob.glob(os.path.join(py_root, 'lib', 'python*', 'site-packages')):
