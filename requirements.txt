@@ -12,3 +12,5 @@ onnxruntime>=1.15
 requests>=2.31
 # 生产部署(替代 Flask 自带 dev server; Windows 本机开发可另装 waitress)
 gunicorn>=21.2
+# 注: 插件专属依赖(jmcomic/bs4/opencv/qrcode/rapidocr/PyYAML/torch 等)不进本文件,
+#     按设计在【安装插件时】由面板读取插件 plugin.json 的 requirements 安装。
