@@ -22,6 +22,7 @@ RELEASE_TAG="env-offline-0.1.0"   # 三资产同挂此 Release
 BODY_ASSET="raincough-linux-x86_64-0.1.0.tar.gz"
 ENV_ASSET="env-offline-linux-x86_64-0.1.0.tar.gz"
 MIRROR="${RC_MIRROR:-https://gh-proxy.com/https://github.com}"
+UNIT_NAME="${RC_UNIT_NAME:-raincough.service}"   # 单元名可覆盖(测试/多实例隔离)
 # 面板核心 python 环境(与主仓 requirements.txt 保持一致; 供插件运行基座)
 CORE_PIP_PKGS="flask flask-cors curl_cffi psutil cryptography apscheduler Pillow numpy onnxruntime requests gunicorn"
 
@@ -64,10 +65,10 @@ fetch() {         # $1 仓库相对路径 $2 输出文件; 镜像失败回退直
     done
     return 1
 }
-pip_install() {   # $@ = 参数; Debian PEP668 兼容
-    python3 -m pip install --no-input --disable-pip-version-check \
+pip_install() {   # $@ = 参数; 以特权系统级安装(服务以 RUN_USER 运行, 用户级 ~/.local 不可见)
+    $SUDO python3 -m pip install --no-input --disable-pip-version-check \
         --break-system-packages "$@" 2>/dev/null \
-        || python3 -m pip install --no-input --disable-pip-version-check "$@"
+        || $SUDO python3 -m pip install --no-input --disable-pip-version-check "$@"
 }
 
 echo
@@ -149,6 +150,12 @@ APP_DIR=$(ask_default "安装目录" "/opt/raincough")
 RUN_USER=$(ask_default "运行用户" "root")
 while :; do
     PORT=$(ask_default "面板端口" "3900")
+    case "$PORT" in
+        ''|*[!0-9]) warn "端口必须是数字"; continue ;;
+    esac
+    if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+        warn "端口范围 1-65535"; continue
+    fi
     if ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":${PORT}\$"; then
         warn "端口 $PORT 已被占用, 请换一个"
     else
@@ -165,6 +172,12 @@ echo "  摘要: 目录=$APP_DIR 用户=$RUN_USER 端口=$PORT 功能工具=$INST
 # ---------- 步骤 6: 安装 ----------
 echo
 info "步骤 6/7: 安装"
+if [ -f "/etc/systemd/system/$UNIT_NAME" ]; then
+    if ! confirm_yes "检测到已有单元 $UNIT_NAME, 是否覆盖?"; then
+        echo "已取消(保留原服务)。"
+        exit 0
+    fi
+fi
 $SUDO mkdir -p "$APP_DIR"
 $SUDO tar xzf "$TMPD/$BODY_ASSET" -C "$APP_DIR" --strip-components=1
 $SUDO chown -R "$RUN_USER:$RUN_USER" "$APP_DIR" 2>/dev/null || true
@@ -172,7 +185,7 @@ ok "面板文件解压至 $APP_DIR"
 if [ "$INSTALL_TOOLS" = "yes" ]; then
     $SUDO apt-get install -y p7zip-full ffmpeg && ok "功能工具已安装"
 fi
-UNIT=/etc/systemd/system/raincough.service
+UNIT=/etc/systemd/system/$UNIT_NAME
 $SUDO tee "$UNIT" >/dev/null <<EOF
 [Unit]
 Description=RainCough Core Panel (Go)
@@ -193,8 +206,8 @@ RuntimeDirectoryMode=0700
 WantedBy=multi-user.target
 EOF
 $SUDO systemctl daemon-reload
-$SUDO systemctl enable --now raincough.service
-ok "systemd 服务已注册并启动 (raincough.service)"
+$SUDO systemctl enable --now "$UNIT_NAME"
+ok "systemd 服务已注册并启动 ($UNIT_NAME)"
 
 # ---------- 步骤 7: 完成 ----------
 echo
@@ -212,8 +225,8 @@ echo
 echo "${C_G}=======================================================${C_0}"
 echo "${C_G}  安装完成!${C_0}"
 echo "  访问地址:  http://${LAN_IP:-<服务器IP>}:$PORT"
-echo "  服务管理:  systemctl {status|restart|stop} raincough"
-echo "  日志:      journalctl -u raincough -f"
+echo "  服务管理:  systemctl {status|restart|stop} $UNIT_NAME"
+echo "  日志:      journalctl -u $UNIT_NAME -f"
 echo "  下一步:    面板内【插件市场】安装插件 —— 插件依赖将自动安装;"
 echo "             aigen/mcskin 的 AI 依赖会自动拉取 env-ai 离线轮子。"
 echo "${C_G}=======================================================${C_0}"
