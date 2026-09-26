@@ -98,9 +98,13 @@ ok "磁盘可用 $((AVAIL_K/1024))M"
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
     command -v sudo >/dev/null 2>&1 || fail "需要 root 或 sudo 权限"
-    info "需要特权操作, 请输入 sudo 密码:"
-    sudo -v || fail "sudo 验证失败"
-    SUDO="sudo"
+    if sudo -n true 2>/dev/null; then
+        SUDO="sudo"   # 免密可用: 绝不弹提示(避免 pty 下 sudo -v 异常索密)
+    else
+        info "需要特权操作, 请输入 sudo 密码:"
+        sudo -v || fail "sudo 验证失败"
+        SUDO="sudo"
+    fi
 fi
 ok "权限就绪 (root${SUDO:+ via sudo})"
 curl -fsSL -m 10 -o /dev/null https://api.github.com 2>/dev/null \
@@ -112,6 +116,8 @@ command -v curl >/dev/null 2>&1 || fail "缺少 curl (apt install curl)"
 echo
 info "步骤 3/7: 环境包检查与安装"
 NEED_APT=""
+export DEBIAN_FRONTEND=noninteractive   # 防 apt/needrestart 交互提示卡死(如 TTY 下"重启哪些服务")
+export NEEDRESTART_MODE=a
 command -v python3 >/dev/null 2>&1 || NEED_APT="python3"
 if ! python3 -m pip --version >/dev/null 2>&1; then NEED_APT="$NEED_APT python3-pip"; fi
 if [ -n "$NEED_APT" ]; then

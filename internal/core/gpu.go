@@ -143,7 +143,10 @@ func gpuKind(vendor, name string) string {
 	case strings.Contains(v, "vmware"), strings.Contains(v, "innotek"),
 		strings.Contains(v, "virtualbox"), strings.Contains(v, "qemu"),
 		strings.Contains(v, "cirrus"), strings.Contains(v, "bochs"),
-		strings.Contains(v, "virtio"):
+		strings.Contains(v, "virtio"), strings.Contains(v, "red hat"),
+		strings.Contains(n, "virtio"), strings.Contains(n, "bochs"),
+		strings.Contains(n, "qxl"), strings.Contains(n, "cirrus"),
+		strings.Contains(n, "vbox"), strings.Contains(n, "vmware"):
 		return "虚拟"
 	}
 	return "未知"
