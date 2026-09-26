@@ -70,18 +70,22 @@ def run(cmd, **kw):
     subprocess.run(cmd, check=True, **kw)
 
 
-def pip_download_wheels(pybin, dest, pkgs=None, req=None, ai_indexes=False):
+def pip_download_wheels(pybin, dest, pkgs=None, req=None, ai_indexes=False, pyver=None):
     """下载轮子到 dest。
 
     ai_indexes=True 时两阶段:
       1) torch 走纯 CPU 源(--index-url, 无 extra, 避免 PyPI CUDA 版被选中);
       2) 其余(diffusers/transformers 等)走 PyPI 源。
+    pyver="310" 等: 按目标 Python 版本下轮子(--only-binary, 供多版本共存,
+      如 Ubuntu22.04=py3.10 与 Debian12=py3.11 同包离线通用)。
     """
     os.makedirs(dest, exist_ok=True)
     base = [pybin, '-m', 'pip', 'download', '--no-cache-dir', '-d', dest]
     extra = os.environ.get('PIP_INDEX_URL')
     if req:
         cmd = base + ['-r', req]
+        if pyver:
+            cmd += ['--python-version', pyver, '--only-binary=:all:']
         if extra:
             cmd += ['--extra-index-url', extra]
         run(cmd)
@@ -200,10 +204,13 @@ def build(version):
             raise SystemExit('依赖验证失败: ' + r.stderr)
         print('依赖验证通过:', r.stdout.strip())
 
-        # wheels 离线轮子仓库: 面向【系统 python3】(插件运行时, Debian12=3.11),
-        # 必须用系统解释器下载, 否则拿到 cp312 轮子系统装不了
-        print('下载 wheels 轮子仓库(系统 python)...')
-        pip_download_wheels(sys.executable, os.path.join(staging, 'wheels'), req=REQ)
+        # wheels 离线轮子仓库: 面向【系统 python3】(Debian12=3.11, Ubuntu22.04=3.10),
+        # 必须用系统解释器下载, 且按目标版本各下一套, 离线安装才跨发行版通用
+        print('下载 wheels 轮子仓库(系统 python3.11)...')
+        wheels_dir = os.path.join(staging, 'wheels')
+        pip_download_wheels(sys.executable, wheels_dir, req=REQ)
+        print('下载 wheels 轮子仓库(python3.10 兼容, Ubuntu22.04)...')
+        pip_download_wheels(sys.executable, wheels_dir, req=REQ, pyver='310')
 
         # 清理缓存减小体积(兼容任意 python3.x 目录名)
         for sp in glob.glob(os.path.join(py_root, 'lib', 'python*', 'site-packages')):
