@@ -30,3 +30,6 @@ plugins/*/
 # 临时
 *.tmp
 .DS_Store
+
+# 离线环境包产物(94MB, 作为 GitHub Release 资产分发, 不进 git)
+dist/

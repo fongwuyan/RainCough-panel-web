@@ -8,9 +8,15 @@
     python3 tools/build_env_offline.py
 输出: dist/env-offline-linux-x86_64-<version>.tar.gz
 上传该文件为 RainCough-panel-web 的 GitHub Release 资产即可。
+
+环境变量(可选, 弱网/离线构建用):
+    PBS_LOCAL      预先下载好的 python-build-standalone 包路径(跳过联网下载)
+    PBS_BASE       下载镜像前缀, 如 https://gh-proxy.com/https://github.com
+    PIP_INDEX_URL  pip 源(构建机访问 pypi 慢时可用镜像, 如清华源)
 """
 import os
 import sys
+import glob
 import argparse
 import tarfile
 import shutil
@@ -22,16 +28,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REQ = os.path.join(ROOT, 'requirements.txt')
 OUT_DIR = os.path.join(ROOT, 'dist')
 ASSET_PREFIX = 'env-offline-linux-x86_64'
-# python-build-standalone 具体版本号可在 GitHub Releases 中确认
-PBS_VERSION = '3.12.10+20250305'
+# python-build-standalone 的 release 标签是纯日期(如 20260924),
+# 资产命名 cpython-<版本>+<标签>-<架构>-install_only_stripped.tar.gz
+PBS_TAG = '20260924'
+PBS_PY = '3.12.14'
 PBS_ARCH = 'x86_64-unknown-linux-gnu'
+PBS_ASSET = 'cpython-%s+%s-%s-install_only_stripped.tar.gz' % (PBS_PY, PBS_TAG, PBS_ARCH)
 
 
 def pbs_url():
-    # install_only 变体: 仅 Python 运行时, 不含 build 工具链, 体积最小
-    return ('https://github.com/astral-sh/python-build-standalone/releases/download/'
-            '{v}/cpython-{v}-{a}-{v2}-install_only_stripped.tar.gz'.format(
-                v=PBS_VERSION, a=PBS_ARCH, v2=PBS_VERSION))
+    base = (os.environ.get('PBS_BASE') or 'https://github.com').rstrip('/')
+    return '%s/astral-sh/python-build-standalone/releases/download/%s/%s' % (
+        base, PBS_TAG, PBS_ASSET)
 
 
 def download(url, dest):
@@ -54,24 +62,30 @@ def build(version):
 
     with tempfile.TemporaryDirectory() as tmp:
         py_tar = os.path.join(tmp, 'python.tar.gz')
-        download(pbs_url(), py_tar)
+        local_pbs = os.environ.get('PBS_LOCAL')
+        if local_pbs and os.path.isfile(local_pbs):
+            print('  使用本地 python-build-standalone 包:', local_pbs)
+            shutil.copyfile(local_pbs, py_tar)
+        else:
+            download(pbs_url(), py_tar)
 
         staging = os.path.join(tmp, 'staging')
         os.makedirs(staging)
         with tarfile.open(py_tar, 'r:gz') as tf:
-            # 去掉顶层目录(cpython-.../), 使 python/ 直接位于 staging 下
-            for m in tf.getmembers():
-                parts = m.name.split('/', 1)
-                if len(parts) > 1:
-                    m.name = parts[1]
-                tf.extract(m, staging)
+            # install_only 包顶层即 python/, 原样解压(不做顶层剥离)
+            tf.extractall(staging)
 
-        py_root = os.path.join(staging, 'python', 'install')
-        if not os.path.isdir(py_root):
-            py_root = os.path.join(staging, 'python')
+        # 定位 python 安装根(含 bin/python3): 兼容 python/install/ 与 python/ 两种布局
+        py_root = None
+        for cand in (os.path.join(staging, 'python', 'install'),
+                     os.path.join(staging, 'python'),
+                     staging):
+            if os.path.isfile(os.path.join(cand, 'bin', 'python3')):
+                py_root = cand
+                break
+        if py_root is None:
+            raise SystemExit('解压后未找到 python3: ' + staging)
         pybin = os.path.join(py_root, 'bin', 'python3')
-        if not os.path.isfile(pybin):
-            raise SystemExit('解压后未找到 python3: ' + pybin)
         print('解释器:', pybin)
 
         subprocess.run([pybin, '-m', 'pip', 'install', '--no-cache-dir', '--upgrade', 'pip'],
@@ -87,12 +101,13 @@ def build(version):
             raise SystemExit('依赖验证失败: ' + r.stderr)
         print('依赖验证通过:', r.stdout.strip())
 
-        # 清理缓存减小体积
-        shutil.rmtree(os.path.join(py_root, 'lib', 'python3.12', 'site-packages', 'pip'), ignore_errors=True)
-        for cache in ('__pycache__',):
-            for rootd, dirs, files in os.walk(staging):
-                if cache in dirs:
-                    shutil.rmtree(os.path.join(rootd, cache))
+        # 清理缓存减小体积(兼容任意 python3.x 目录名)
+        for sp in glob.glob(os.path.join(py_root, 'lib', 'python*', 'site-packages')):
+            shutil.rmtree(os.path.join(sp, 'pip'), ignore_errors=True)
+        for rootd, dirs, files in os.walk(staging):
+            if '__pycache__' in dirs:
+                shutil.rmtree(os.path.join(rootd, '__pycache__'), ignore_errors=True)
+                dirs.remove('__pycache__')
 
         out = os.path.join(OUT_DIR, '%s-%s.tar.gz' % (ASSET_PREFIX, version))
         with tarfile.open(out, 'w:gz') as tf:
@@ -104,6 +119,7 @@ def build(version):
                     with open(full, 'rb') as fh:
                         tf.addfile(info, fh)
         print('完成:', out)
+        print('大小: %.1f MB' % (os.path.getsize(out) / 1024 / 1024))
 
 
 if __name__ == '__main__':
