@@ -130,8 +130,14 @@ else
     WHEELS=$(find "$TMPD" -type d -name wheels | head -n1)
     [ -n "$WHEELS" ] || fail "环境包中未找到 wheels/"
     info "离线安装核心环境 (wheels)..."
-    pip_install --no-index --find-links "$WHEELS" $CORE_PIP_PKGS || fail "核心环境安装失败"
-    ok "核心 Python 环境安装完成"
+    if pip_install --no-index --find-links "$WHEELS" $CORE_PIP_PKGS; then
+        ok "核心 Python 环境安装完成 (离线轮子)"
+    else
+        # 轮子与本机 Python 版本不匹配(如旧资产只含 cp311 而本机 3.10) → 在线兜底
+        warn "离线轮子与本机 Python 不匹配, 回退在线安装 (PyPI)..."
+        pip_install $CORE_PIP_PKGS || fail "核心环境安装失败"
+        ok "核心 Python 环境安装完成 (在线)"
+    fi
     rm -rf "$TMPD"
 fi
 
