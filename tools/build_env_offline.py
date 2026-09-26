@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """构建 RainCough 面板的「离线环境包」(Debian 12 / x86_64)。
 
-产物: 内嵌 Python(python-build-standalone) + 全部面板依赖 的 tar.gz,
-供面板在无外网/环境不足时自动拉取并解压为 runtime/ 使用。
+两种产物(均上传为 RainCough-panel-web 的 GitHub Release 资产):
+  默认(核心)   dist/env-offline-linux-x86_64-<version>.tar.gz
+      = 内嵌 Python(python-build-standalone) + 全部面板/插件依赖
+        + wheels/ 离线轮子仓库(顶层 staging/wheels/)
+      供 Python 面板无外网自举; GO 面板安装器用其 wheels/ 离线装 pip 依赖。
+  --ai          dist/env-ai-offline-linux-x86_64-<version>.tar.gz
+      = aigen 文生图 AI 依赖 wheels (torch CPU + diffusers + transformers),
+        无 Python 运行时(顶层 staging/wheels/), 供安装器可选安装。
 
 用法(在 Debian 12 x86_64 上):
-    python3 tools/build_env_offline.py
-输出: dist/env-offline-linux-x86_64-<version>.tar.gz
-上传该文件为 RainCough-panel-web 的 GitHub Release 资产即可。
+    python3 tools/build_env_offline.py            # 核心包
+    python3 tools/build_env_offline.py --ai       # AI 包
 
 环境变量(可选, 弱网/离线构建用):
     PBS_LOCAL      预先下载好的 python-build-standalone 包路径(跳过联网下载)
     PBS_BASE       下载镜像前缀, 如 https://gh-proxy.com/https://github.com
     PIP_INDEX_URL  pip 源(构建机访问 pypi 慢时可用镜像, 如清华源)
+    AI_INDEX       AI 包 torch CPU 源(默认依次尝试 pytorch 官方/阿里云镜像)
 """
 import os
 import sys
@@ -28,12 +34,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REQ = os.path.join(ROOT, 'requirements.txt')
 OUT_DIR = os.path.join(ROOT, 'dist')
 ASSET_PREFIX = 'env-offline-linux-x86_64'
+AI_ASSET_PREFIX = 'env-ai-offline-linux-x86_64'
 # python-build-standalone 的 release 标签是纯日期(如 20260924),
 # 资产命名 cpython-<版本>+<标签>-<架构>-install_only_stripped.tar.gz
 PBS_TAG = '20260924'
 PBS_PY = '3.12.14'
 PBS_ARCH = 'x86_64-unknown-linux-gnu'
 PBS_ASSET = 'cpython-%s+%s-%s-install_only_stripped.tar.gz' % (PBS_PY, PBS_TAG, PBS_ARCH)
+# AI 依赖(aigen 文生图): torch 必须走 CPU 源, 否则 CUDA 版超 GitHub Release 2GB 上限
+AI_PKGS = ['torch', 'diffusers', 'transformers']
+AI_INDEXES = ['https://download.pytorch.org/whl/cpu',
+              'https://mirrors.aliyun.com/pytorch-wheels/cpu']
 
 
 def pbs_url():
@@ -52,6 +63,84 @@ def download(url, dest):
 def read_reqs():
     with open(REQ, encoding='utf-8') as f:
         return [l.strip() for l in f if l.strip() and not l.startswith('#')]
+
+
+def run(cmd, **kw):
+    print('  $', ' '.join(cmd))
+    subprocess.run(cmd, check=True, **kw)
+
+
+def pip_download_wheels(pybin, dest, pkgs=None, req=None, ai_indexes=False):
+    """下载轮子到 dest。
+
+    ai_indexes=True 时两阶段:
+      1) torch 走纯 CPU 源(--index-url, 无 extra, 避免 PyPI CUDA 版被选中);
+      2) 其余(diffusers/transformers 等)走 PyPI 源。
+    """
+    os.makedirs(dest, exist_ok=True)
+    base = [pybin, '-m', 'pip', 'download', '--no-cache-dir', '-d', dest]
+    extra = os.environ.get('PIP_INDEX_URL')
+    if req:
+        cmd = base + ['-r', req]
+        if extra:
+            cmd += ['--extra-index-url', extra]
+        run(cmd)
+        return
+    if not ai_indexes:
+        cmd = base + list(pkgs)
+        if extra:
+            cmd += ['--extra-index-url', extra]
+        run(cmd)
+        return
+    pypi = extra or 'https://pypi.org/simple'
+    cpu_list = [p for p in pkgs if p.split('=')[0].strip() in ('torch', 'torchvision', 'torchaudio')]
+    rest = [p for p in pkgs if p not in cpu_list]
+    cpu_indexes = []
+    env_idx = os.environ.get('AI_INDEX')
+    if env_idx:
+        cpu_indexes.append(env_idx)
+    cpu_indexes += [i for i in AI_INDEXES if i not in cpu_indexes]
+    if cpu_list:
+        last = None
+        for idx in cpu_indexes:
+            try:
+                # 纯 CPU 源, 不带 extra-index, 防止 PyPI CUDA 版胜出
+                run(base + cpu_list + ['--index-url', idx])
+                last = None
+                break
+            except subprocess.CalledProcessError as e:
+                last = e
+                print('  CPU 源失败, 尝试下一个:', idx)
+        if last is not None:
+            raise last
+    if rest:
+        run(base + rest + ['--index-url', pypi])
+
+
+def package_staging(staging, out_path):
+    with tarfile.open(out_path, 'w:gz') as tf:
+        for rootd, dirs, files in os.walk(staging):
+            for fn in files:
+                full = os.path.join(rootd, fn)
+                arc = os.path.relpath(full, os.path.dirname(staging))
+                info = tf.gettarinfo(full, arcname=arc)
+                with open(full, 'rb') as fh:
+                    tf.addfile(info, fh)
+    print('完成:', out_path)
+    print('大小: %.1f MB' % (os.path.getsize(out_path) / 1024 / 1024))
+
+
+def build_ai(version):
+    """AI 环境包: 仅 wheels(torch CPU + diffusers + transformers)。"""
+    print('构建 AI 环境包 v%s' % version)
+    os.makedirs(OUT_DIR, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        staging = os.path.join(tmp, 'staging')
+        wheels = os.path.join(staging, 'wheels')
+        # torch 系用系统 python 下载即可(仅取轮子, 不安装)
+        pip_download_wheels(sys.executable, wheels, pkgs=AI_PKGS, ai_indexes=True)
+        out = os.path.join(OUT_DIR, '%s-%s.tar.gz' % (AI_ASSET_PREFIX, version))
+        package_staging(staging, out)
 
 
 def build(version):
@@ -88,10 +177,8 @@ def build(version):
         pybin = os.path.join(py_root, 'bin', 'python3')
         print('解释器:', pybin)
 
-        subprocess.run([pybin, '-m', 'pip', 'install', '--no-cache-dir', '--upgrade', 'pip'],
-                       check=True, cwd=ROOT)
-        subprocess.run([pybin, '-m', 'pip', 'install', '--no-cache-dir'] + reqs,
-                       check=True, cwd=ROOT)
+        run([pybin, '-m', 'pip', 'install', '--no-cache-dir', '--upgrade', 'pip'])
+        run([pybin, '-m', 'pip', 'install', '--no-cache-dir'] + reqs)
 
         code = ('import sys;'
                 'import flask,flask_cors,curl_cffi,psutil,cryptography,apscheduler;'
@@ -100,6 +187,10 @@ def build(version):
         if r.returncode != 0:
             raise SystemExit('依赖验证失败: ' + r.stderr)
         print('依赖验证通过:', r.stdout.strip())
+
+        # wheels 离线轮子仓库(GO 面板安装器 pip install --no-index --find-links 用)
+        print('下载 wheels 轮子仓库...')
+        pip_download_wheels(pybin, os.path.join(staging, 'wheels'), req=REQ)
 
         # 清理缓存减小体积(兼容任意 python3.x 目录名)
         for sp in glob.glob(os.path.join(py_root, 'lib', 'python*', 'site-packages')):
@@ -110,20 +201,15 @@ def build(version):
                 dirs.remove('__pycache__')
 
         out = os.path.join(OUT_DIR, '%s-%s.tar.gz' % (ASSET_PREFIX, version))
-        with tarfile.open(out, 'w:gz') as tf:
-            for rootd, dirs, files in os.walk(staging):
-                for fn in files:
-                    full = os.path.join(rootd, fn)
-                    arc = os.path.relpath(full, os.path.dirname(staging))
-                    info = tf.gettarinfo(full, arcname=arc)
-                    with open(full, 'rb') as fh:
-                        tf.addfile(info, fh)
-        print('完成:', out)
-        print('大小: %.1f MB' % (os.path.getsize(out) / 1024 / 1024))
+        package_staging(staging, out)
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--version', default='0.1.0')
+    ap.add_argument('--ai', action='store_true', help='构建 AI 环境包(torch/diffusers/transformers)')
     a = ap.parse_args()
-    build(a.version)
+    if a.ai:
+        build_ai(a.version)
+    else:
+        build(a.version)
