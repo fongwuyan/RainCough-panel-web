@@ -812,7 +812,7 @@ def _append_call(rec):
             f.write(line + '\n')
         # 超限截断: 保留最近半
         if os.path.getsize(_CALL_FILE) > 3000000:
-            head = _read_calls(0, 2000000)
+            head = _read_calls(2000000)
             with open(_CALL_FILE, 'w', encoding='utf-8') as f:
                 for r in head[-1500:]:
                     f.write(json.dumps(r, ensure_ascii=False) + '\n')
