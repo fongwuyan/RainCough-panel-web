@@ -87,47 +87,49 @@ function pushIface(name, up, down) {
   push(hist.ifaces[name].down, down)
 }
 
-// --- 常驻历史回填 ---
-// 服务端每秒采样落 data/workspace-history.ndjson(不限期, 仅"存储清理"可删),
-// 页面打开时取尾部若干点回填图表, 再由实时轮询接续。
-const histRestored = ref(0)
+// --- 常驻历史回填(非阻塞) ---
+// 服务端每秒采样落 data/workspace-history.ndjson(不限期, 仅"存储清理"可删)。
+// 关键: 【不等待】该接口 —— 实时轮询立刻开始, 历史返回后 unshift 到序列头部
+// (实时点在尾部), 先到后到时间顺序都正确 → 首屏加载不被历史接口拖慢。
 async function hydrateHistory() {
   try {
-    const h = await api.wsHistory(600)
+    const h = await api.wsHistory(MAX) // 只取图表窗口内点数, 载荷最小
     const pts = (h && h.points) || []
     const ser = (h && h.series) || []
     if (!pts.length || !ser.length) return
     const idx = {}
     ser.forEach((n, i) => { idx[n] = i })
-    const direct = [
-      ['cpu', hist.cpu], ['mem', hist.mem], ['swap', hist.swap],
-      ['up', hist.netUp], ['down', hist.netDown], ['disk', hist.disk],
-      ['l1', hist.load1], ['l5', hist.load5], ['l15', hist.load15],
-    ]
-    const ifNames = new Set()
-    for (const p of pts) {
-      const v = p.v || []
-      for (const [name, arr] of direct) {
-        const i = idx[name]
-        push(arr, i != null && v[i] != null ? v[i] : 0)
-      }
-      for (let c = 0; c < 64; c++) {
-        const i = idx['pc' + c]
-        if (i == null) break
-        if (v[i] == null) continue
-        if (!hist.pc[c]) hist.pc[c] = []
-        push(hist.pc[c], v[i])
-      }
-      if (p.if) for (const n of Object.keys(p.if)) ifNames.add(n)
+    const unshift = (arr, vals) => {
+      if (!arr || !vals.length) return
+      arr.unshift(...vals)
+      if (arr.length > MAX) arr.length = MAX // 与实时 push 同窗口
     }
+    const pick = (i) => pts.map((p) => {
+      const v = p.v || []
+      return i != null && v[i] != null ? v[i] : 0
+    })
+    const target = {
+      cpu: hist.cpu, mem: hist.mem, swap: hist.swap,
+      up: hist.netUp, down: hist.netDown, disk: hist.disk,
+      l1: hist.load1, l5: hist.load5, l15: hist.load15,
+    }
+    for (const name of Object.keys(target)) {
+      if (idx[name] == null) continue
+      unshift(target[name], pick(idx[name]))
+    }
+    for (let c = 0; c < 64; c++) {
+      const i = idx['pc' + c]
+      if (i == null) break
+      if (!hist.pc[c]) hist.pc[c] = []
+      unshift(hist.pc[c], pick(i))
+    }
+    const ifNames = new Set()
+    for (const p of pts) if (p.if) for (const n of Object.keys(p.if)) ifNames.add(n)
     for (const n of ifNames) {
       if (!hist.ifaces[n]) hist.ifaces[n] = { up: [], down: [] }
-      for (const p of pts) {
-        const a = p.if ? p.if[n] : null
-        pushIface(n, a ? a[0] : 0, a ? a[1] : 0)
-      }
+      unshift(hist.ifaces[n].up, pts.map((p) => (p.if && p.if[n] ? p.if[n][0] : 0)))
+      unshift(hist.ifaces[n].down, pts.map((p) => (p.if && p.if[n] ? p.if[n][1] : 0)))
     }
-    histRestored.value = pts.length
   } catch (e) {
     // 历史不可用不影响实时轮询
   }
@@ -224,15 +226,13 @@ function pctBar(p) {
   return Math.max(0, Math.min(100, p || 0))
 }
 
-onMounted(async () => {
-  // 先回填常驻历史, 再起实时轮询(保证历史在前、实时接续, 不乱序)
-  try {
-    await Promise.race([hydrateHistory(), new Promise((r) => setTimeout(r, 5000))])
-  } catch (e) { /* 忽略 */ }
+onMounted(() => {
+  // 全部并行、零等待: 实时数据先出, 常驻历史异步补齐(见 hydrateHistory)
   loadSys()
   loadDisks()
   loadGpus()
   loadIfaceTotal()
+  hydrateHistory()
   sysTimer = setInterval(loadSys, 1000)
   diskTimer = setInterval(loadDisks, 5000)
   gpuTimer = setInterval(loadGpus, 5000)
@@ -326,9 +326,6 @@ async function loadSys() {
 
 <template>
   <div>
-    <h1>工作台</h1>
-    <div class="subtitle">已加载 {{ plugins.length }} 个插件<span v-if="histRestored"> · 已回填常驻历史 {{ histRestored }} 点（服务端每秒采样 · 不限期 · 仅「存储清理」可清）</span></div>
-        
     <div class="section" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
       <div>
         <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">{{ plugins.length }}</div>
