@@ -52,11 +52,6 @@ function loadSection(k) {
   };
   if (jobs[k]) call(k, jobs[k])
 }
-function switchSub(k) {
-  activate(k)
-  const target = '/sysfunc/' + k
-  if (route.path !== target) router.replace(target)
-}
 async function svcAct(u, act) {
   try { const r = await api.sysfServiceAction(u.unit, act); data.value.svcMsg = (r && (r.out || r.error)) || 'ok' } catch (e) { data.value.svcMsg = e.message }
   loadSection('svc')
@@ -122,11 +117,6 @@ const subLabel = computed(() => (SUBS.find((s) => s.key === sub.value) || { labe
 const paneLoading = computed(() =>
   loading.value[sub.value] && !data.value[sub.value] &&
   sub.value !== 'logs' && sub.value !== 'processes' && sub.value !== 'backup')
-function reloadSub() {
-  if (sub.value === 'api') { loadApi(); return }
-  if (sub.value === 'logs' || sub.value === 'processes' || sub.value === 'backup') return
-  loadSection(sub.value)
-}
 const svcUnits = computed(() => (data.value.svc || {}).units || [])
 const healthChecks = computed(() => (data.value.health || {}).checks || [])
 const healthOk = computed(() => healthChecks.value.filter((x) => x.ok).length)
@@ -228,23 +218,6 @@ async function pwrCancel() {
 
 <template>
   <div class="sys-page">
-    <!-- 页头 -->
-    <div class="sys-hero">
-      <div class="sys-hero-icon">SYS</div>
-      <div class="sys-hero-main">
-        <div class="sys-hero-title">系统中心</div>
-        <div class="sys-hero-sub">当前: {{ subLabel }} · 共 {{ SUBS.length }} 个子系统</div>
-      </div>
-      <span class="grow"></span>
-      <span v-if="loading[sub]" class="sf-load">⟳ 加载中…</span>
-      <button class="btn btn-sm" :disabled="loading[sub]" @click="reloadSub">⟳ 刷新</button>
-    </div>
-    <!-- 子级选项卡 -->
-    <div class="sub-tabs">
-      <button v-for="s in SUBS" :key="s.key" class="tab sys-tab" :class="{ active: sub === s.key }" @click="switchSub(s.key)">
-        <span class="tab-dot" :class="{ on: sub === s.key }"></span>{{ s.label }}
-      </button>
-    </div>
     <div v-if="notice" class="notice">{{ notice }}</div>
     <div v-if="appErr" class="error" style="margin-bottom:10px">运行/渲染错误: {{ appErr }}</div>
     <div v-if="paneLoading" class="pane-load">⟳ 正在加载 {{ subLabel }} …</div>
@@ -654,11 +627,6 @@ async function pwrCancel() {
 
 <style scoped>
 .notice { padding: 8px 12px; background: var(--success-soft); color: var(--success); margin-bottom: 12px; font-size: 13px; }
-.parent-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
-.pt { display: flex; align-items: center; gap: 10px; padding: 14px 18px; background: var(--accent-soft); border: 1px solid var(--accent-strong, var(--border-strong)); }
-.pt-badge { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-.sub-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-.sf-load { color: var(--accent); font-size: 12px; font-family: var(--font-mono); }
 .sf-body { }
 .svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
 .svc-card { border: 1px solid var(--border); padding: 10px 12px; background: var(--surface-2); }
@@ -671,8 +639,6 @@ async function pwrCancel() {
 .bar-row { display: flex; align-items: flex-end; gap: 2px; height: 56px; padding: 4px; background: var(--surface-2); }
 .bar-cell { flex: 1; background: var(--accent); min-width: 2px; }
 .bar-cell.hot { background: var(--danger); }
-.tab { border-bottom: 2px solid transparent; }
-.tab.active { border-bottom-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .tl { border-left: 2px solid var(--border); padding-left: 12px; }
 .tl-item { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 12px; }
 .tl-time { color: var(--text-faint); font-size: 11px; width: 170px; }
@@ -684,29 +650,6 @@ async function pwrCancel() {
 .lr-file:hover { border-color: var(--accent); }
 
 /* ================= 系统中心视觉重构 ================= */
-/* 页头 */
-.sys-hero {
-  display: flex; align-items: center; gap: 14px;
-  padding: 14px 16px; margin-bottom: 12px;
-  background: var(--accent-soft);
-  border: 1px solid var(--border-strong);
-}
-.sys-hero-icon {
-  width: 42px; height: 42px; flex: none;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--accent); color: #fff;
-  font-family: var(--font-mono); font-weight: 800; font-size: 13px; letter-spacing: 1px;
-}
-.sys-hero-title { font-size: 17px; font-weight: 800; line-height: 1.2; }
-.sys-hero-sub { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 3px; }
-/* 子选项卡胶囊 */
-.sys-tab {
-  display: inline-flex; align-items: center; gap: 7px;
-  border: 1px solid transparent;
-}
-.sys-tab.active { border-bottom-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.tab-dot { width: 6px; height: 6px; flex: none; background: var(--border-strong); transition: background var(--transition); }
-.tab-dot.on { background: var(--accent); }
 /* 加载占位 */
 .pane-load {
   padding: 28px; text-align: center; margin-bottom: 12px;
