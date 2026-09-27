@@ -88,10 +88,16 @@ function openSocket(s) {
       if (s._es) { try { s._es.close() } catch (e) {} }
       const es = new EventSource('/api/terminal/stream?sid=' + d.sid)
       s._es = es
+      // base64 → UTF-8 字节 → 文本。
+      // 旧实现直接 atob() 得到"每字节一个字符"的 Latin-1 串, 中文等多字节输出
+      // 全部乱码(如 PAM 的"密码：" → å¯ç ï¼:)。解码器按会话持有并用 stream 模式,
+      // 跨块的多字节序列由 TextDecoder 自行拼接。
+      s._dec = new TextDecoder('utf-8')
       es.onmessage = (ev) => {
         try {
-          const text = atob(ev.data)
-          if (s.term) s.term.write(text)
+          const bytes = Uint8Array.from(atob(ev.data), (c) => c.charCodeAt(0))
+          const text = s._dec.decode(bytes, { stream: true })
+          if (text && s.term) s.term.write(text)
           if (s._canvas && typeof s._canvas.forceDraw === 'function') {
             try { s._canvas.forceDraw() } catch (e) {}
           }

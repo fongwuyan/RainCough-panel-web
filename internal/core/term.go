@@ -237,6 +237,39 @@ func (s *TermSession) signal() {
 // Notify 返回"有新输出/会话关闭"的通知通道(事件驱动, 供 SSE 使用)。
 func (s *TermSession) Notify() <-chan struct{} { return s.notify }
 
+// utf8HoldIdx 返回 data 末尾"未完成 UTF-8 序列"的起始下标; 数据完整则返回 -1。
+// 旧实现只在末尾是连续字节(10xxxxxx)时挂起; 若读恰好停在首字节上(如只读到 E5),
+// 会把不完整序列当完整块发出 → 客户端解码出乱码或 U+FFFD(实测 PAM"密码："变 å¯ç ï¼:)。
+func utf8HoldIdx(data []byte) int {
+	if len(data) == 0 {
+		return -1
+	}
+	j := len(data) - 1
+	for j > 0 && (data[j]&0xC0) == 0x80 {
+		j--
+	}
+	b := data[j]
+	if (b & 0xC0) == 0x80 {
+		// j==0 且是孤儿连续字节(上游已损坏) → 原样发出, 不做挂起
+		return -1
+	}
+	need := 1
+	switch {
+	case b < 0xC0: // ASCII 或(仅 j==0 时)孤儿连续字节
+		need = 1
+	case b < 0xE0:
+		need = 2
+	case b < 0xF0:
+		need = 3
+	case b < 0xF8:
+		need = 4
+	}
+	if need > len(data)-j {
+		return j
+	}
+	return -1
+}
+
 // readLoop 读 pty 输出, 增量 UTF-8 解码入缓冲。
 func (s *TermSession) readLoop() {
 	raw := make([]byte, 8192)
@@ -251,17 +284,11 @@ func (s *TermSession) readLoop() {
 		n, err := s.ptmx.Read(raw)
 		if n > 0 {
 			data := append(pending, raw[:n]...)
-			// 保留可能的 UTF-8 尾部(最多 3 字节)
-			cut := len(data)
-			for cut > 0 && data[cut-1] >= 0x80 && data[cut-1] < 0xC0 {
-				cut--
-			}
-			if cut < len(data) && len(data)-cut <= 3 {
-				// 尾部可能是未完成的多字节: 完整部分入队
-				pending = append(pending[:0], data[cut:]...)
-				data = data[:cut]
-			} else {
-				pending = pending[:0]
+			pending = pending[:0]
+			// 末尾可能被截断的多字节 UTF-8 序列 → 挂起到下一次读(见 utf8HoldIdx)
+			if hold := utf8HoldIdx(data); hold >= 0 {
+				pending = append(pending[:0], data[hold:]...)
+				data = data[:hold]
 			}
 			if len(data) > 0 {
 				s.appendOutput(data)
