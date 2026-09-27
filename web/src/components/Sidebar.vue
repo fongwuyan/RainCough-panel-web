@@ -18,12 +18,12 @@ const PAGES = [
   { key: 'media', label: '媒体中心', path: '/media', desc: '图片视频', icon: 'MD' },
   { key: 'tasks', label: '任务队列', path: '/tasks', desc: '下载安装', icon: 'TQ' },
   { key: 'store', label: '插件市场', path: '/store', desc: '安装更新', icon: 'MK' },
-  { key: 'envpkg', label: '环境包', path: '/envpkg', desc: '运行时', icon: 'EN' },
   { key: 'settings', label: '设置', path: '/settings', desc: '偏好', icon: 'SG' },
   { key: 'docs', label: '开发文档', path: '/docs', desc: '插件指南', icon: 'DC' },
 ]
-// 「系统」分组: 系统中心20个子功能拆分为侧边栏直达项; 能融合的已融合
-// (系统日志/进程管理 与独立页面 /logs /processes 合一; 服务健康/接口总览/定时任务 并入组内)
+// 「系统」分组: 系统中心子功能拆分为侧边栏直达项; 已融合去重:
+// 系统日志/进程管理 = /sysfunc/logs|processes; 服务健康/环境包/接口总览 = 子组件 /sysfunc/sh|env|ifa
+// (原独立页 /logs /processes /envpkg /plughealth /ifaces 已删, router 留旧链重定向)
 const sysOpen = ref(true)
 const SYS_GROUPS = [
   { title: '监控与诊断', items: [
@@ -31,16 +31,17 @@ const SYS_GROUPS = [
     { label: '硬件信息', path: '/sysfunc/hw', desc: 'CPU/内存/主板/温度', icon: 'HW' },
     { label: '事件时间线', path: '/sysfunc/events', desc: '系统操作留痕', icon: 'EV' },
     { label: '接口监控', path: '/sysfunc/api', desc: '路由与请求流水', icon: 'IM' },
-    { label: '接口总览', path: '/ifaces', desc: '服务总线接口目录', icon: 'IF' },
+    { label: '接口总览', path: '/sysfunc/ifa', desc: '服务总线接口目录', icon: 'IF' },
     { label: '启动历史', path: '/sysfunc/boot', desc: '开机/重启记录', icon: 'BT' },
   ]},
   { title: '服务与系统', items: [
     { label: '服务管理', path: '/sysfunc/svc', desc: 'systemd 启停', icon: 'SV' },
-    { label: '服务健康', path: '/plughealth', desc: '插件与服务健康诊断', icon: 'HC' },
+    { label: '服务健康', path: '/sysfunc/sh', desc: '插件与服务健康诊断', icon: 'HC' },
     { label: '系统更新', path: '/sysfunc/up', desc: 'apt 升级', icon: 'UP' },
     { label: '内核管理', path: '/sysfunc/kern', desc: '内核包', icon: 'KN' },
     { label: '时间/NTP', path: '/sysfunc/tz', desc: '时区同步', icon: 'TZ' },
     { label: '用户/密钥', path: '/sysfunc/usr', desc: '用户与 SSH 密钥', icon: 'US' },
+    { label: '环境包', path: '/sysfunc/env', desc: '运行时 node/python/go', icon: 'EN' },
     { label: '关机/重启', path: '/sysfunc/pwr', desc: '电源计划', icon: 'PW' },
   ]},
   { title: '存储与数据', items: [
@@ -51,8 +52,8 @@ const SYS_GROUPS = [
     { label: '日志保留', path: '/sysfunc/lr', desc: 'logrotate 配置', icon: 'LR' },
   ]},
   { title: '日志 · 进程 · 计划', items: [
-    { label: '系统日志', path: '/logs', desc: 'journal/面板日志(融合)', icon: 'LG' },
-    { label: '进程管理', path: '/processes', desc: '进程列表(融合)', icon: 'PS' },
+    { label: '系统日志', path: '/sysfunc/logs', desc: 'journal/面板日志(融合)', icon: 'LG' },
+    { label: '进程管理', path: '/sysfunc/processes', desc: '进程列表(融合)', icon: 'PS' },
     { label: 'Crontab', path: '/sysfunc/cron', desc: '系统 crontab 文本', icon: 'CR' },
     { label: '定时任务', path: '/scheduler', desc: '调度器编排', icon: 'SC' },
   ]},
@@ -84,20 +85,15 @@ function go(path) { router.push(path) }
 
 function isActive(name) {
   if (name === 'workspace') return route.path === '/'
-  if (name === 'plughealth') return route.name === 'plughealth'
-  if (name === 'ifaces') return route.name === 'ifaces'
   if (name === 'settings') return route.name === 'settings'
   if (name === 'docs') return route.name === 'docs'
   if (name === 'fm') return route.name === 'fm'
   if (name === 'filemanager') return route.name === 'plugin' && route.params.name === 'filemanager'
   if (name === 'terminal') return route.name === 'terminal'
-  if (name === 'logs') return route.name === 'logs'
-  if (name === 'processes') return route.name === 'processes'
   if (name === 'media') return route.name === 'media'
   if (name === 'scheduler') return route.name === 'scheduler'
   if (name === 'tasks') return route.name === 'tasks'
   if (name === 'sysfunc') return route.name === 'sysfunc' || route.name === 'sysfunc-sub'
-  if (name === 'envpkg') return route.name === 'envpkg'
   if (name === 'store') return route.name === 'store'
   return route.name === 'plugin' && route.params.name === name
 }

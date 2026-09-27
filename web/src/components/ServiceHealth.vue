@@ -49,7 +49,7 @@ const filtered = computed(() => rows.value.filter((r) => {
 const expandedRow = computed(() => rows.value.find((r) => r.name === expanded.value) || null)
 
 function toggleRow(name) { expanded.value = expanded.value === name ? null : name }
-function goIfaces(q) { router.push({ path: '/ifaces', query: q ? { q } : {} }) }
+function goIfaces(q) { router.push({ path: '/sysfunc/ifa', query: q ? { q } : {} }) }
 
 async function openLog(name) {
   log.value = { open: true, name, text: '', lines: 200, loading: true }

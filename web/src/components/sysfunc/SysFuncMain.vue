@@ -5,16 +5,21 @@ import { api } from '../../api'
 import Logs from '../logs/Logs.vue'
 import BackupMain from '../backup/BackupMain.vue'
 import Processes from '../processes/Processes.vue'
+import ServiceHealth from '../ServiceHealth.vue'
+import EnvPkgMain from '../envpkg/EnvPkgMain.vue'
+import Ifaces from '../Ifaces.vue'
 
 // 子级选项卡(父级为「系统中心」; 支持侧边栏深链 /sysfunc/<key>)
 const route = useRoute()
 const router = useRouter()
-const SUBKEYS = ['logs','processes','svc','hw','up','cron','disk','snap','usr','clean','pwr','kern','tz','health','events','lr','backup','boot','api']
+const SUBKEYS = ['logs','processes','svc','sh','hw','up','cron','disk','snap','usr','clean','env','pwr','kern','tz','health','events','lr','backup','boot','api','ifa']
+// 页面型子组件(自带取数, 不走 loadSection)
+const COMP_SUBS = ['logs', 'processes', 'backup', 'sh', 'env', 'ifa']
 const sub = ref('logs')
 function activate(k) {
   if (!SUBKEYS.includes(k)) k = 'logs'
   sub.value = k
-  if (k !== 'logs' && k !== 'processes' && k !== 'backup' && !data.value[k]) loadSection(k)
+  if (!COMP_SUBS.includes(k) && !data.value[k]) loadSection(k)
   apiPoll(k)
 }
 const appErr = ref('')
@@ -94,6 +99,7 @@ const SUBS = [
   { key: 'logs', label: '系统日志' },
   { key: 'processes', label: '进程管理' },
   { key: 'svc', label: '服务管理' },
+  { key: 'sh', label: '服务健康' },
   { key: 'hw', label: '硬件' },
   { key: 'up', label: '系统更新' },
   { key: 'cron', label: '定时任务' },
@@ -101,6 +107,7 @@ const SUBS = [
   { key: 'snap', label: '快照' },
   { key: 'usr', label: '用户/密钥' },
   { key: 'clean', label: '存储清理' },
+  { key: 'env', label: '环境包' },
   { key: 'pwr', label: '关机/重启' },
   { key: 'kern', label: '内核管理' },
   { key: 'tz', label: '时间/NTP' },
@@ -110,12 +117,12 @@ const SUBS = [
   { key: 'backup', label: '系统备份' },
   { key: 'boot', label: '启动历史' },
   { key: 'api', label: '接口监控' },
+  { key: 'ifa', label: '接口总览' },
 ];
 
 const subLabel = computed(() => (SUBS.find((s) => s.key === sub.value) || { label: '' }).label)
 const paneLoading = computed(() =>
-  loading.value[sub.value] && !data.value[sub.value] &&
-  sub.value !== 'logs' && sub.value !== 'processes' && sub.value !== 'backup')
+  loading.value[sub.value] && !data.value[sub.value] && !COMP_SUBS.includes(sub.value))
 const svcUnits = computed(() => (data.value.svc || {}).units || [])
 const healthChecks = computed(() => (data.value.health || {}).checks || [])
 const healthOk = computed(() => healthChecks.value.filter((x) => x.ok).length)
@@ -222,10 +229,13 @@ async function pwrCancel() {
     <div v-if="appErr" class="error" style="margin-bottom:10px">运行/渲染错误: {{ appErr }}</div>
     <div v-if="paneLoading" class="pane-load">⟳ 正在加载 {{ subLabel }} …</div>
 
-    <!-- 日志 / 进程 / 备份(复用独立页组件) -->
+    <!-- 页面型子组件(自带取数): 日志/进程/备份 + 融入的服务健康/环境包/接口总览 -->
     <Logs v-if="sub === 'logs'" />
     <Processes v-if="sub === 'processes'" />
     <BackupMain v-if="sub === 'backup'" />
+    <ServiceHealth v-if="sub === 'sh'" />
+    <EnvPkgMain v-if="sub === 'env'" />
+    <Ifaces v-if="sub === 'ifa'" />
 
     
       <template v-if="sub === 'boot'">
@@ -274,7 +284,7 @@ async function pwrCancel() {
         </table>
       </template>
 
-<div v-if="sub !== 'logs' && sub !== 'processes' && sub !== 'backup'" class="sf-body">
+<div v-if="!COMP_SUBS.includes(sub)" class="sf-body">
       <div v-if="err[sub]" class="error">{{ err[sub] }}</div>
 
       <template v-if="sub === 'svc'">
