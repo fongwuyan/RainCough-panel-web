@@ -58,6 +58,15 @@ func (m *TermManager) Open(rows, cols int) (*TermSession, error) {
 		shell = "/bin/bash"
 	}
 	cmd := exec.Command(shell)
+	// 启动目录 = 用户家目录。
+	// 原实现不设 cmd.Dir → 子 shell 继承面板进程 cwd(服务 WorkingDirectory=
+	// /home/f/raincough-dev), 提示符恒为 f@f:~/raincough-dev$; 改为 $HOME 后
+	// 与常规终端一致(f@f:~$)。家目录不存在时退回继承(不阻断会话)。
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if st, err := os.Stat(home); err == nil && st.IsDir() {
+			cmd.Dir = home
+		}
+	}
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
