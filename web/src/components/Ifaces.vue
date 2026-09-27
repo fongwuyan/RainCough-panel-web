@@ -1,6 +1,6 @@
 <script setup>
 // 接口总览: 接口库 v4 目录(系统+插件), 支持筛选/详情/试调用
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api.js'
 
@@ -10,6 +10,9 @@ const summary = ref({ interfaces: 0, online: 0, offline: 0, plugin: 0, system: 0
 const items = ref([])
 const total = ref(0)
 const loading = ref(false)
+const loadErr = ref('')          // 目录加载错误(页级展示, 不再被详情面板吞掉)
+const page = ref(1)
+const pageSize = 500             // 后端单页上限 500; 一次拉全避免"共N但只显示100"
 const detail = ref(null)
 const detailErr = ref('')
 const testParams = ref('{}')
@@ -17,26 +20,41 @@ const testResult = ref('')
 const testing = ref(false)
 
 const filters = ref({ source: '', visibility: '', status: '', q: '' })
-const sources = ['', 'plugin', 'system']
 const visibilities = ['', 'all', 'main', 'private']
-const statuses = ['', 'online', 'offline']
 
 let timer = null
 
+const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+
 async function load() {
   loading.value = true
+  loadErr.value = ''
   try {
-    const f = { ...filters.value }
+    const f = { ...filters.value, page: page.value, page_size: pageSize }
     if (!f.q) delete f.q
     const [cat, sum] = await Promise.all([api.ifaces(f), api.ifacesSummary()])
     items.value = cat.items || []
     total.value = cat.total || 0
     Object.assign(summary.value, sum)
+    // 过滤后当前页可能越界
+    if (page.value > pages.value) { page.value = pages.value; return load() }
   } catch (e) {
-    detailErr.value = '加载失败: ' + (e.message || e)
+    loadErr.value = (e && e.message) || String(e)
   } finally {
     loading.value = false
   }
+}
+
+// 筛选条件变化 → 回到第 1 页再取
+function resetLoad() { page.value = 1; load() }
+function goPage(p) { if (p < 1 || p > pages.value || p === page.value) return; page.value = p; load() }
+
+// 破坏性动词(全来源) + 系统主接口(visibility≠all) → 试调用前必须确认
+const DANGER_RE = /(delete|remove|install|uninstall|send|save|create|update|start|stop|restart|close|purge|runnow|mkdir|rename|cancel|clear|format|reboot|shutdown|exec)/i
+function isDangerous(it) {
+  if (!it) return false
+  if (DANGER_RE.test(it.id)) return true
+  return it.source === 'system' && it.visibility !== 'all'
 }
 
 function groups() {
@@ -74,6 +92,13 @@ function previewParams(schema) {
 
 async function runTest() {
   if (!detail.value) return
+  if (isDangerous(detail.value)) {
+    const ok = confirm(
+      '即将在服务器上执行接口试调用：\n' + detail.value.id +
+      '\n\n该接口可能改变系统/插件状态（删除、保存、启停、发送等），确认继续？'
+    )
+    if (!ok) return
+  }
   testing.value = true
   testResult.value = ''
   let params = {}
@@ -116,6 +141,10 @@ onBeforeUnmount(() => clearInterval(timer))
       <button class="btn" :disabled="loading" @click="load">刷新</button>
     </div>
 
+    <div v-if="loadErr" class="err" style="margin-bottom:8px;padding:8px 10px;border:1px solid #f3c1c0;background:#fdf1f1;border-radius:6px;">
+      目录加载失败: {{ loadErr }} · <button class="btn btn-sm" @click="load">重试</button>
+    </div>
+
     <div class="iface-summary">
       <div class="stat-card"><b>{{ summary.interfaces }}</b><span>接口总数</span></div>
       <div class="stat-card"><b style="color:#2e9e5b">{{ summary.online }}</b><span>在线</span></div>
@@ -126,22 +155,27 @@ onBeforeUnmount(() => clearInterval(timer))
     </div>
 
     <div class="iface-filter">
-      <input v-model="filters.q" placeholder="搜索接口 id / 插件 / 描述" class="input" @keyup.enter="load" />
-      <select v-model="filters.source" class="input" @change="load">
+      <input v-model="filters.q" placeholder="搜索接口 id / 插件 / 描述" class="input" @keyup.enter="resetLoad" />
+      <select v-model="filters.source" class="input" @change="resetLoad">
         <option value="">来源:全部</option>
         <option value="plugin">插件</option>
         <option value="system">系统</option>
       </select>
-      <select v-model="filters.visibility" class="input" @change="load">
+      <select v-model="filters.visibility" class="input" @change="resetLoad">
         <option value="">可见性:全部</option>
-        <option v-for="v in visibilities" :key="v" :value="v">{{ v }}</option>
+        <option v-for="v in visibilities.filter(Boolean)" :key="v" :value="v">{{ v }}</option>
       </select>
-      <select v-model="filters.status" class="input" @change="load">
+      <select v-model="filters.status" class="input" @change="resetLoad">
         <option value="">状态:全部</option>
         <option value="online">在线</option>
         <option value="offline">离线</option>
       </select>
-      <span class="faint">共 {{ total }} 个接口</span>
+      <span class="faint">共 {{ total }} 个接口 · 本页 {{ items.length }} 条</span>
+      <span v-if="pages > 1" class="iface-pager">
+        <button class="btn btn-sm" :disabled="page <= 1 || loading" @click="goPage(page - 1)">上一页</button>
+        <span class="faint">{{ page }}/{{ pages }}</span>
+        <button class="btn btn-sm" :disabled="page >= pages || loading" @click="goPage(page + 1)">下一页</button>
+      </span>
     </div>
 
     <div class="iface-body">
@@ -199,6 +233,7 @@ onBeforeUnmount(() => clearInterval(timer))
 .stat-card span { font-size: 12px; color: #888; }
 .iface-filter { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 .iface-filter .input { min-width: 140px; }
+.iface-pager { display: inline-flex; gap: 6px; align-items: center; }
 .iface-body { display: grid; grid-template-columns: 1fr 380px; gap: 12px; align-items: start; }
 @media (max-width: 1100px) { .iface-body { grid-template-columns: 1fr; } }
 .iface-group { margin-bottom: 12px; }
