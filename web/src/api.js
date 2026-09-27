@@ -218,7 +218,8 @@ export const api = {
   tmHostCreate: (h) => req('POST', '/api/terminal/hosts', h),
   tmHostUpdate: (h) => req('PUT', '/api/terminal/hosts', h),
   tmHostDelete: (host) => req('DELETE', `/api/terminal/hosts?host=${encodeURIComponent(host)}`),
-  tmHostSort: (sortList) => req('POST', '/api/terminal/hosts/set_sort', { sort_list: sortList }),
+  // 契约修正: 后端 /hosts/set_sort 读 {hosts:[...]} 数组(原 sort_list 键名+形状双错 → 恒400)
+  tmHostSort: (hosts) => req('POST', '/api/terminal/hosts/set_sort', { hosts }),
   tmCommandsList: () => req('GET', '/api/terminal/commands'),
   tmCommandCreate: (c) => req('POST', '/api/terminal/commands', c),
   tmCommandUpdate: (c) => req('PUT', '/api/terminal/commands', c),

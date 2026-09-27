@@ -44,12 +44,25 @@ func termSave(key string, list []map[string]interface{}) {
 	}
 }
 
+// termFilter 剔除缺主键的畸形项 —— 旧面板迁移残留(实测存过 {"list":{}}),
+// GET 原样返回会被前端渲染成一条"无名主机行"。
+func termFilter(list []map[string]interface{}, key string) []map[string]interface{} {
+	out := list[:0]
+	for _, item := range list {
+		if str(item, key) != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 // ---- /api/terminal/hosts CRUD ----
 
 func (s *server) handleTermHosts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, termGet("hosts", nil))
+		// [F3] 过滤缺 host 的畸形项(旧面板迁移残留曾产生 {"list":{}} 之类, 会渲染成无名主机行)
+		writeJSON(w, http.StatusOK, termFilter(termGet("hosts", nil), "host"))
 	case http.MethodPost:
 		var h map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&h); err != nil {
@@ -72,20 +85,43 @@ func (s *server) handleTermHosts(w http.ResponseWriter, r *http.Request) {
 		termSave("hosts", list)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "hosts": list})
 	case http.MethodPut:
+		// [F4] 补校验: 解析失败 / 缺 old_host / 缺 host / 未命中 → 明确报错, 不再静默 200
 		var h map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&h)
+		if err := json.NewDecoder(r.Body).Decode(&h); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
 		old := str(h, "old_host")
+		if old == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "old_host 必填"})
+			return
+		}
+		if str(h, "host") == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "host 必填"})
+			return
+		}
 		list := termGet("hosts", nil)
+		hit := false
 		for i, item := range list {
 			if str(item, "host") == old {
 				h["old_host"] = old
 				list[i] = h
+				hit = true
 			}
+		}
+		if !hit {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "主机不存在: " + old})
+			return
 		}
 		termSave("hosts", list)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "hosts": list})
 	case http.MethodDelete:
-		host := r.URL.Query().Get("host")
+		// [F5] 缺参必须 400(原空参也 200, 语义上等于"按空名删除")
+		host := strings.TrimSpace(r.URL.Query().Get("host"))
+		if host == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "host 必填"})
+			return
+		}
 		list := termGet("hosts", nil)
 		out := list[:0]
 		for _, item := range list {
@@ -105,7 +141,8 @@ func (s *server) handleTermHosts(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleTermCommands(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, termGet("commands", nil))
+		// [F3] 过滤缺 title 的畸形项(与 hosts 同口径)
+		writeJSON(w, http.StatusOK, termFilter(termGet("commands", nil), "title"))
 	case http.MethodPost:
 		var c map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
@@ -128,19 +165,42 @@ func (s *server) handleTermCommands(w http.ResponseWriter, r *http.Request) {
 		termSave("commands", list)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "commands": list})
 	case http.MethodPut:
+		// [F4] 补校验: 解析失败 / 缺 old_title / 缺 title/shell / 未命中 → 明确报错
 		var c map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&c)
+		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
 		old := str(c, "old_title")
+		if old == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "old_title 必填"})
+			return
+		}
+		if str(c, "title") == "" || str(c, "shell") == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "title 与 shell 必填"})
+			return
+		}
 		list := termGet("commands", nil)
+		hit := false
 		for i, item := range list {
 			if str(item, "title") == old {
 				list[i] = c
+				hit = true
 			}
+		}
+		if !hit {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "命令不存在: " + old})
+			return
 		}
 		termSave("commands", list)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "commands": list})
 	case http.MethodDelete:
-		title := r.URL.Query().Get("title")
+		// [F5] 缺参必须 400
+		title := strings.TrimSpace(r.URL.Query().Get("title"))
+		if title == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "title 必填"})
+			return
+		}
 		list := termGet("commands", nil)
 		out := list[:0]
 		for _, item := range list {

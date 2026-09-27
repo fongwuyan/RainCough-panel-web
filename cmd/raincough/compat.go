@@ -82,11 +82,18 @@ func (s *server) handleEnvStartStop(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWsToken GET /api/terminal/ws_token
+// [F6 死端点处置] websocket-terminal(23080) 服务已于 2026-09-26 随旧面板删除,
+// 终端已改走 SSE(/api/terminal/stream)。端点保留仅为兼容旧客户端,
+// 但【不再返回指向不存在服务的 port】, 改为显式 deprecated + 指明新传输方式。
 func (s *server) handleWsToken(w http.ResponseWriter, r *http.Request) {
-	// 旧面板由 PHP websocket 消费; 新面板走 SSE, 返回空 token 兼容前端
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"token": "", "port": 23080,
-		"host": r.Host,
+		"token":      "",
+		"port":       0,
+		"host":       r.Host,
+		"deprecated": true,
+		"transport":  "sse",
+		"stream":     "/api/terminal/stream",
+		"note":       "websocket-terminal(23080) 已移除, 请使用 SSE 流",
 	})
 }
 

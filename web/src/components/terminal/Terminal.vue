@@ -39,6 +39,13 @@ function toast(msg, ok = true) {
 /* ---------------- 会话管理 ---------------- */
 function openSession(spec) {
   // spec: {target:'local'|'ssh', host, port, username, password, pkey, passphrase, label, id}
+  // [F1] 远程 SSH 终端后端未实现(TermManager 只起本地 pty, 密钥/密码均被忽略)。
+  // 明示降级而不是"假装连上": 改成本机会话并加醒目标签, 防止"我在远程机上"误操作。
+  if (spec.target === 'ssh') {
+    const want = spec.host || '远程主机'
+    toast('远程 SSH 终端未实现, 已打开【本机】终端(原目标 ' + want + ' 不会连接)', false)
+    spec = { ...spec, target: 'local', label: (spec.label ? spec.label + ' · 本机' : '本机终端') }
+  }
   if (!spec.id) spec = { ...spec, id: 's' + (sidCounter++) }
   const label = spec.label || (spec.target === 'local' ? '本地服务器' : spec.host || 'SSH 会话')
   const s = {
@@ -336,9 +343,9 @@ function onHostDrop(e, target) {
   const to = hosts.value.findIndex((h) => h.host === target)
   if (from < 0 || to < 0) return
   hosts.value.splice(to, 0, hosts.value.splice(from, 1)[0])
-  const sortList = {}
-  hosts.value.forEach((h, i) => (sortList[h.host] = i))
-  api.tmHostSort(sortList).catch(() => {})
+  // [F2] 契约修正: 后端 set_sort 读 {hosts:[...]} 数组; 原 {sort_list:{host:idx}}
+  // 键名+形状双错 → 恒 400, 且 .catch 静默吞掉 → 拖拽排序从未生效过
+  api.tmHostSort(hosts.value.map((h) => ({ ...h }))).catch(() => {})
   dragHost = null
 }
 function onHostDragOver(e) { e.preventDefault() }
@@ -361,7 +368,12 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  for (const s of sessions.value) { closeSocket(s) }
+  for (const s of sessions.value) {
+    closeSocket(s)
+    // [F7] 离开页面同时关掉后端 pty, 否则要等 60 分钟闲置清理才释放
+    if (s.wsId) { api.tmClose(s.wsId).catch(() => {}) }
+    s.wsId = ''
+  }
   document.removeEventListener('keydown', onDocKey)
   document.removeEventListener('fullscreenchange', onFsChange)
   for (const u of unregTermCtx) { try { u() } catch (e) {} }
