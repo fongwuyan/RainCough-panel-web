@@ -355,12 +355,54 @@ async function loadSys() {
 
     <div v-if="sysErr" class="error span-12">系统数据加载失败: {{ sysErr }}（核心指标/服务器信息可能滞后）</div>
 
+    <!-- 服务器信息: 按需求置顶(概览与服务器信息在上, 其余在下); 与概览不重复的 6 项 -->
+    <section v-if="sys" class="section span-12">
+      <div class="section-title">服务器信息
+        <span class="card-side">主机 {{ sys.hostname }}</span>
+      </div>
+      <div class="info-grid">
+        <div>
+          <div class="kv-label">系统 / 架构</div>
+          <div class="kv-value-sm">{{ sys.platform || '-' }} / {{ sys.arch || '-' }}</div>
+        </div>
+        <div>
+          <div class="kv-label">CPU 型号</div>
+          <div class="kv-value-sm">{{ sys.cpu_model || '-' }}</div>
+        </div>
+        <div>
+          <div class="kv-label">内存(可用/总)</div>
+          <div class="kv-value">{{ fmtBytes(sys.memory_available) }} / {{ fmtBytes(sys.memory_total) }}</div>
+        </div>
+        <div>
+          <div class="kv-label">Go 版本</div>
+          <div class="kv-value">{{ sys.go_version || sys.python_version || '-' }}</div>
+        </div>
+        <div>
+          <div class="kv-label">进程 / 线程</div>
+          <div class="kv-value">{{ sys.process_count }} / {{ sys.thread_count }}</div>
+        </div>
+        <div>
+          <div class="kv-label">交换分区</div>
+          <div class="kv-value">{{ sys.swap_total ? fmtBytes(sys.swap_used) + ' / ' + fmtBytes(sys.swap_total) : '未配置' }}</div>
+        </div>
+      </div>
+
+      <div class="ip-block">
+        <div class="kv-label">网卡 IP</div>
+        <div class="ip-chips">
+          <span v-for="ni in sys.net_interfaces" :key="ni.name" class="ip-chip">
+            <span class="ip-dot" :class="ni.up ? 'up' : 'down'">●</span>
+            {{ ni.name }} {{ ni.addr || '-' }}
+          </span>
+        </div>
+      </div>
+    </section>
+
     <!-- ===== CPU (span 6, 含每核迷你图) ===== -->
     <section v-if="sys" class="section span-6">
-          <div class="perf-head">
-            <span>CPU（{{ sys.cpu_count }}核）</span>
-            <span class="perf-val">{{ (sys.cpu_percent || 0).toFixed(1) }}%</span>
-          </div>
+      <div class="section-title">CPU（{{ sys.cpu_count }} 核）
+        <span class="section-val">{{ (sys.cpu_percent || 0).toFixed(1) }}%</span>
+      </div>
           <div class="core-grid">
             <div v-for="(c, i) in sys.cpu_per_core" :key="i" class="core-card">
               <div class="core-head">
@@ -375,10 +417,9 @@ async function loadSys() {
 
     <!-- ===== 内存 + 交换 (span 3) ===== -->
     <section v-if="sys" class="section span-3">
-          <div class="perf-head">
-            <span>内存</span>
-            <span class="perf-val">{{ fmtBytes(sys.memory_used) }} / {{ fmtBytes(sys.memory_total) }}</span>
-          </div>
+      <div class="section-title">内存
+        <span class="section-val">{{ fmtBytes(sys.memory_used) }} / {{ fmtBytes(sys.memory_total) }}</span>
+      </div>
           <RealtimeChart :series="[
             { name: '内存', data: hist.mem, color: C.mem },
             { name: '交换', data: hist.swap, color: C.swap },
@@ -391,10 +432,9 @@ async function loadSys() {
 
     <!-- ===== 磁盘总览 (span 3) ===== -->
     <section v-if="sys" class="section span-3">
-          <div class="perf-head">
-            <span>磁盘</span>
-            <span class="perf-val">{{ fmtBytes(diskAgg.used) }} / {{ fmtBytes(diskAgg.total) }}</span>
-          </div>
+      <div class="section-title">磁盘总览
+        <span class="section-val">{{ fmtBytes(diskAgg.used) }} / {{ fmtBytes(diskAgg.total) }}</span>
+      </div>
           <RealtimeChart :series="[{ name: '磁盘', data: hist.disk, color: C.disk }]" :max="100" :height="120" />
           <div class="row-between">
             <span class="muted">总占用 {{ diskAgg.percent.toFixed(1) }}%</span>
@@ -402,29 +442,11 @@ async function loadSys() {
           </div>
         </section>
 
-    <!-- ===== 负载 (span 4) ===== -->
-    <section v-if="sys" class="section span-4">
-          <div class="perf-head">
-            <span>Load Average</span>
-            <span class="perf-val" v-if="sys.load_avg && sys.load_avg.length">
-              {{ sys.load_avg[0].toFixed(2) }} / {{ sys.load_avg[1].toFixed(2) }} / {{ sys.load_avg[2].toFixed(2) }}
-            </span>
-          </div>
-          <RealtimeChart :series="[
-            { name: '1m', data: hist.load1, color: C.load[0] },
-            { name: '5m', data: hist.load5, color: C.load[1] },
-            { name: '15m', data: hist.load15, color: C.load[2] },
-          ]" :height="120" />
-        </section>
-
     <!-- ===== 网络 (span 8, 内含并入的「网络摘要」四砖) ===== -->
     <section v-if="sys" class="section span-8">
-          <div class="perf-head">
-            <span>网络</span>
-            <span class="perf-val">
-              ↓ {{ fmtRate(sys.net_down_rate) }} &nbsp; ↑ {{ fmtRate(sys.net_up_rate) }}
-            </span>
-          </div>
+      <div class="section-title">网络
+        <span class="section-val">↓ {{ fmtRate(sys.net_down_rate) }} &nbsp; ↑ {{ fmtRate(sys.net_up_rate) }}</span>
+      </div>
           <div class="net-grid">
             <div>
               <RealtimeChart :series="[
@@ -466,49 +488,57 @@ async function loadSys() {
           </div>
         </section>
 
-    <!-- 服务器信息: 文字信息(原「服务器状态」上半部)下沉到图表之后 -->
-    <section v-if="sys" class="section span-6">
-      <div class="section-title">服务器信息</div>
-      <div class="info-grid">
-        <div>
-          <div class="kv-label">主机名</div>
-          <div class="kv-value">{{ sys.hostname || '-' }}</div>
-        </div>
-        <div>
-          <div class="kv-label">系统</div>
-          <div class="kv-value-sm">{{ sys.platform || '-' }} ({{ sys.arch || '-' }})</div>
-        </div>
-        <div>
-          <div class="kv-label">CPU 型号</div>
-          <div class="kv-value-sm">{{ sys.cpu_model || '-' }}</div>
-        </div>
-        <div>
-          <div class="kv-label">内存可用</div>
-          <div class="kv-value">{{ fmtBytes(sys.memory_available) }}</div>
-        </div>
-        <div>
-          <div class="kv-label">Go 版本</div>
-          <div class="kv-value">{{ sys.go_version || sys.python_version || '-' }}</div>
-        </div>
-        <div>
-          <div class="kv-label">进程 / 线程</div>
-          <div class="kv-value">{{ sys.process_count }} / {{ sys.thread_count }}</div>
-        </div>
-      </div>
-
-      <div class="ip-block">
-        <div class="kv-label">网卡 IP</div>
-        <div class="ip-chips">
-          <span v-for="ni in sys.net_interfaces" :key="ni.name" class="ip-chip">
-            <span class="ip-dot" :class="ni.up ? 'up' : 'down'">●</span>
-            {{ ni.name }} {{ ni.addr || '-' }}
+    <!-- 高低搭配: 负载 + GPU 竖排成栏(与左侧「网络」卡高度对齐), 消除大片留白 -->
+    <div class="span-4 stack">
+      <section v-if="sys" class="section">
+        <div class="section-title">Load Average
+          <span class="section-val" v-if="sys.load_avg && sys.load_avg.length">
+            {{ sys.load_avg[0].toFixed(2) }} / {{ sys.load_avg[1].toFixed(2) }} / {{ sys.load_avg[2].toFixed(2) }}
           </span>
         </div>
-      </div>
-    </section>
+        <RealtimeChart :series="[
+          { name: '1m', data: hist.load1, color: C.load[0] },
+          { name: '5m', data: hist.load5, color: C.load[1] },
+          { name: '15m', data: hist.load15, color: C.load[2] },
+        ]" :height="120" />
+      </section>
 
-    <!-- ===== 性能趋势 (span 6) ===== -->
-    <SysPerf class="span-6" />
+      <!-- GPU: 全部核显与显卡 -->
+      <section class="section">
+        <div class="section-title">GPU
+          <span class="card-side">{{ gpus.length }} 个显示核心</span>
+          <button class="btn btn-sm btn-ghost" @click="loadGpus">⟳ 刷新</button>
+        </div>
+        <div v-if="!gpuLoaded" class="status-line">加载中...</div>
+        <div v-else-if="gpuErr" class="error">GPU 信息获取失败: {{ gpuErr }}</div>
+        <div v-else-if="!gpus.length" class="hint">未检测到显卡 / 核显 (无显示设备的服务器属正常)</div>
+        <div v-else class="gpu-grid">
+          <div v-for="(g, i) in gpus" :key="g.pci || i" class="perf-card">
+            <div class="perf-head">
+              <span class="gpu-name">
+                <span class="gpu-name-txt">{{ g.name || ('GPU ' + (i + 1)) }}</span>
+                <span class="tag-chip" :style="gpuKindStyle(g.kind)">{{ g.kind || '未知' }}</span>
+              </span>
+              <span class="perf-val" v-if="g.usage >= 0">{{ g.usage.toFixed(0) }}%</span>
+            </div>
+            <div class="gpu-meta">
+              <div><span class="gpu-label">厂商</span>{{ g.vendor || '-' }}</div>
+              <div><span class="gpu-label">驱动</span>{{ g.driver || '-' }}</div>
+              <div><span class="gpu-label">PCI</span>{{ g.pci || '-' }}</div>
+              <div><span class="gpu-label">显存</span>{{ gpuVramText(g) }}</div>
+              <div><span class="gpu-label">温度</span>{{ g.temp ? g.temp + '°C' : '—' }}</div>
+              <div><span class="gpu-label">利用率</span>{{ g.usage >= 0 ? g.usage.toFixed(1) + '%' : '—' }}</div>
+            </div>
+            <div v-if="g.usage >= 0" class="progress gpu-progress">
+              <div :style="{ width: Math.min(100, g.usage) + '%', background: gpuUsageColor(g.usage) }"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== 性能趋势 (span 5) ===== -->
+    <SysPerf class="span-5" />
 
     <!-- ===== 磁盘设备 (span 7, 表格化) ===== -->
     <section class="section span-7">
@@ -566,38 +596,6 @@ async function loadSys() {
       </table>
     </section>
 
-    <!-- ===== GPU (span 5, 全部核显与显卡) ===== -->
-    <section class="section span-5">
-      <div class="section-title">GPU
-        <span class="card-side">{{ gpus.length }} 个显示核心</span>
-        <button class="btn btn-sm btn-ghost" @click="loadGpus">⟳ 刷新</button>
-      </div>
-      <div v-if="!gpuLoaded" class="status-line">加载中...</div>
-      <div v-else-if="gpuErr" class="error">GPU 信息获取失败: {{ gpuErr }}</div>
-      <div v-else-if="!gpus.length" class="hint">未检测到显卡 / 核显 (无显示设备的服务器属正常)</div>
-      <div v-else class="gpu-grid">
-        <div v-for="(g, i) in gpus" :key="g.pci || i" class="perf-card">
-          <div class="perf-head">
-            <span class="gpu-name">
-              <span class="gpu-name-txt">{{ g.name || ('GPU ' + (i + 1)) }}</span>
-              <span class="tag-chip" :style="gpuKindStyle(g.kind)">{{ g.kind || '未知' }}</span>
-            </span>
-            <span class="perf-val" v-if="g.usage >= 0">{{ g.usage.toFixed(0) }}%</span>
-          </div>
-          <div class="gpu-meta">
-            <div><span class="gpu-label">厂商</span>{{ g.vendor || '-' }}</div>
-            <div><span class="gpu-label">驱动</span>{{ g.driver || '-' }}</div>
-            <div><span class="gpu-label">PCI</span>{{ g.pci || '-' }}</div>
-            <div><span class="gpu-label">显存</span>{{ gpuVramText(g) }}</div>
-            <div><span class="gpu-label">温度</span>{{ g.temp ? g.temp + '°C' : '—' }}</div>
-            <div><span class="gpu-label">利用率</span>{{ g.usage >= 0 ? g.usage.toFixed(1) + '%' : '—' }}</div>
-          </div>
-          <div v-if="g.usage >= 0" class="progress gpu-progress">
-            <div :style="{ width: Math.min(100, g.usage) + '%', background: gpuUsageColor(g.usage) }"></div>
-          </div>
-        </div>
-      </div>
-    </section>
   </div>
 </template>
 
@@ -607,7 +605,15 @@ async function loadSys() {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   gap: 14px;
+  align-items: start; /* 卡片按内容高度, 不互相拉伸 → 消除卡内大片空白 */
 }
+/* 竖排组合栏(把两张矮卡拉到与相邻高卡齐平) */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.stack > .section { margin-bottom: 0; }
 /* 网格内卡片抵消 .section 自带下外边距, 保证行距均匀; 错误条通栏 */
 .ws-grid > .section,
 .ws-grid > .error { margin-bottom: 0; }
@@ -629,6 +635,13 @@ async function loadSys() {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-faint);
+}
+/* 统一表头右侧的实时值(图表卡) */
+.section-val {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
 }
 /* 通用:两端对齐脚注 / 单行元信息 */
 .row-between {
