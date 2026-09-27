@@ -19,11 +19,9 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 <template>
   <div class="section">
-    <div class="section-title">网络状态 <span class="mono faint" style="font-weight:400">网卡 · 连接 · DNS</span> <button class="btn btn-sm" style="float:right" @click="load">刷新</button></div>
+    <div class="section-title">网络摘要 <span class="mono faint" style="font-weight:400">DNS · TCP 连接 · 实时速率</span> <button class="btn btn-sm" style="float:right" @click="load">刷新</button></div>
     <div v-if="err" class="error" style="margin-bottom:6px;">网络状态加载失败: {{ err }}</div>
-    <table class="table"><thead><tr><th>接口</th><th>状态</th><th>IP</th><th>MTU</th></tr></thead>
-      <tbody><tr v-for="n in ((data || {}).nics || [])" :key="n.name">
-        <td class="mono">{{ n.name }}</td><td><span :class="n.up ? 'ok' : 'faint'">{{ n.up ? 'UP' : 'DOWN' }}</span></td><td class="mono">{{ n.ip || '-' }}</td><td class="mono">{{ n.mtu }}</td></tr></tbody></table>
+    <!-- 网卡清单(IP/UP 状态)已在「服务器信息 · 网卡 IP」展示, 此处不再重复渲染表格 -->
     <div class="info-grid" style="margin-top:8px">
       <div><div style="font-size:12px;color:var(--text-faint);">TCP 连接</div><div class="mono" style="font-size:15px;font-weight:700">{{ (data || {}).tcp_conns || 0 }}</div></div>
       <div><div style="font-size:12px;color:var(--text-faint);">DNS</div><div class="mono" style="font-size:15px;font-weight:700">{{ (data || {}).dns || '—' }}</div></div>

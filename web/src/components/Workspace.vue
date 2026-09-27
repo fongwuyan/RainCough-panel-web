@@ -326,67 +326,37 @@ async function loadSys() {
 
 <template>
   <div>
-    <div class="section" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
-      <div>
-        <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">{{ plugins.length }}</div>
-        <div style="font-size:12px;color:var(--text-faint);">已安装插件</div>
+    <!-- 概览: 页头标题/副标题已按需求移除, 用带标题的指标条给页面锚点 -->
+    <div class="section">
+      <div class="section-title">概览
+        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">服务器时间 {{ fmtClock(sys ? sys.current_time : 0) }}</span>
       </div>
-      <div>
-        <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">{{ ifaceTotal || '—' }}</div>
-        <div style="font-size:12px;color:var(--text-faint);">可用功能</div>
-      </div>
-      <div>
-        <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">v1.0.0</div>
-        <div style="font-size:12px;color:var(--text-faint);">应用版本</div>
+      <div class="ov-grid">
+        <div class="ov-tile">
+          <b>{{ plugins.length }}</b>
+          <span>已安装插件</span>
+        </div>
+        <div class="ov-tile">
+          <b>{{ ifaceTotal || '—' }}</b>
+          <span>可用功能</span>
+        </div>
+        <div class="ov-tile">
+          <b>{{ sys ? fmtDuration(sys.uptime) : '—' }}</b>
+          <span>运行时长 · {{ sys ? fmtClock(sys.boot_time) + ' 启动' : '—' }}</span>
+        </div>
+        <div class="ov-tile">
+          <b>v1.0.0</b>
+          <span>应用版本</span>
+        </div>
       </div>
     </div>
 
-    <div v-if="sysErr" class="error" style="margin-bottom:8px;">服务器状态加载失败: {{ sysErr }}（下方数据可能滞后）</div>
+    <div v-if="sysErr" class="error" style="margin-bottom:8px;">系统数据加载失败: {{ sysErr }}（核心指标/服务器信息可能滞后）</div>
 
+    <!-- 核心指标: 图表提到最前(仪表盘先看数), 文字信息下沉到「服务器信息」 -->
     <div v-if="sys" class="section">
-      <div class="section-title">服务器状态
-        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">服务器时间 {{ fmtClock(sys.current_time) }}</span>
-      </div>
-
-      <div class="info-grid">
-        <div>
-          <div style="font-size:12px;color:var(--text-faint);">主机名</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.hostname || '-' }}</div>
-        </div>
-        <div>
-          <div style="font-size:12px;color:var(--text-faint);">系统</div>
-          <div style="font-size:13px;font-weight:600;">{{ sys.platform || '-' }} ({{ sys.arch || '-' }})</div>
-        </div>
-        <div>
-          <div style="font-size:12px;color:var(--text-faint);">CPU 型号</div>
-          <div style="font-size:13px;font-weight:600;font-family:var(--font-mono);">{{ sys.cpu_model || '-' }}</div>
-        </div>
-        <div>
-          <div style="font-size:12px;color:var(--text-faint);">内存可用</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ fmtBytes(sys.memory_available) }}</div>
-        </div>
-        <div>
-          <div style="font-size:12px;color:var(--text-faint);">运行时长 / 启动</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ fmtDuration(sys.uptime) }}</div>
-          <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-faint);">{{ fmtClock(sys.boot_time) }} 启动</div>
-        </div>
-        <div>
-          <div style="font-size:12px;color:var(--text-faint);">Go 版本</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.go_version || sys.python_version || '-' }}</div>
-        </div>
-      </div>
-
-      <div class="info-grid" style="margin-top:12px;">
-        <div style="grid-column:1/-1;">
-          <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">网卡 IP</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;">
-            <span v-for="ni in sys.net_interfaces" :key="ni.name"
-                  style="font-size:12px;font-family:var(--font-mono);background:var(--bg);border:1px solid var(--border);padding:3px 8px;">
-              <span :style="{ color: ni.up ? 'var(--success)' : 'var(--danger)' }">●</span>
-              {{ ni.name }} {{ ni.addr || '-' }}
-            </span>
-          </div>
-        </div>
+      <div class="section-title">核心指标
+        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">每秒采样 · 曲线窗口 200 点</span>
       </div>
 
       <div class="perf-grid">
@@ -488,14 +458,55 @@ async function loadSys() {
               </div>
             </div>
           </div>
-          <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-faint);margin-top:6px;">
-            进程 {{ sys.process_count }} / 线程 {{ sys.thread_count }}
+        </div>
+      </div>
+    </div>
+
+    <!-- 服务器信息: 文字信息(原「服务器状态」上半部)下沉到图表之后 -->
+    <div v-if="sys" class="section">
+      <div class="section-title">服务器信息</div>
+      <div class="info-grid">
+        <div>
+          <div style="font-size:12px;color:var(--text-faint);">主机名</div>
+          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.hostname || '-' }}</div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-faint);">系统</div>
+          <div style="font-size:13px;font-weight:600;">{{ sys.platform || '-' }} ({{ sys.arch || '-' }})</div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-faint);">CPU 型号</div>
+          <div style="font-size:13px;font-weight:600;font-family:var(--font-mono);">{{ sys.cpu_model || '-' }}</div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-faint);">内存可用</div>
+          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ fmtBytes(sys.memory_available) }}</div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-faint);">Go 版本</div>
+          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.go_version || sys.python_version || '-' }}</div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-faint);">进程 / 线程</div>
+          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.process_count }} / {{ sys.thread_count }}</div>
+        </div>
+      </div>
+
+      <div class="info-grid" style="margin-top:12px;">
+        <div style="grid-column:1/-1;">
+          <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">网卡 IP</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            <span v-for="ni in sys.net_interfaces" :key="ni.name"
+                  style="font-size:12px;font-family:var(--font-mono);background:var(--bg);border:1px solid var(--border);padding:3px 8px;">
+              <span :style="{ color: ni.up ? 'var(--success)' : 'var(--danger)' }">●</span>
+              {{ ni.name }} {{ ni.addr || '-' }}
+            </span>
           </div>
         </div>
       </div>
     </div>
 
-        <SysPerf />
+    <SysPerf />
     <SysNet />
 
 <div class="section">
@@ -586,6 +597,28 @@ async function loadSys() {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px 16px;
+}
+/* 概览指标条 */
+.ov-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.ov-tile {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+.ov-tile b {
+  display: block;
+  font-size: 24px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  line-height: 1.25;
+}
+.ov-tile span {
+  font-size: 12px;
+  color: var(--text-faint);
 }
 .perf-card {
   background: var(--bg);
