@@ -12,7 +12,7 @@ import Ifaces from '../Ifaces.vue'
 // 子级选项卡(父级为「系统中心」; 支持侧边栏深链 /sysfunc/<key>)
 const route = useRoute()
 const router = useRouter()
-const SUBKEYS = ['logs','processes','svc','sh','hw','up','cron','disk','snap','usr','clean','env','pwr','kern','tz','health','events','lr','backup','boot','api','ifa']
+const SUBKEYS = ['logs','processes','svc','sh','hw','up','disk','snap','usr','clean','env','pwr','kern','tz','health','events','lr','backup','boot','api','ifa']
 // 页面型子组件(自带取数, 不走 loadSection)
 const COMP_SUBS = ['logs', 'processes', 'backup', 'sh', 'env', 'ifa']
 const sub = ref('logs')
@@ -40,7 +40,6 @@ function loadSection(k) {
     svc: () => api.sysfServiceList(),
     hw: () => api.sysfHardware(),
     up: () => api.sysfUpdatesList(),
-    cron: () => api.sysfCronGet('f'),
     disk: () => api.sysfDisks(),
     snap: () => api.sysfSnapCap(),
     usr: () => api.sysfUsers(),
@@ -70,10 +69,6 @@ async function updRun() {
   try { const r = await api.sysfUpdatesRun(); data.value.upMsg = (r && (r.out || r.error)) || 'done' } catch (e) { data.value.upMsg = e.message }
   loadSection('up')
 }
-const cronUser = ref('f')
-const cronText = ref('')
-async function cronLoad() { await call('cron', () => api.sysfCronGet(cronUser.value)); const d = data.value.cron || {}; cronText.value = d.content || '' }
-async function cronSave() { try { const r = await api.sysfCronSave(cronUser.value, cronText.value); toast(r && r.ok !== false ? '已保存' : ((r && r.error) || '失败')) } catch (e) { toast('保存失败: ' + e.message) } }
 const snapName = ref('')
 async function snapCreate() {
   if (!snapName.value.trim()) return
@@ -102,7 +97,6 @@ const SUBS = [
   { key: 'sh', label: '服务健康' },
   { key: 'hw', label: '硬件' },
   { key: 'up', label: '系统更新' },
-  { key: 'cron', label: '定时任务' },
   { key: 'disk', label: '磁盘' },
   { key: 'snap', label: '快照' },
   { key: 'usr', label: '用户/密钥' },
@@ -352,19 +346,6 @@ async function pwrCancel() {
         <table class="table"><thead><tr><th>软件包</th><th>新版本</th><th>架构</th></tr></thead>
           <tbody><tr v-for="(p,i) in (data.up || {}).packages || []" :key="i"><td class="mono">{{ p.pkg }}</td><td class="mono">{{ p.new }}</td><td class="mono faint">{{ p.arch }}</td></tr></tbody></table>
         <div v-if="!((data.up || {}).packages || []).length && !data.upMsg" class="hint">点击「更新索引」获取可升级列表</div>
-      </template>
-
-      <template v-if="sub === 'cron'">
-        <div class="pane-head">
-          <span class="pane-title">Crontab</span>
-          <span class="pane-sub">/etc/crontab 或用户 crontab 文本</span>
-          <span class="grow"></span>
-          <input v-model="cronUser" class="input" style="max-width:120px" placeholder="用户" />
-          <button class="btn btn-sm" @click="cronLoad">读取</button>
-          <button class="btn btn-sm btn-primary" @click="cronSave">保存</button>
-        </div>
-        <textarea v-model="cronText" class="input cron-box" rows="14" placeholder="# 分钟 小时 日 月 星期 命令"></textarea>
-        <div class="hint">保存立即生效 · 格式: 分 时 日 月 星期 命令 · 默认用户 f</div>
       </template>
 
       <template v-if="sub === 'disk'">
@@ -712,8 +693,6 @@ async function pwrCancel() {
 /* 快照芯片 */
 .snap-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .snap-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* cron 编辑器 */
-.cron-box { min-height: 260px; font-family: var(--font-mono); line-height: 1.6; tab-size: 4; }
 /* 用户头像块 */
 .avatar {
   display: inline-flex; width: 22px; height: 22px; margin-right: 8px;

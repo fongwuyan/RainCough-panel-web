@@ -135,6 +135,14 @@ func main() {
 	// 系统中心(服务/进程/日志/防火墙)
 	globalSys = core.NewSysCenter(cfg.SudoPW)
 
+	// 系统备份(目录打包归档 + 保留轮换 + 定时间隔; 进度接入任务队列)
+	bkpNS, err := sd.Namespace("core_backup")
+	if err != nil {
+		log.Fatalf("备份 namespace 初始化失败: %v", err)
+	}
+	globalBkp = core.NewBackupManager(bkpNS, globalTasks)
+	globalBkp.Start()
+
 	// 终端主机/常用命令存储
 	initTermNS(sd)
 	initMediaNS(sd)
@@ -174,6 +182,9 @@ func main() {
 		<-sig
 		close(taskCleanupStop)
 		globalSched.Stop()
+		if globalBkp != nil {
+			globalBkp.Stop()
+		}
 		globalPX.Stop()
 		sd.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -234,8 +245,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sysfunc/hardware", s.sysfHardware)
 	mux.HandleFunc("/api/sysfunc/updates/", s.sysfUpdates)
 	mux.HandleFunc("/api/sysfunc/updates", s.sysfUpdates)
-	mux.HandleFunc("/api/sysfunc/cron/", s.sysfCron)
-	mux.HandleFunc("/api/sysfunc/cron", s.sysfCron)
+	mux.HandleFunc("/api/sysfunc/backup/", s.handleBackup)
 	mux.HandleFunc("/api/sysfunc/disks/fs", s.sysfDisks)
 	mux.HandleFunc("/api/sysfunc/snapshot/", s.sysfSnap)
 	mux.HandleFunc("/api/sysfunc/users", s.sysfUsers)

@@ -54,7 +54,6 @@ const SYS_GROUPS = [
   { title: '日志 · 进程 · 计划', items: [
     { label: '系统日志', path: '/sysfunc/logs', desc: 'journal/面板日志(融合)', icon: 'LG' },
     { label: '进程管理', path: '/sysfunc/processes', desc: '进程列表(融合)', icon: 'PS' },
-    { label: 'Crontab', path: '/sysfunc/cron', desc: '系统 crontab 文本', icon: 'CR' },
     { label: '定时任务', path: '/scheduler', desc: '调度器编排', icon: 'SC' },
   ]},
 ]

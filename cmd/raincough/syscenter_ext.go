@@ -70,23 +70,6 @@ func (s *server) sysfUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *server) sysfCron(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		user := r.URL.Query().Get("user")
-		out, _ := globalSys.CronTab(user)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"user": user, "content": out})
-	case http.MethodPost:
-		var b struct {
-			User    string `json:"user"`
-			Content string `json:"content"`
-		}
-		json.NewDecoder(r.Body).Decode(&b)
-		err := globalSys.SaveCronTab(b.User, b.Content)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "error": errStr(err)})
-	}
-}
-
 func (s *server) sysfDisks(w http.ResponseWriter, r *http.Request) {
 	// 旧前端契约: df[{fs,type,size,used,avail,use,mount}] 人类可读 + lsblk JSON 原样
 	df := []map[string]interface{}{}

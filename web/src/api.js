@@ -156,8 +156,6 @@ export const api = {
   sysfUpdatesRefresh: () => req('POST', '/api/sysfunc/updates/refresh', {}),
   sysfUpdatesList: () => req('GET', '/api/sysfunc/updates/list'),
   sysfUpdatesRun: () => req('POST', '/api/sysfunc/updates/run', { confirm: 'yes' }),
-  sysfCronGet: (user) => req('GET', `/api/sysfunc/cron/get?user=${user || ''}`),
-  sysfCronSave: (user, content) => req('POST', '/api/sysfunc/cron/save', { user, content }),
   sysfDisks: () => req('GET', '/api/sysfunc/disks/fs'),
   sysfSnapCap: () => req('GET', '/api/sysfunc/snapshot/cap'),
   sysfSnapCreate: (name) => req('POST', '/api/sysfunc/snapshot/create', { name }),
@@ -279,4 +277,14 @@ export const api = {
   sysfBootHistory: () => req('GET', '/api/sysfunc/boot/history'),
   sysfApiStats: () => req('GET', '/api/sysfunc/api-monitor/stats'),
   sysfApiCalls: (n) => req('GET', `/api/sysfunc/api-monitor/calls?limit=${n || 300}`),
+  sysfApiClear: () => req('POST', '/api/sysfunc/api-monitor/clear', {}),
+
+  // 系统备份(目录打包 + 保留轮换 + 定时间隔)
+  bkpList: () => req('GET', '/api/sysfunc/backup/jobs'),
+  bkpCreate: (job) => req('POST', '/api/sysfunc/backup/jobs', job),
+  bkpUpdate: (name, patch) => req('POST', '/api/sysfunc/backup/jobs/update', { name, ...patch }),
+  bkpDelete: (name) => req('POST', '/api/sysfunc/backup/jobs/delete', { name }),
+  bkpRun: (name) => req('POST', '/api/sysfunc/backup/jobs/run', { name }),
+  bkpRuns: () => req('GET', '/api/sysfunc/backup/runs'),
+  bkpDeleteRun: (file) => req('POST', '/api/sysfunc/backup/runs/delete', { file }),
 }
