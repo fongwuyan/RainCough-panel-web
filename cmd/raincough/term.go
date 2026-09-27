@@ -148,8 +148,3 @@ func (s *server) handleTermClose(w http.ResponseWriter, r *http.Request) {
 	globalTerm.Close(b.SID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
 }
-
-// handleTermSessions GET /api/terminal/sessions
-func (s *server) handleTermSessions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"sessions": globalTerm.List()})
-}

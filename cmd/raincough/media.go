@@ -100,10 +100,6 @@ func (s *server) handleMediaTag(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"results": results})
 }
 
-func (s *server) handleMediaTags(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"tags": []string{}})
-}
-
 // ---- /api/media/dedup 相似图片检测(按文件大小分组简化) ----
 func (s *server) handleMediaDedup(w http.ResponseWriter, r *http.Request) {
 	var b struct {

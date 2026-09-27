@@ -81,13 +81,6 @@ func (s *server) handleEnvStartStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "name": b.Name, "action": action, "message": "ok"})
 }
 
-// handleStorage GET /api/storage (插件存储路径)
-func (s *server) handleStorage(w http.ResponseWriter, r *http.Request) {
-	// 简版: 汇总插件目录 df
-	result := map[string]interface{}{}
-	writeJSON(w, http.StatusOK, result)
-}
-
 // handleWsToken GET /api/terminal/ws_token
 func (s *server) handleWsToken(w http.ResponseWriter, r *http.Request) {
 	// 旧面板由 PHP websocket 消费; 新面板走 SSE, 返回空 token 兼容前端

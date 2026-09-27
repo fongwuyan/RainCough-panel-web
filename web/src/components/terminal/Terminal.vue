@@ -51,10 +51,6 @@ function openSession(spec) {
   openSocket(s)
 }
 
-function wsUrl() {
-  return api.tmWsUrl(24, 80)
-}
-
 function openSocket(s) {
   s.closed = false
   s.connecting = true

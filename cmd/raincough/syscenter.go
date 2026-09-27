@@ -61,78 +61,13 @@ func (s *server) handleSysCenter(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "output": out})
 
-	// 进程
-	case sub == "process/list" && r.Method == http.MethodGet:
-		list, err := globalSys.ProcessList()
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"processes": list})
-
-	case sub == "process/kill" && r.Method == http.MethodPost:
-		var b struct {
-			PID string `json:"pid"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
-			return
-		}
-		out, err := globalSys.KillProcess(b.PID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error(), "output": out})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
-
-	// 日志
-	case sub == "log" && r.Method == http.MethodGet:
-		path := r.URL.Query().Get("path")
-		lines := 200
-		if l := r.URL.Query().Get("lines"); l != "" {
-			var n int
-			if _, err := fmtSscan(l, &n); err == nil {
-				lines = n
-			}
-		}
-		grep := r.URL.Query().Get("grep")
-		logs, err := globalSys.TailLog(path, lines, grep)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"path": path, "logs": logs})
-
-	case sub == "log/journal" && r.Method == http.MethodGet:
-		unit := r.URL.Query().Get("unit")
-		lines := 100
-		logs, err := globalSys.JournalLog(unit, lines)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"unit": unit, "logs": logs})
-
-	// 防火墙
-	case (sub == "fw/status" || sub == "fw/all") && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, func() map[string]interface{} {
-			st, err := globalSys.FirewallStatus()
-			if err != nil {
-				return map[string]interface{}{"error": err.Error()}
-			}
-			// 前端 fw/all 期望完整规则列表
-			st["all"] = st["rules"]
-			return st
-		}())
-
-	// 接口监控(简单计数: 返回空统计, 保持契约)
-	case strings.HasPrefix(sub, "api-monitor/stats") && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"total": 0, "by_status": map[string]int{}, "by_path": map[string]int{},
-		})
-	case strings.HasPrefix(sub, "api-monitor/calls") && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]interface{}{"calls": []interface{}{}})
+	// 接口监控(真实数据: apiMon 中间件在请求链路上采集)
+	case sub == "api-monitor/stats" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, apiMon.stats())
+	case sub == "api-monitor/calls" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]interface{}{"calls": apiMon.recent()})
 	case sub == "api-monitor/clear" && r.Method == http.MethodPost:
+		apiMon.clear()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
 
 	default:

@@ -12,50 +12,49 @@ const { installOpen } = useUi()
 onMounted(load)
 
 const PAGES = [
-  { key: 'ws', label: '工作台', path: '/', desc: '概览与状态' },
-  { key: 'fm', label: '文件管理', path: '/fm', desc: '文件系统' },
-  { key: 'term', label: '终端', path: '/terminal', desc: 'Shell' },
-  { key: 'media', label: '媒体中心', path: '/media', desc: '图片视频' },
-  { key: 'store', label: '插件市场', path: '/store', desc: '安装更新' },
-  { key: 'envpkg', label: '环境包', path: '/envpkg', desc: '运行时' },
-  { key: 'tasks', label: '任务队列', path: '/tasks', desc: '下载安装' },
-  { key: 'settings', label: '设置', path: '/settings', desc: '偏好' },
-  { key: 'docs', label: '开发文档', path: '/docs', desc: '插件指南' },
+  { key: 'workspace', label: '工作台', path: '/', desc: '概览与状态', icon: 'WD' },
+  { key: 'fm', label: '文件管理', path: '/fm', desc: '文件系统', icon: 'FM' },
+  { key: 'terminal', label: '终端', path: '/terminal', desc: 'Shell', icon: 'TM' },
+  { key: 'media', label: '媒体中心', path: '/media', desc: '图片视频', icon: 'MD' },
+  { key: 'tasks', label: '任务队列', path: '/tasks', desc: '下载安装', icon: 'TQ' },
+  { key: 'store', label: '插件市场', path: '/store', desc: '安装更新', icon: 'MK' },
+  { key: 'envpkg', label: '环境包', path: '/envpkg', desc: '运行时', icon: 'EN' },
+  { key: 'settings', label: '设置', path: '/settings', desc: '偏好', icon: 'SG' },
+  { key: 'docs', label: '开发文档', path: '/docs', desc: '插件指南', icon: 'DC' },
 ]
 // 「系统」分组: 系统中心20个子功能拆分为侧边栏直达项; 能融合的已融合
 // (系统日志/进程管理 与独立页面 /logs /processes 合一; 服务健康/接口总览/定时任务 并入组内)
 const sysOpen = ref(true)
 const SYS_GROUPS = [
   { title: '监控与诊断', items: [
-    { label: '健康检查', path: '/sysfunc/health', desc: '面板自检与重启' },
-    { label: '硬件信息', path: '/sysfunc/hw', desc: 'CPU/内存/主板/温度' },
-    { label: '事件时间线', path: '/sysfunc/events', desc: '系统操作留痕' },
-    { label: '接口监控', path: '/sysfunc/api', desc: '路由与请求流水' },
-    { label: '接口总览', path: '/ifaces', desc: '服务总线接口目录' },
-    { label: '启动历史', path: '/sysfunc/boot', desc: '开机/重启记录' },
+    { label: '健康检查', path: '/sysfunc/health', desc: '面板自检与重启', icon: 'HI' },
+    { label: '硬件信息', path: '/sysfunc/hw', desc: 'CPU/内存/主板/温度', icon: 'HW' },
+    { label: '事件时间线', path: '/sysfunc/events', desc: '系统操作留痕', icon: 'EV' },
+    { label: '接口监控', path: '/sysfunc/api', desc: '路由与请求流水', icon: 'IM' },
+    { label: '接口总览', path: '/ifaces', desc: '服务总线接口目录', icon: 'IF' },
+    { label: '启动历史', path: '/sysfunc/boot', desc: '开机/重启记录', icon: 'BT' },
   ]},
   { title: '服务与系统', items: [
-    { label: '服务管理', path: '/sysfunc/svc', desc: 'systemd 启停' },
-    { label: '服务健康', path: '/plughealth', desc: '插件与服务健康诊断' },
-    { label: '防火墙/监听', path: '/sysfunc/fw', desc: '规则与端口' },
-    { label: '系统更新', path: '/sysfunc/up', desc: 'apt 升级' },
-    { label: '内核管理', path: '/sysfunc/kern', desc: '内核包' },
-    { label: '时间/NTP', path: '/sysfunc/tz', desc: '时区同步' },
-    { label: '用户/密钥', path: '/sysfunc/usr', desc: '用户与 SSH 密钥' },
-    { label: '关机/重启', path: '/sysfunc/pwr', desc: '电源计划' },
+    { label: '服务管理', path: '/sysfunc/svc', desc: 'systemd 启停', icon: 'SV' },
+    { label: '服务健康', path: '/plughealth', desc: '插件与服务健康诊断', icon: 'HC' },
+    { label: '系统更新', path: '/sysfunc/up', desc: 'apt 升级', icon: 'UP' },
+    { label: '内核管理', path: '/sysfunc/kern', desc: '内核包', icon: 'KN' },
+    { label: '时间/NTP', path: '/sysfunc/tz', desc: '时区同步', icon: 'TZ' },
+    { label: '用户/密钥', path: '/sysfunc/usr', desc: '用户与 SSH 密钥', icon: 'US' },
+    { label: '关机/重启', path: '/sysfunc/pwr', desc: '电源计划', icon: 'PW' },
   ]},
   { title: '存储与数据', items: [
-    { label: '磁盘用量', path: '/sysfunc/disk', desc: 'df / lsblk' },
-    { label: '快照', path: '/sysfunc/snap', desc: '只读快照' },
-    { label: '存储清理', path: '/sysfunc/clean', desc: '缓存与占用 Top' },
-    { label: '系统备份', path: '/sysfunc/backup', desc: '备份与还原' },
-    { label: '日志保留', path: '/sysfunc/lr', desc: 'logrotate 配置' },
+    { label: '磁盘用量', path: '/sysfunc/disk', desc: 'df / lsblk', icon: 'DS' },
+    { label: '快照', path: '/sysfunc/snap', desc: '只读快照', icon: 'SN' },
+    { label: '存储清理', path: '/sysfunc/clean', desc: '缓存与占用 Top', icon: 'CL' },
+    { label: '系统备份', path: '/sysfunc/backup', desc: '备份与还原', icon: 'BK' },
+    { label: '日志保留', path: '/sysfunc/lr', desc: 'logrotate 配置', icon: 'LR' },
   ]},
   { title: '日志 · 进程 · 计划', items: [
-    { label: '系统日志', path: '/logs', desc: 'journal/面板日志(融合)' },
-    { label: '进程管理', path: '/processes', desc: '进程列表(融合)' },
-    { label: 'Crontab', path: '/sysfunc/cron', desc: '系统 crontab 文本' },
-    { label: '定时任务', path: '/scheduler', desc: '调度器编排' },
+    { label: '系统日志', path: '/logs', desc: 'journal/面板日志(融合)', icon: 'LG' },
+    { label: '进程管理', path: '/processes', desc: '进程列表(融合)', icon: 'PS' },
+    { label: 'Crontab', path: '/sysfunc/cron', desc: '系统 crontab 文本', icon: 'CR' },
+    { label: '定时任务', path: '/scheduler', desc: '调度器编排', icon: 'SC' },
   ]},
 ]
 const searchQ = ref('')
@@ -103,6 +102,8 @@ function isActive(name) {
   return route.name === 'plugin' && route.params.name === name
 }
 function activeByPath(p) { return route.path === p }
+const sysActive = computed(() => SYS_GROUPS.some((g) => g.items.some((i) => activeByPath(i.path))))
+const sysCount = computed(() => SYS_GROUPS.reduce((n, g) => n + g.items.length, 0))
 </script>
 
 <template>
@@ -128,27 +129,28 @@ function activeByPath(p) { return route.path === p }
       </div>
     </div>
     <nav class="plugin-list">
-      <div class="plugin-item" :class="{ active: isActive('workspace') }" @click="go('/')">
+      <div
+        v-for="p in PAGES.slice(0, 3)"
+        :key="p.key"
+        class="plugin-item"
+        :class="{ active: isActive(p.key) }"
+        @click="go(p.path)"
+      >
+        <div class="nav-icon">{{ p.icon }}</div>
         <div class="info">
-          <div class="label">工作台</div>
-          <div class="desc">概览与状态</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('fm') }" @click="go('/fm')">
-        <div class="info">
-          <div class="label">文件管理</div>
-          <div class="desc">服务器文件系统</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('terminal') }" @click="go('/terminal')">
-        <div class="info">
-          <div class="label">终端</div>
-          <div class="desc">服务器 Shell</div>
+          <div class="label">{{ p.label }}</div>
+          <div class="desc">{{ p.desc }}</div>
         </div>
       </div>
 
-      <div class="sidebar-section-label" style="cursor:pointer;user-select:none" @click="sysOpen = !sysOpen">
-        系统 <span style="float:right;opacity:.65">{{ sysOpen ? '▾' : '▸' }}</span>
+      <div
+        class="sidebar-section-label sys-toggle"
+        :class="{ 'sys-active': sysActive }"
+        @click="sysOpen = !sysOpen"
+      >
+        <span class="sys-caret">{{ sysOpen ? '▾' : '▸' }}</span>
+        <span>系统</span>
+        <span class="sys-count">{{ sysCount }}</span>
       </div>
       <template v-if="sysOpen">
         <template v-for="g in SYS_GROUPS" :key="g.title">
@@ -160,6 +162,7 @@ function activeByPath(p) { return route.path === p }
             :class="{ active: activeByPath(p.path) }"
             @click="go(p.path)"
           >
+            <div class="nav-icon sys-ico">{{ p.icon }}</div>
             <div class="info">
               <div class="label">{{ p.label }}</div>
               <div class="desc">{{ p.desc }}</div>
@@ -167,40 +170,17 @@ function activeByPath(p) { return route.path === p }
           </div>
         </template>
       </template>
-      <div class="plugin-item" :class="{ active: isActive('media') }" @click="go('/media')">
+      <div
+        v-for="p in PAGES.slice(3)"
+        :key="p.key"
+        class="plugin-item"
+        :class="{ active: isActive(p.key) }"
+        @click="go(p.path)"
+      >
+        <div class="nav-icon">{{ p.icon }}</div>
         <div class="info">
-          <div class="label">媒体中心</div>
-          <div class="desc">图片与视频聚合</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('tasks') }" @click="go('/tasks')">
-        <div class="info">
-          <div class="label">任务队列</div>
-          <div class="desc">下载/安装/生成</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('store') }" @click="go('/store')">
-        <div class="info">
-          <div class="label">插件市场</div>
-          <div class="desc">安装/更新/卸载</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('envpkg') }" @click="go('/envpkg')">
-        <div class="info">
-          <div class="label">环境包</div>
-          <div class="desc">运行时管理</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('settings') }" @click="go('/settings')">
-        <div class="info">
-          <div class="label">设置</div>
-          <div class="desc">主题与偏好</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('docs') }" @click="go('/docs')">
-        <div class="info">
-          <div class="label">开发文档</div>
-          <div class="desc">插件开发指南</div>
+          <div class="label">{{ p.label }}</div>
+          <div class="desc">{{ p.desc }}</div>
         </div>
       </div>
 
@@ -231,19 +211,61 @@ function activeByPath(p) { return route.path === p }
 
 <style scoped>
 .sidebar-sub-label {
-  padding: 5px 10px 2px 14px;
-  font-size: 11px;
-  color: var(--text-faint);
-  border-left: 2px solid var(--border);
-  margin: 7px 0 2px;
-}
-.sys-sub {
-  padding-left: 6px;
-}
-.sys-sub .label {
-  font-size: 13px;
-}
-.sys-sub .desc {
+  padding: 6px 10px 3px 14px;
   font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  border-left: 2px solid var(--border);
+  margin: 8px 0 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+.sys-toggle {
+  cursor: pointer;
+  user-select: none;
+  border-left: 2px solid transparent;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+.sys-toggle:hover { color: var(--text-muted); background: var(--surface-2); }
+.sys-toggle.sys-active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+.sys-caret {
+  display: inline-block;
+  width: 14px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.sys-toggle.sys-active .sys-caret { color: var(--accent); }
+.sys-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+.sys-toggle.sys-active .sys-count {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.sys-sub { padding-left: 4px; }
+.sys-sub .sys-ico {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+.sys-sub .label { font-size: 13px; }
+.sys-sub .desc { font-size: 10px; }
+.sys-sub.active { border-left: 2px solid var(--accent); }
 </style>

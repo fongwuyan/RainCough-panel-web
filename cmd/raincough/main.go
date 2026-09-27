@@ -153,7 +153,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", *port),
-		Handler:           mux,
+		Handler:           apiMon.serve(mux), // 接口监控中间件(记录 /api/* 计数与流水)
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	if cfg.HTTPReadTimeout > 0 {
@@ -210,7 +210,6 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/terminal/input", s.handleTermInput)
 	mux.HandleFunc("/api/terminal/resize", s.handleTermResize)
 	mux.HandleFunc("/api/terminal/close", s.handleTermClose)
-	mux.HandleFunc("/api/terminal/sessions", s.handleTermSessions)
 	mux.HandleFunc("/api/terminal/hosts", s.handleTermHosts)
 	mux.HandleFunc("/api/terminal/commands", s.handleTermCommands)
 
@@ -258,7 +257,6 @@ func (s *server) routes(mux *http.ServeMux) {
 	// ---- 旧前端兼容端点 ----
 	mux.HandleFunc("/api/disks", s.handleDisks)
 	mux.HandleFunc("/api/disks/unmount", s.handleDiskUnmount)
-	mux.HandleFunc("/api/storage", s.handleStorage)
 	mux.HandleFunc("/api/terminal/ws_token", s.handleWsToken)
 	mux.HandleFunc("/api/terminal/hosts/set_sort", s.handleTermHostsSetSort)
 	mux.HandleFunc("/api/sys/processes/kill", s.handleSysKill)
@@ -277,7 +275,6 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/media/thumb", s.handleMediaFile)
 	mux.HandleFunc("/api/media/file", s.handleMediaFile)
 	mux.HandleFunc("/api/media/tag", s.handleMediaTag)
-	mux.HandleFunc("/api/media/tags", s.handleMediaTags)
 	mux.HandleFunc("/api/media/dedup", s.handleMediaDedup)
 	mux.HandleFunc("/api/media/tool/", s.handleMediaTool)
 

@@ -9,7 +9,7 @@ import Processes from '../processes/Processes.vue'
 // 子级选项卡(父级为「系统中心」; 支持侧边栏深链 /sysfunc/<key>)
 const route = useRoute()
 const router = useRouter()
-const SUBKEYS = ['logs','processes','svc','fw','hw','up','cron','disk','snap','usr','clean','pwr','kern','tz','health','events','lr','backup','boot','api']
+const SUBKEYS = ['logs','processes','svc','hw','up','cron','disk','snap','usr','clean','pwr','kern','tz','health','events','lr','backup','boot','api']
 const sub = ref('logs')
 function activate(k) {
   if (!SUBKEYS.includes(k)) k = 'logs'
@@ -33,7 +33,6 @@ async function call(key, fn) {
 function loadSection(k) {
   const jobs = {
     svc: () => api.sysfServiceList(),
-    fw: () => api.sysfFw(),
     hw: () => api.sysfHardware(),
     up: () => api.sysfUpdatesList(),
     cron: () => api.sysfCronGet('f'),
@@ -51,6 +50,7 @@ function loadSection(k) {
     api: () => loadApi(),
   };
   if (jobs[k]) call(k, jobs[k])
+  if (k === 'snap') call('snapList', api.sysfSnapList) // 已有快照列表(此前从未拉取)
 }
 async function svcAct(u, act) {
   try { const r = await api.sysfServiceAction(u.unit, act); data.value.svcMsg = (r && (r.out || r.error)) || 'ok' } catch (e) { data.value.svcMsg = e.message }
@@ -94,7 +94,6 @@ const SUBS = [
   { key: 'logs', label: '系统日志' },
   { key: 'processes', label: '进程管理' },
   { key: 'svc', label: '服务管理' },
-  { key: 'fw', label: '防火墙/监听' },
   { key: 'hw', label: '硬件' },
   { key: 'up', label: '系统更新' },
   { key: 'cron', label: '定时任务' },
@@ -179,7 +178,8 @@ function toggleApiPoll() {
   if (sub.value === 'api') apiPoll('api')
 }
 async function clearApiCalls() { try { await api.sysfApiClear(); data.value.apiCalls = [] } catch (e) {} }
-function codeCls(c) { return c < 400 ? 'ok' : (c < 500 ? 'run' : 'err') }
+// (原 codeCls 已随状态码芯片内联化移除)
+
 
 // ---- 补充动作函数(模板引用, 旧源码缺) ----
 async function cleanDo(item) {
@@ -237,7 +237,7 @@ async function pwrCancel() {
         </div>
         <table class="table"><thead><tr><th>动作</th><th>时间</th></tr></thead>
           <tbody><tr v-for="(r,i) in (data.boot || {}).rows || []" :key="i">
-            <td><span class="tag-chip" :class="r.action === 'reboot' ? 'chip-ok' : 'chip-err'">{{ r.action }}</span></td><td class="mono faint">{{ r.when }}</td></tr></tbody></table>
+            <td><span class="tag-chip" :class="r.action === 'current' ? 'chip-ok' : 'chip-dim'">{{ r.action }}</span></td><td class="mono faint">{{ r.when }}</td></tr></tbody></table>
         <div v-if="!((data.boot || {}).rows || []).length" class="hint">无记录(或 last 无法读取)</div>
       </template>
       <template v-if="sub === 'api'">
@@ -308,29 +308,6 @@ async function pwrCancel() {
         </div>
       </template>
 
-      <template v-if="sub === 'fw'">
-        <div class="pane-head">
-          <span class="pane-title">防火墙与监听</span>
-          <span class="tag-chip chip-info">{{ ((data.fw || {}).firewall || {}).tool || '-' }}</span>
-          <span class="grow"></span>
-          <button class="btn btn-sm" @click="loadSection('fw')">⟳ 刷新</button>
-        </div>
-        <div class="split2">
-          <div>
-            <div class="pane-head" style="margin-top:0"><span class="pane-title">防火墙规则</span></div>
-            <pre class="mono-block pre panel-box">{{ ((data.fw || {}).firewall || {}).text || '(无规则或工具不可用)' }}</pre>
-          </div>
-          <div>
-            <div class="pane-head" style="margin-top:0">
-              <span class="pane-title">监听端口</span>
-              <span class="tag-chip chip-dim">{{ ((data.fw || {}).listen || []).length }}</span>
-            </div>
-            <table class="table"><thead><tr><th>协议</th><th>本地地址</th><th>对端</th><th>进程</th></tr></thead>
-              <tbody><tr v-for="(l,i) in (data.fw || {}).listen || []" :key="i"><td><span class="tag-chip chip-info">{{ l.proto }}</span></td><td class="mono">{{ l.local }}</td><td class="mono faint">{{ l.peer }}</td><td class="mono" style="font-size:11px">{{ l.proc }}</td></tr></tbody></table>
-          </div>
-        </div>
-      </template>
-
       <template v-if="sub === 'hw'">
         <div class="pane-head">
           <span class="pane-title">硬件概览</span>
@@ -339,7 +316,7 @@ async function pwrCancel() {
         </div>
         <div class="hv-grid">
           <div class="stat"><span class="st-k">CPU</span><b class="mono" style="font-size:13px">{{ ((data.hw || {}).cpu || {}).model || '-' }}</b><span class="faint">核数: {{ ((data.hw || {}).cpu || {}).cores || '-' }}</span></div>
-          <div class="stat"><span class="st-k">内存条</span><b class="mono">{{ (((data.hw || {}).memory || {}).sticks || []).length }} 条</b><span class="faint mono">{{ (((data.hw || {}).memory || {}).sticks || []).map(x => x.size + '@' + (x.speed || '?')).join(', ') }}</span></div>
+          <div class="stat"><span class="st-k">内存</span><template v-if="(((data.hw || {}).memory || {}).sticks || []).length"><b class="mono">{{ ((data.hw || {}).memory || {}).sticks.length }} 条</b><span class="faint mono">{{ (((data.hw || {}).memory || {}).sticks || []).map(x => x.size + (x.speed ? '@' + x.speed : '')).join(', ') }}</span></template><template v-else><b class="mono">{{ ((data.hw || {}).memory || {}).total ? (((data.hw || {}).memory || {}).total / 1073741824).toFixed(1) + ' GB' : '—' }}</b><span class="faint">物理内存总量</span></template></div>
           <div class="stat"><span class="st-k">主板</span><b class="mono" style="font-size:13px">{{ ((data.hw || {}).board || {}).vendor || '' }} {{ ((data.hw || {}).board || {}).model || '' }}</b></div>
           <div class="stat"><span class="st-k">温度传感器</span><b class="mono">{{ ((data.hw || {}).temps || []).length }} 个</b><span class="faint mono">{{ ((data.hw || {}).temps || []).map(t => t.chip + ':' + Object.values(t.values || {}).join('/')).join(' ').slice(0, 120) }}</span></div>
         </div>
@@ -642,7 +619,7 @@ async function pwrCancel() {
 .tl { border-left: 2px solid var(--border); padding-left: 12px; }
 .tl-item { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 12px; }
 .tl-time { color: var(--text-faint); font-size: 11px; width: 170px; }
-.tl-scope { color: var(--accent); font-weight: 700; width: 90px; }
+.tl-scope { color: var(--accent); font-weight: 700; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-act { color: var(--text-muted); width: 110px; }
 .tl-msg { color: var(--text); flex: 1; }
 .lr-layout { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }

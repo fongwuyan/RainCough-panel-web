@@ -26,7 +26,6 @@ export const api = {
   removePlugin: (name) => req('DELETE', `/api/plugins/${name}`),
   sysInfo: () => req('GET', '/api/system'),
   sysGpus: () => req('GET', '/api/system/gpus'),
-  sysStorage: () => req('GET', '/api/storage'),
   disks: () => req('GET', '/api/disks'),
   diskUnmount: (device) => req('POST', '/api/disks/unmount', { device }),
 
@@ -45,7 +44,6 @@ export const api = {
     if (grep) u += '&grep=' + encodeURIComponent(grep)
     return req('GET', u)
   },
-  pluginInvoke: (name, iface, params, timeoutMs) => req('POST', `/api/plugins/${name}/invoke`, { iface, params, timeout_ms: timeoutMs }),
 
   mtImage: (files, opts) => {
     const fd = new FormData()
@@ -133,8 +131,6 @@ export const api = {
   },
   fmMkdir: (path) => req('POST', '/api/fm/mkdir', { path }),
   fmRename: (path, newName) => req('POST', '/api/fm/rename', { path, new_name: newName }),
-  fmMove: (paths, dest) => req('POST', '/api/fm/move', { paths, dest }),
-  fmCopy: (paths, dest) => req('POST', '/api/fm/copy', { paths, dest }),
   fmDelete: (paths) => req('POST', '/api/fm/delete', { paths }),
   fmHash: (path, algo) => req('GET', `/api/fm/hash?path=${encodeURIComponent(path)}&algo=${algo}`),
   fmUnzip: (archive, dest, password) => req('POST', '/api/fm/unzip', { archive, dest, password }),
@@ -143,15 +139,9 @@ export const api = {
   fmSize: (paths) => req('POST', '/api/fm/size', { paths }),
   fmOpsStart: (op, paths, opts = {}) => req('POST', '/api/fm/ops', { op, paths, ...opts }),
   fmOpsList: () => req('GET', '/api/fm/ops'),
-  fmOpsGet: (id) => req('GET', `/api/fm/ops/${id}`),
   fmOpsCancel: (id) => req('POST', `/api/fm/ops/${id}/cancel`),
   fmOpsRemove: (id) => req('DELETE', `/api/fm/ops/${id}`),
   fmOpsDownload: (id) => `/api/fm/ops/${id}/download`,
-  fmArchive: (paths, format, name) => {
-    const qs = new URLSearchParams({ format: format || 'zip', name: name || 'archive' })
-    for (const p of paths) qs.append('paths', p)
-    return `/api/fm/archive?${qs.toString()}`
-  },
   fmPreview: (path) => req('GET', `/api/fm/preview?path=${encodeURIComponent(path)}`),
   fmSearch: (params) => {
     const qs = new URLSearchParams()
@@ -161,7 +151,7 @@ export const api = {
     return req('GET', `/api/fm/search?${qs.toString()}`)
   },
   sysfServiceAction: (unit, action) => req('POST', '/api/sysfunc/service/action', { unit, action }),
-  sysfFw: () => req('GET', '/api/sysfunc/fw/all'),
+  sysfServiceList: () => req('GET', '/api/sysfunc/service/list'),
   sysfHardware: () => req('GET', '/api/sysfunc/hardware'),
   sysfUpdatesRefresh: () => req('POST', '/api/sysfunc/updates/refresh', {}),
   sysfUpdatesList: () => req('GET', '/api/sysfunc/updates/list'),
@@ -200,7 +190,6 @@ export const api = {
   mediaThumb: (path) => `/api/media/thumb?path=${encodeURIComponent(path)}`,
   mediaFile: (path) => `/api/media/file?path=${encodeURIComponent(path)}`,
   mediaTag: (paths) => req('POST', '/api/media/tag', { paths }),
-  mediaTags: (path) => req('GET', `/api/media/tags?path=${encodeURIComponent(path)}`),
   mediaDedup: (root) => req('POST', '/api/media/dedup', { root }),
 
   vmInfo: (file) => {
@@ -227,14 +216,6 @@ export const api = {
     for (const f of files) fd.append('files', f)
     return reqForm('/api/media/tool/media?action=merge', fd)
   },
-  tmWsToken: () => req('GET', '/api/terminal/ws_token'),
-  tmWsUrl: async (rows, cols) => {
-    const d = await req('GET', '/api/terminal/ws_token')
-    const host = d.host || window.location.hostname
-    const port = d.port || 23080
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    return `${proto}://${host}:${port}/?token=${encodeURIComponent(d.token)}&rows=${rows}&cols=${cols}`
-  },
   tmHostsList: () => req('GET', '/api/terminal/hosts'),
   tmHostCreate: (h) => req('POST', '/api/terminal/hosts', h),
   tmHostUpdate: (h) => req('PUT', '/api/terminal/hosts', h),
@@ -246,12 +227,10 @@ export const api = {
   tmCommandDelete: (title) => req('DELETE', `/api/terminal/commands?title=${encodeURIComponent(title)}`),
 
   // 环境包管理 (envpkg 系统模块)
-  envRecipes: () => req('GET', '/api/envpkg/recipes'),
   envCatalog: () => req('GET', '/api/envpkg/catalog'),
   envList: () => req('GET', '/api/envpkg/envs'),
   envInstall: (name) => req('POST', '/api/envpkg/install', { name }),
   envInstallRT: (type, version) => req('POST', '/api/envpkg/install', { type, version }),
-  envTask: (id) => req('GET', `/api/envpkg/tasks/${id}`),
   envUninstall: (name) => req('POST', '/api/envpkg/uninstall', { name }),
   envStart: (name) => req('POST', '/api/envpkg/start', { name }),
   envStop: (name) => req('POST', '/api/envpkg/stop', { name }),

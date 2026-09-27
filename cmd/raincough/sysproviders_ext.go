@@ -457,11 +457,11 @@ func registerSystemProvidersMore(px *pluginx.PluginX) {
 			}},
 		{ID: "system.sys.logrotate.get", Visibility: "all", Version: "1", Description: "logrotate 配置",
 			Handler: func(params interface{}) (interface{}, error) {
-				c, err := globalSys.LogrotateList()
+				files, err := globalSys.LogrotateFiles()
 				if err != nil {
 					return nil, err
 				}
-				return map[string]interface{}{"content": c}, nil
+				return map[string]interface{}{"files": files}, nil
 			}},
 		{ID: "system.sys.logrotate.save", Visibility: "main", Version: "1", Description: "保存 logrotate 配置",
 			Handler: func(params interface{}) (interface{}, error) {
@@ -469,7 +469,7 @@ func registerSystemProvidersMore(px *pluginx.PluginX) {
 			}},
 		{ID: "system.sys.boot", Visibility: "all", Version: "1", Description: "启动历史",
 			Handler: func(params interface{}) (interface{}, error) {
-				return map[string]interface{}{"rows": globalSys.BootHistory(), "boot_started": time.Now().Format("2006-01-02 15:04:05")}, nil
+				return map[string]interface{}{"rows": globalSys.BootHistory(), "boot_started": time.Unix(sysMon.Snapshot().BootTime, 0).Format("2006-01-02 15:04:05")}, nil
 			}},
 		{ID: "system.sys.perf", Visibility: "all", Version: "1", Description: "性能趋势",
 			Handler: func(params interface{}) (interface{}, error) {
