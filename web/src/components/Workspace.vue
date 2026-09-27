@@ -87,6 +87,52 @@ function pushIface(name, up, down) {
   push(hist.ifaces[name].down, down)
 }
 
+// --- 常驻历史回填 ---
+// 服务端每秒采样落 data/workspace-history.ndjson(不限期, 仅"存储清理"可删),
+// 页面打开时取尾部若干点回填图表, 再由实时轮询接续。
+const histRestored = ref(0)
+async function hydrateHistory() {
+  try {
+    const h = await api.wsHistory(600)
+    const pts = (h && h.points) || []
+    const ser = (h && h.series) || []
+    if (!pts.length || !ser.length) return
+    const idx = {}
+    ser.forEach((n, i) => { idx[n] = i })
+    const direct = [
+      ['cpu', hist.cpu], ['mem', hist.mem], ['swap', hist.swap],
+      ['up', hist.netUp], ['down', hist.netDown], ['disk', hist.disk],
+      ['l1', hist.load1], ['l5', hist.load5], ['l15', hist.load15],
+    ]
+    const ifNames = new Set()
+    for (const p of pts) {
+      const v = p.v || []
+      for (const [name, arr] of direct) {
+        const i = idx[name]
+        push(arr, i != null && v[i] != null ? v[i] : 0)
+      }
+      for (let c = 0; c < 64; c++) {
+        const i = idx['pc' + c]
+        if (i == null) break
+        if (v[i] == null) continue
+        if (!hist.pc[c]) hist.pc[c] = []
+        push(hist.pc[c], v[i])
+      }
+      if (p.if) for (const n of Object.keys(p.if)) ifNames.add(n)
+    }
+    for (const n of ifNames) {
+      if (!hist.ifaces[n]) hist.ifaces[n] = { up: [], down: [] }
+      for (const p of pts) {
+        const a = p.if ? p.if[n] : null
+        pushIface(n, a ? a[0] : 0, a ? a[1] : 0)
+      }
+    }
+    histRestored.value = pts.length
+  } catch (e) {
+    // 历史不可用不影响实时轮询
+  }
+}
+
 const C = {
   mem: '#3fb950',
   swap: '#f0b429',
@@ -178,7 +224,11 @@ function pctBar(p) {
   return Math.max(0, Math.min(100, p || 0))
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 先回填常驻历史, 再起实时轮询(保证历史在前、实时接续, 不乱序)
+  try {
+    await Promise.race([hydrateHistory(), new Promise((r) => setTimeout(r, 5000))])
+  } catch (e) { /* 忽略 */ }
   loadSys()
   loadDisks()
   loadGpus()
@@ -277,7 +327,7 @@ async function loadSys() {
 <template>
   <div>
     <h1>工作台</h1>
-    <div class="subtitle">已加载 {{ plugins.length }} 个插件</div>
+    <div class="subtitle">已加载 {{ plugins.length }} 个插件<span v-if="histRestored"> · 已回填常驻历史 {{ histRestored }} 点（服务端每秒采样 · 不限期 · 仅「存储清理」可清）</span></div>
         
     <div class="section" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
       <div>

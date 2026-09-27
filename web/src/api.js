@@ -287,4 +287,7 @@ export const api = {
   bkpRun: (name) => req('POST', '/api/sysfunc/backup/jobs/run', { name }),
   bkpRuns: () => req('GET', '/api/sysfunc/backup/runs'),
   bkpDeleteRun: (file) => req('POST', '/api/sysfunc/backup/runs/delete', { file }),
+
+  // 工作台常驻历史(服务端每秒采样, 不限期; 唯一清理入口=存储清理)
+  wsHistory: (points) => req('GET', '/api/workspace/history?points=' + (points || 600)),
 }

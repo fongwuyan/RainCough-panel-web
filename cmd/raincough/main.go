@@ -155,6 +155,11 @@ func main() {
 	perf = core.NewPerfTracker(sysMon)
 	go perf.Run()
 
+	// 工作台常驻历史: 每秒采样追加 data/workspace-history.ndjson
+	// 不限期(永不过期/不轮转), 唯一清理入口是"存储清理"(key=workspace)
+	globalWSH = core.NewWSHistory(filepath.Join(cfg.DataDir, "workspace-history.ndjson"))
+	globalWSH.Start(sysMon)
+
 	s := &server{cfg: cfg, sd: sd}
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -185,6 +190,9 @@ func main() {
 		if globalBkp != nil {
 			globalBkp.Stop()
 		}
+		if globalWSH != nil {
+			globalWSH.Stop()
+		}
 		globalPX.Stop()
 		sd.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -203,6 +211,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	// ---- 核心 API ----
 	mux.HandleFunc("/api/system", s.handleSystem)
 	mux.HandleFunc("/api/system/", s.handleSystemSub)
+	mux.HandleFunc("/api/workspace/history", s.handleWSHistory)
 
 	// ---- 文件管理 ----
 	mux.HandleFunc("/api/fm/ops", s.handleFmOps)  // 列表只在无子路径时生效

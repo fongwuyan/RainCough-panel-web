@@ -184,8 +184,19 @@ async function clearApiCalls() { try { await api.sysfApiClear(); data.value.apiC
 
 // ---- 补充动作函数(模板引用, 旧源码缺) ----
 async function cleanDo(item) {
-  if (!confirm('清理 ' + (item.label || item.key) + ' ?')) return
-  try { const r = await api.sysfCleanDo(item.key); toast(r && r.ok !== false ? '已清理' : ((r && r.error) || '清理失败')) } catch (e) { toast('清理失败: ' + e.message) }
+  // 逐项确认: 常驻类数据给出不可恢复警告
+  let msg = '清理「' + (item.label || item.key) + '」' + (item.path ? ' (' + item.path + ')' : '') + ' ?'
+  if (item.key === 'workspace') {
+    msg = '确定清除【工作台常驻历史】？\n\n' +
+      '· 该数据永久保存、从不自动过期，「存储清理」是唯一删除入口\n' +
+      '· 清除后不可恢复，工作台图表将从零重新累积\n\n继续？'
+  }
+  if (!confirm(msg)) return
+  try {
+    const r = await api.sysfCleanDo(item.key)
+    if (r && r.ok !== false) toast(r && r.output ? String(r.output).trim() : '已清理')
+    else toast((r && r.error) || '清理失败')
+  } catch (e) { toast('清理失败: ' + e.message) }
   loadSection('clean')
 }
 async function kernRemove(pkg) {
@@ -435,6 +446,8 @@ async function pwrCancel() {
             <div class="pane-head" style="margin-top:0"><span class="pane-title">清理项</span></div>
             <div v-for="it in (data.clean || {}).items || []" :key="it.key" class="clean-row">
               <span>{{ it.label }}</span>
+              <span v-if="it.key === 'workspace'" class="tag-chip" title="永久保存, 不自动过期, 仅本页可删">常驻·不限期</span>
+              <span class="mono faint" style="font-size:11px;word-break:break-all">{{ it.path }}</span>
               <span class="grow"></span>
               <span class="mono">{{ it.size }}</span>
               <button class="btn btn-sm btn-danger" @click="cleanDo(it)">清理</button>

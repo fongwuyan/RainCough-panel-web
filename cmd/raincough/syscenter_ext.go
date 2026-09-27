@@ -204,6 +204,15 @@ func (s *server) sysfClean(w http.ResponseWriter, r *http.Request) {
 			}
 			out = append(out, m)
 		}
+		// 工作台常驻历史(不限期, 唯一清理入口在此页)
+		if globalWSH != nil {
+			out = append(out, map[string]interface{}{
+				"key":   "workspace",
+				"path":  globalWSH.Path(),
+				"size":  globalWSH.Size(),
+				"label": "workspace-history · 工作台常驻历史",
+			})
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"items": out, "dirs": cleanTopDirs()})
 	} else if sub == "do" {
 		var b struct {
@@ -217,6 +226,12 @@ func (s *server) sysfClean(w http.ResponseWriter, r *http.Request) {
 			out, err = globalSys.CleanApt()
 		case "tmp":
 			out, err = globalSys.CleanTmp()
+		case "workspace":
+			if globalWSH == nil {
+				err = fmt.Errorf("历史模块未初始化")
+			} else {
+				out, err = globalWSH.Clear()
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": err == nil, "output": out, "error": errStr(err)})
 	}

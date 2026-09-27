@@ -262,12 +262,12 @@ func (sc *SysCenter) SaveSSHKeys(user, keys string) error {
 }
 
 // CleanScan 清理候选扫描(apt 缓存 / tmp)。
+// 大小优先用 sudo du(白名单已放行 /usr/bin/du, 含不可读子目录, 口径与真实一致),
+// 失败再退化为本地 walk。
 func (sc *SysCenter) CleanScan() []map[string]interface{} {
-	aptSize, _ := DirSize("/var/cache/apt")
-	tmpSize, _ := DirSize("/tmp")
 	return []map[string]interface{}{
-		{"key": "apt", "path": "/var/cache/apt", "size": aptSize, "label": "apt-cache"},
-		{"key": "tmp", "path": "/tmp", "size": tmpSize, "label": "tmp-files"},
+		{"key": "apt", "path": "/var/cache/apt", "size": sc.DirSizeCached("/var/cache/apt"), "label": "apt-cache"},
+		{"key": "tmp", "path": "/tmp", "size": sc.DirSizeCached("/tmp"), "label": "tmp-files"},
 	}
 }
 
@@ -276,9 +276,39 @@ func (sc *SysCenter) CleanApt() (string, error) {
 	return sc.Sudo("apt", "clean")
 }
 
+// DirSizeCached 目录大小: sudo du(精确, 含 root 私有目录) → 本地 DirSize 兜底。
+func (sc *SysCenter) DirSizeCached(path string) int64 {
+	if out, err := sc.Sudo("/usr/bin/du", "-s", "-B1", "--", path); err == nil {
+		if f := strings.Fields(strings.TrimSpace(out)); len(f) > 0 {
+			if v, e := strconv.ParseInt(f[0], 10, 64); e == nil && v > 0 {
+				return v
+			}
+		}
+	}
+	v, _ := DirSize(path)
+	return v
+}
+
 // CleanTmp 清理 /tmp 一级内容。
+// 旧实现经 sh -c 调用 → sudoers 白名单不放行 sh, 【恒失败】(reader 已记载)。
+// 现改为固定参数的 find: 精确放行(见宿主 /etc/sudoers.d/91-raincough-find),
+// 并【剪枝 systemd-private-* / snap-private-*】避免删掉在跑服务的私有 /tmp;
+// 提权不可用时降级为当前用户可删部分(报告里注明)。
 func (sc *SysCenter) CleanTmp() (string, error) {
-	return sc.Sudo("sh", "-c", "find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} +")
+	args := []string{"/tmp", "-mindepth", "1", "-maxdepth", "1",
+		"-not", "-name", "systemd-private-*",
+		"-not", "-name", "snap-private-*",
+		"-exec", "rm", "-rf", "{}", "+"}
+	full := append([]string{"/usr/bin/find"}, args...)
+	if out, err := sc.Sudo(full...); err == nil {
+		return out, nil
+	} else {
+		out2, err2 := sc.Run("/usr/bin/find", args...)
+		if err2 != nil {
+			return "", fmt.Errorf("提权清理失败: %v; 降级清理也失败: %v", err, err2)
+		}
+		return strings.TrimSpace(out2) + "\n(降级模式: 无提权, 仅清理当前用户可删除的条目, root 私有目录未动)", nil
+	}
 }
 
 // PwrState 已排程的关机/重启状态。

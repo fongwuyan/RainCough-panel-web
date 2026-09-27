@@ -175,18 +175,20 @@ func Delete(path string) error {
 }
 
 // DirSize 计算目录总大小(byte)。
+// 注意: 遇到不可读项(如 700 root 目录)【跳过继续】, 绝不中断统计 ——
+// 旧实现一处权限错误即中止, 导致 /tmp 这类目录被严重低报(实测 31.5M vs 真实 1.1G)。
 func DirSize(path string) (int64, error) {
 	var total int64
-	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return nil // 跳过不可读文件/目录, 继续累计
 		}
 		if !info.IsDir() {
 			total += info.Size()
 		}
 		return nil
 	})
-	return total, err
+	return total, nil
 }
 
 // PreviewType 由扩展名推断预览类型。
