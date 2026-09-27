@@ -209,7 +209,7 @@ func (s *server) sysfClean(w http.ResponseWriter, r *http.Request) {
 			out = append(out, map[string]interface{}{
 				"key":   "workspace",
 				"path":  globalWSH.Path(),
-				"size":  globalWSH.Size(),
+				"size":  humanBytes(uint64(globalWSH.Size())), // 与其余项同口径(人类可读)
 				"label": "workspace-history · 工作台常驻历史",
 			})
 		}
