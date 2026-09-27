@@ -128,11 +128,25 @@ function closeSocket(s) {
 function sendMsg(s, obj) {
   if (!s || !s.wsId) return
   if (obj && obj.type === 'input' && obj.data != null) {
-    const b64 = btoa(unescape(encodeURIComponent(obj.data)))
-    api.tmInput(s.wsId, b64).catch(() => {})
+    // 输入合并: 连续输入在 16ms 窗口内拼成一次 POST(快速打字/自动重复时,
+    // 请求数从"每键一个"降到约 60/s, 减少往返与接口监控噪音); 粘贴大块立即冲刷
+    s._inBuf = (s._inBuf || '') + obj.data
+    if (!s._inTimer) s._inTimer = setTimeout(() => flushInput(s), 16)
+    if (s._inBuf.length > 4096) flushInput(s)
   } else if (obj && obj.type === 'resize') {
+    flushInput(s) // 先冲刷输入, 再同步尺寸
     api.tmResize(s.wsId, obj.rows, obj.cols).catch(() => {})
   }
+}
+
+function flushInput(s) {
+  if (!s) return
+  if (s._inTimer) { clearTimeout(s._inTimer); s._inTimer = null }
+  const data = s._inBuf || ''
+  s._inBuf = ''
+  if (!data || !s.wsId) return
+  const b64 = btoa(unescape(encodeURIComponent(data)))
+  api.tmInput(s.wsId, b64).catch(() => {})
 }
 
 function activate(i) {
@@ -162,6 +176,8 @@ function retryActive() {
 function closeSession(s) {
   s._userClose = true
   s.closed = true
+  if (s._inTimer) { clearTimeout(s._inTimer); s._inTimer = null } // 丢弃未冲刷的输入, 避免悬挂定时器
+  s._inBuf = ''
   closeSocket(s)
   if (s.wsId) { api.tmClose(s.wsId).catch(() => {}) }
   s.wsId = ''

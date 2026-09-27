@@ -55,6 +55,10 @@ func (s *server) handleTermStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	disconnect := r.Context().Done()
+	// 事件驱动推送: 会话有新输出/关闭即刻唤醒(旧实现 1s 轮询 → 回显最多延迟 1 秒,
+	// 表现为"输入缓慢、回显一顿一顿"); 15s 注释心跳保活, 防代理/浏览器空闲掐线。
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
 	for {
 		chunks, _, closed := sess.DrainAll()
 		for _, c := range chunks {
@@ -67,12 +71,14 @@ func (s *server) handleTermStream(w http.ResponseWriter, r *http.Request) {
 		}
 		flusher.Flush()
 
-		// 等新数据(1s 超时做心跳)
 		select {
 		case <-disconnect:
 			return
-		case <-time.After(1 * time.Second):
-			continue
+		case <-sess.Notify():
+			// 新输出/关闭 → 立刻进入下一轮 drain(零等待)
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
 		}
 	}
 }

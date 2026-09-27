@@ -31,6 +31,10 @@ type TermSession struct {
 	// 输出缓冲(base64 块), SSE 分块推送
 	buf  []string
 	cond *sync.Cond
+
+	// 事件驱动通知: 新输出/关闭时非阻塞唤醒 SSE 推送循环。
+	// (旧实现 SSE 侧 1s 轮询 DrainAll → 回显最多延迟 1 秒, 表现为"输入缓慢、一顿一顿")
+	notify chan struct{}
 }
 
 // TermManager 终端会话管理器。
@@ -83,7 +87,8 @@ func (m *TermManager) Open(rows, cols int) (*TermSession, error) {
 		ID: sid, Rows: rows, Cols: cols,
 		Created: time.Now(), LastSeen: time.Now(),
 		ptmx: ptmx, cmd: cmd,
-		cond: sync.NewCond(&sync.Mutex{}),
+		cond:  sync.NewCond(&sync.Mutex{}),
+		notify: make(chan struct{}, 1),
 	}
 	m.sessions[sid] = s
 	m.mu.Unlock()
@@ -214,7 +219,23 @@ func (s *TermSession) markClosed() {
 	s.cond.L.Lock()
 	s.cond.Broadcast()
 	s.cond.L.Unlock()
+	s.signal()
 }
+
+// signal 非阻塞唤醒 SSE 推送循环(缓冲 1; 满即丢弃 —— 已有未消费的唤醒,
+// 消费方下一轮 DrainAll 会取走全部缓冲, 不会漏数据)。
+func (s *TermSession) signal() {
+	if s.notify == nil {
+		return
+	}
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+}
+
+// Notify 返回"有新输出/会话关闭"的通知通道(事件驱动, 供 SSE 使用)。
+func (s *TermSession) Notify() <-chan struct{} { return s.notify }
 
 // readLoop 读 pty 输出, 增量 UTF-8 解码入缓冲。
 func (s *TermSession) readLoop() {
@@ -267,6 +288,7 @@ func (s *TermSession) appendOutput(data []byte) {
 	}
 	s.cond.Broadcast()
 	s.cond.L.Unlock()
+	s.signal() // 立刻唤醒 SSE(原来要等下一个 1s 轮询)
 }
 
 // DrainAll 返回自 fromSeq 以来的全部输出(base64 列表), 并传回最新序号。

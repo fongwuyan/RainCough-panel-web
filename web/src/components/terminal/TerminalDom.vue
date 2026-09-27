@@ -175,9 +175,23 @@ function refreshScrollbar() {
   tk.style.top = (maxTop * posRatio) + 'px'
 }
 
-function schedule() { renderAll() }
+// rAF 合帧渲染: 一次 pty 输出会同时触发 term 变更 watcher 与外部 forceDraw,
+// 合并到下一帧只渲染一次 → 重输出(ls -R / 解压日志)时显著降低主线程占用。
+// 后台标签 rAF 不触发 → 用 0ms 定时器兜底, 避免帧号卡死。
+let rafId = 0
+let rafByTimeout = false
+function schedule() {
+  if (rafId) return
+  if (typeof document !== 'undefined' && document.hidden) {
+    rafByTimeout = true
+    rafId = setTimeout(() => { rafId = 0; rafByTimeout = false; renderAll() }, 0)
+    return
+  }
+  rafByTimeout = false
+  rafId = requestAnimationFrame(() => { rafId = 0; renderAll() })
+}
 
-function forceDraw() { renderAll() }
+function forceDraw() { schedule() }
 
 // ---- 键盘 ----
 function onKeyDown(e) {
@@ -303,8 +317,8 @@ function tickCursor() {
   renderAll()
 }
 
-watch(() => props.term.redrawFull, () => renderAll())
-watch(() => props.term.cur, () => renderAll(), { deep: true })
+watch(() => props.term.redrawFull, () => schedule())
+watch(() => props.term.cur, () => schedule(), { deep: true })
 
 onMounted(() => {
   const wrap = wrapRef.value
