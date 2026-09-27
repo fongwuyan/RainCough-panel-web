@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -14,20 +16,139 @@ import (
 
 // ---- 系统中心扩展(旧前端 sysf* 契约的数据逻辑; HTTP 装配留在 cmd) ----
 
-// Hardware 硬件/内核信息(/proc + /sys)。
+// Hardware 硬件信息(/proc + /sys + DMI/hwmon)。
+// 同时携带旧前端期望的结构化字段 cpu/board/memory/temps/smart(双契约兼容)。
 func (sc *SysCenter) Hardware() map[string]interface{} {
 	out := map[string]interface{}{}
 	if b, err := os.ReadFile("/proc/cpuinfo"); err == nil {
 		out["cpuinfo"] = string(b)
-	}
-	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
-		out["meminfo"] = string(b)
+		model := ""
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(l, "model name") {
+				if i := strings.Index(l, ":"); i >= 0 {
+					model = strings.TrimSpace(l[i+1:])
+					break
+				}
+			}
+		}
+		out["cpu"] = map[string]interface{}{"model": model, "cores": runtime.NumCPU()}
 	}
 	out["cpu_count"] = runtime.NumCPU()
-	if sb, err := os.ReadFile("/sys/class/dmi/id/product_name"); err == nil {
-		out["product"] = strings.TrimSpace(string(sb))
+	mem := map[string]interface{}{}
+	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+		out["meminfo"] = string(b)
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(l, "MemTotal:") {
+				if f := strings.Fields(l); len(f) >= 2 {
+					if v, e := strconv.ParseInt(f[1], 10, 64); e == nil {
+						mem["total"] = v * 1024 // bytes
+					}
+				}
+			}
+		}
 	}
+	mem["sticks"] = sc.memorySticks()
+	out["memory"] = mem
+	vendor, _ := os.ReadFile("/sys/class/dmi/id/sys_vendor")
+	product, _ := os.ReadFile("/sys/class/dmi/id/product_name")
+	out["product"] = strings.TrimSpace(string(product))
+	out["board"] = map[string]interface{}{
+		"vendor": strings.TrimSpace(string(vendor)),
+		"model":  strings.TrimSpace(string(product)),
+	}
+	out["temps"] = sc.hwmonTemps()
+	out["smart"] = sc.smartStatus()
 	return out
+}
+
+// memorySticks 解析 dmidecode 内存条(不可用时返回空)。
+func (sc *SysCenter) memorySticks() []map[string]interface{} {
+	out, err := sc.Sudo("dmidecode", "-t", "memory")
+	if err != nil || !strings.Contains(out, "Memory Device") {
+		return []map[string]interface{}{}
+	}
+	sticks := []map[string]interface{}{}
+	for _, part := range strings.Split(out, "Memory Device")[1:] {
+		size, speed := "", ""
+		for _, l := range strings.Split(part, "\n") {
+			t := strings.TrimSpace(l)
+			if size == "" && strings.HasPrefix(t, "Size:") {
+				size = strings.TrimSpace(strings.TrimPrefix(t, "Size:"))
+			}
+			if speed == "" && strings.HasPrefix(t, "Speed:") {
+				speed = strings.TrimSpace(strings.TrimPrefix(t, "Speed:"))
+			}
+		}
+		if size == "" || strings.Contains(size, "No Module") || strings.Contains(size, "Unknown") || strings.Contains(size, "None") || strings.Contains(size, "Other") {
+			continue
+		}
+		sticks = append(sticks, map[string]interface{}{"size": size, "speed": strings.TrimPrefix(speed, "-")})
+	}
+	return sticks
+}
+
+// hwmonTemps 读取 /sys/class/hwmon 温度传感器。
+func (sc *SysCenter) hwmonTemps() []map[string]interface{} {
+	temps := []map[string]interface{}{}
+	chips, _ := filepath.Glob("/sys/class/hwmon/hwmon*")
+	for _, c := range chips {
+		nb, err := os.ReadFile(filepath.Join(c, "name"))
+		if err != nil {
+			continue
+		}
+		values := map[string]string{}
+		inputs, _ := filepath.Glob(filepath.Join(c, "temp*_input"))
+		for _, in := range inputs {
+			b, err := os.ReadFile(in)
+			if err != nil {
+				continue
+			}
+			v, err := strconv.ParseFloat(strings.TrimSpace(string(b)), 64)
+			if err != nil || v == 0 {
+				continue
+			}
+			lblFile := strings.TrimSuffix(in, "_input") + "_label"
+			lbl := filepath.Base(strings.TrimSuffix(in, "_input"))
+			if lb, err := os.ReadFile(lblFile); err == nil && strings.TrimSpace(string(lb)) != "" {
+				lbl = strings.TrimSpace(string(lb))
+			}
+			values[lbl] = fmt.Sprintf("%.0f°C", v/1000)
+		}
+		if len(values) > 0 {
+			temps = append(temps, map[string]interface{}{"chip": strings.TrimSpace(string(nb)), "values": values})
+		}
+	}
+	return temps
+}
+
+// smartStatus smartctl 健康概览(未安装时返回空)。
+func (sc *SysCenter) smartStatus() []map[string]interface{} {
+	if _, err := exec.LookPath("smartctl"); err != nil {
+		return []map[string]interface{}{}
+	}
+	scan, err := sc.Sudo("smartctl", "--scan")
+	if err != nil {
+		return []map[string]interface{}{}
+	}
+	res := []map[string]interface{}{}
+	for _, l := range strings.Split(scan, "\n") {
+		f := strings.Fields(l)
+		if len(f) == 0 {
+			continue
+		}
+		dev := f[0]
+		status := "UNKNOWN"
+		if out, e := sc.Sudo("smartctl", "-H", dev); e == nil {
+			switch {
+			case strings.Contains(out, "PASSED"), strings.Contains(out, "OK"):
+				status = "PASSED"
+			case strings.Contains(out, "FAILED"):
+				status = "FAILED"
+			}
+		}
+		res = append(res, map[string]interface{}{"dev": dev, "status": status})
+	}
+	return res
 }
 
 // AptUpgradable 可升级软件包列表(过滤 ls 头注释)。
@@ -183,16 +304,17 @@ func (sc *SysCenter) PwrCancel() (string, error) {
 	return sc.Sudo("shutdown", "-c")
 }
 
-// KernelList 已安装内核包列表。
-func (sc *SysCenter) KernelList() ([]string, error) {
+// KernelList 已安装内核包列表(修正: dpkg --list 首列为状态码, 包名在第 2 列)。
+func (sc *SysCenter) KernelList() ([]map[string]interface{}, error) {
 	out, err := sc.Sudo("dpkg", "--list", "linux-image-*")
-	var kernels []string
+	var kernels []map[string]interface{}
 	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "linux-image") {
-			f := strings.Fields(l)
-			if len(f) > 0 {
-				kernels = append(kernels, f[0])
-			}
+		if !strings.Contains(l, "linux-image") {
+			continue
+		}
+		f := strings.Fields(l)
+		if len(f) >= 3 && (f[0] == "ii" || f[0] == "rc" || f[0] == "un" || f[0] == "iU") {
+			kernels = append(kernels, map[string]interface{}{"status": f[0], "pkg": f[1], "ver": f[2]})
 		}
 	}
 	return kernels, err
@@ -225,38 +347,134 @@ func (sc *SysCenter) HealthChecks(service string) []map[string]interface{} {
 	return checks
 }
 
-// Events journal 最近事件时间线。
+// Events 面板/系统事件时间线(journalctl JSON; 过滤噪声单元, 结构化为旧前端契约)。
 func (sc *SysCenter) Events(limit int) ([]map[string]interface{}, error) {
-	out, err := sc.Run("journalctl", "--no-pager", "-n", fmt.Sprint(limit), "--output=short-iso")
+	n := limit * 3
+	if n < 60 {
+		n = 60
+	}
+	out, err := sc.Run("journalctl", "--no-pager", "-o", "json", "-n", strconv.Itoa(n))
 	events := []map[string]interface{}{}
 	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			events = append(events, map[string]interface{}{"line": line})
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var e map[string]interface{}
+		if json.Unmarshal([]byte(line), &e) != nil {
+			continue
+		}
+		unit, _ := e["_SYSTEMD_UNIT"].(string)
+		msg, _ := e["MESSAGE"].(string)
+		if msg == "" {
+			continue
+		}
+		keep := unit == "systemd.service" || unit == "systemd-logind.service" ||
+			unit == "raincough.service" || strings.HasPrefix(unit, "plugin-")
+		if !keep {
+			continue
+		}
+		var t int64
+		if v, ok := e["__REALTIME_TIMESTAMP"].(string); ok {
+			// journal 的时间戳是微秒
+			if us, e2 := strconv.ParseInt(v, 10, 64); e2 == nil {
+				t = us / 1000000
+			}
+		}
+		scope := strings.TrimSuffix(unit, ".service")
+		m := strings.ToLower(msg)
+		action := "log"
+		switch {
+		case strings.Contains(m, "fail"):
+			action = "fail"
+		case strings.Contains(m, "stopp"), strings.Contains(m, "deactivat"):
+			action = "stop"
+		case strings.Contains(m, "start"), strings.Contains(m, "activat"):
+			action = "start"
+		case strings.Contains(m, "shut"), strings.Contains(m, "power"):
+			action = "shutdown"
+		case strings.Contains(m, "reboot"):
+			action = "reboot"
+		}
+		if unit == "systemd.service" {
+			// "Started XXX Service." → scope 提取被操作对象
+			for _, p := range []string{"started ", "stopped ", "failed to start ", "deactivated ", "scheduled reboot"} {
+				if i := strings.Index(m, p); i >= 0 && i < len(msg)-len(p) {
+					desc := strings.Trim(strings.TrimSuffix(msg[i+len(p):], "."), `"'`)
+					if desc != "" && len(desc) <= 48 {
+						scope = desc
+					}
+					break
+				}
+			}
+		}
+		events = append(events, map[string]interface{}{
+			"t": t, "scope": scope, "action": action, "msg": msg,
+		})
+		if len(events) >= limit {
+			break
 		}
 	}
 	return events, err
 }
 
-// LogrotateList 读取 logrotate 主配置。
-func (sc *SysCenter) LogrotateList() (string, error) {
-	b, err := os.ReadFile("/etc/logrotate.conf")
-	return string(b), err
+// LogrotateFiles 主配置 + /etc/logrotate.d 下全部配置(旧前端 files[] 契约)。
+func (sc *SysCenter) LogrotateFiles() ([]map[string]interface{}, error) {
+	files := []map[string]interface{}{}
+	main, err := os.ReadFile("/etc/logrotate.conf")
+	if err == nil {
+		files = append(files, map[string]interface{}{
+			"name": "logrotate.conf", "path": "/etc/logrotate.conf", "content": string(main),
+		})
+	}
+	entries, _ := os.ReadDir("/etc/logrotate.d")
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		b, e2 := os.ReadFile(filepath.Join("/etc/logrotate.d", e.Name()))
+		if e2 != nil {
+			continue
+		}
+		files = append(files, map[string]interface{}{
+			"name": e.Name(), "path": "/etc/logrotate.d/" + e.Name(), "content": string(b),
+		})
+	}
+	return files, err
 }
 
-// LogrotateSave 保存单条 logrotate 配置。
+// LogrotateSave 保存配置: logrotate.conf 写主配置, 其余写 /etc/logrotate.d/。
 func (sc *SysCenter) LogrotateSave(name, content string) error {
-	return os.WriteFile("/etc/logrotate.d/"+name, []byte(content), 0o644)
+	if name == "" {
+		return fmt.Errorf("配置名为空")
+	}
+	if name == "logrotate.conf" || name == "logrotate" {
+		return os.WriteFile("/etc/logrotate.conf", []byte(content), 0o644)
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return fmt.Errorf("非法配置名: %s", name)
+	}
+	return os.WriteFile(filepath.Join("/etc/logrotate.d", name), []byte(content), 0o644)
 }
 
-// BootHistory 启动历史(journalctl --list-boots)。
+// BootHistory 启动历史(journalctl --list-boots; 修正表头/字段解析, 当前启动排最前)。
 func (sc *SysCenter) BootHistory() []map[string]interface{} {
 	out, _ := sc.Run("journalctl", "--list-boots", "--no-pager")
 	rows := []map[string]interface{}{}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) >= 3 {
-			rows = append(rows, map[string]interface{}{"action": "boot", "when": f[1] + " " + f[2]})
+		if len(f) < 3 || strings.EqualFold(f[0], "IDX") || strings.EqualFold(f[1], "BOOT_ID") {
+			continue
 		}
+		rows = append(rows, map[string]interface{}{
+			"idx":    f[0],
+			"action": map[bool]string{true: "current", false: "previous"}[strings.TrimLeft(f[0], "-+") == "0"],
+			"when":   strings.Join(f[2:], " "),
+		})
+	}
+	// journalctl 按时间正序, 反转为当前启动在前
+	for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+		rows[i], rows[j] = rows[j], rows[i]
 	}
 	return rows
 }

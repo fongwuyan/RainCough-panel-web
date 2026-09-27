@@ -271,9 +271,14 @@ func (x *PluginX) acceptLoop(name string, l net.Listener) {
 	}
 }
 
-// Stop 关闭全部端点与连接。
+// Stop 关闭全部端点与连接(幂等: 防重复调用二次 close 触发 panic)。
 func (x *PluginX) Stop() {
-	close(x.stopCh)
+	select {
+	case <-x.stopCh:
+		return // 已停止
+	default:
+		close(x.stopCh)
+	}
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	for name, l := range x.listeners {
