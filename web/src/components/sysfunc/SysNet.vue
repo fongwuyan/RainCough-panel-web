@@ -4,7 +4,13 @@ import { api } from '../../api'
 
 const data = ref(null)
 const loading = ref(false)
-async function load() { loading.value = true; try { data.value = await api.sysfNet() } catch (e) {} finally { loading.value = false } }
+const err = ref('')
+async function load() {
+  loading.value = true
+  try { data.value = await api.sysfNet(); err.value = '' }
+  catch (e) { err.value = (e && e.message) || String(e) }
+  finally { loading.value = false }
+}
 function fmtRate(b) { b = Number(b) || 0; if (b >= 1048576) return (b / 1048576).toFixed(1) + 'MB/s'; if (b >= 1024) return (b / 1024).toFixed(1) + 'KB/s'; return b + 'B/s' }
 let timer = null
 onMounted(() => { load(); timer = setInterval(load, 1000) })
@@ -14,6 +20,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 <template>
   <div class="section">
     <div class="section-title">网络状态 <span class="mono faint" style="font-weight:400">网卡 · 连接 · DNS</span> <button class="btn btn-sm" style="float:right" @click="load">刷新</button></div>
+    <div v-if="err" class="error" style="margin-bottom:6px;">网络状态加载失败: {{ err }}</div>
     <table class="table"><thead><tr><th>接口</th><th>状态</th><th>IP</th><th>MTU</th></tr></thead>
       <tbody><tr v-for="n in ((data || {}).nics || [])" :key="n.name">
         <td class="mono">{{ n.name }}</td><td><span :class="n.up ? 'ok' : 'faint'">{{ n.up ? 'UP' : 'DOWN' }}</span></td><td class="mono">{{ n.ip || '-' }}</td><td class="mono">{{ n.mtu }}</td></tr></tbody></table>

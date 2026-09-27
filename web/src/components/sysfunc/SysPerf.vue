@@ -4,7 +4,13 @@ import { api } from '../../api'
 
 const data = ref(null)
 const loading = ref(false)
-async function load() { loading.value = true; try { data.value = await api.sysfPerf(24) } catch (e) {} finally { loading.value = false } }
+const err = ref('')
+async function load() {
+  loading.value = true
+  try { data.value = await api.sysfPerf(24); err.value = '' }
+  catch (e) { err.value = (e && e.message) || String(e) }
+  finally { loading.value = false }
+}
 
 function bars(key) {
   const pts = ((data.value || {}).points || [])
@@ -22,7 +28,8 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 <template>
   <div class="section">
-    <div class="section-title">性能趋势 <span class="mono faint" style="font-weight:400">CPU / 内存 / 磁盘 · 最近 60 点 · 采样 1 分钟</span></div>
+    <div class="section-title">性能趋势 <span class="mono faint" style="font-weight:400">CPU / 内存 / 磁盘 · 每秒采样 · 最近 60 秒（60 点）</span></div>
+    <div v-if="err" class="error" style="margin-bottom:6px;">性能趋势加载失败: {{ err }}</div>
     <div class="muted" style="font-size:11px;margin-bottom:8px">收 {{ fmtRate(((data || {}).net || {}).rx || 0) }} ↓ / 发 {{ fmtRate(((data || {}).net || {}).tx || 0) }} ↑ · 共 {{ ((data || {}).points || []).length }} 点</div>
     <div v-for="row in [['cpu','CPU %'],['mem','内存 %'],['disk','磁盘 %']]" :key="row[0]" style="margin-bottom:6px">
       <div class="muted" style="font-size:11px;margin-bottom:2px">{{ row[1] }}</div>

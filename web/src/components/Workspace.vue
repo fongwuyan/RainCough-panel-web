@@ -8,30 +8,36 @@ import SysNet from './sysfunc/SysNet.vue'
 
 const { plugins } = usePlugins()
 
-const FUNC_COUNTS = {
-  touchgal: 3,
-  yulotool: 25,
-  jmcomic: 4,
-  laizhangsetu: 3,
+// 可用功能 = 接口总览真实口径(总接口数, 含 system), 每 60s 刷新一次
+// (旧实现写死 FUNC_COUNTS 且含已删除的 yulotool, 数字严重失真, 已废弃)
+const ifaceTotal = ref(0)
+let ifaceTimer = null
+async function loadIfaceTotal() {
+  try {
+    const s = await api.ifacesSummary()
+    ifaceTotal.value = (s && s.interfaces) || 0
+  } catch (e) {
+    // 保留上次值, 不打断页面
+  }
 }
 
-const funcCount = computed(() =>
-  plugins.value.reduce((n, p) => n + (FUNC_COUNTS[p.name] || 1), 0)
-)
-
 const sys = ref(null)
+const sysErr = ref('')          // /api/system 拉取失败时给出可见提示(否则整块静默消失)
 let sysTimer = null
 
 // --- GPU (全部核显/独显) ---
 const gpus = ref([])
 const gpuLoaded = ref(false)
+const gpuErr = ref('')
 let gpuTimer = null
 
 async function loadGpus() {
   try {
     const d = await api.sysGpus()
     gpus.value = (d && d.gpus) || []
+    gpuErr.value = ''
   } catch (e) {
+    gpuErr.value = (e && e.message) || String(e)
   } finally {
     gpuLoaded.value = true
   }
@@ -82,7 +88,6 @@ function pushIface(name, up, down) {
 }
 
 const C = {
-  cpu: '#6d5cff',
   mem: '#3fb950',
   swap: '#f0b429',
   down: '#3fb950',
@@ -169,12 +174,27 @@ function fmtClock(ts) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-const nowClock = ref(fmtClock(Date.now() / 1000))
-let clockTimer = null
-
 function pctBar(p) {
   return Math.max(0, Math.min(100, p || 0))
 }
+
+onMounted(() => {
+  loadSys()
+  loadDisks()
+  loadGpus()
+  loadIfaceTotal()
+  sysTimer = setInterval(loadSys, 1000)
+  diskTimer = setInterval(loadDisks, 5000)
+  gpuTimer = setInterval(loadGpus, 5000)
+  ifaceTimer = setInterval(loadIfaceTotal, 60000)
+})
+
+onUnmounted(() => {
+  if (sysTimer) clearInterval(sysTimer)
+  if (diskTimer) clearInterval(diskTimer)
+  if (gpuTimer) clearInterval(gpuTimer)
+  if (ifaceTimer) clearInterval(ifaceTimer)
+})
 
 // --- 磁盘总览（合计）---
 const diskAgg = computed(() => {
@@ -247,25 +267,12 @@ async function loadSys() {
         }
       }
     }
-  } catch (e) {}
+    sysErr.value = ''
+  } catch (e) {
+    sysErr.value = (e && e.message) || String(e)
+  }
 }
-
-onMounted(() => {
-  loadSys()
-  loadDisks()
-  loadGpus()
-  sysTimer = setInterval(loadSys, 1000)
-  diskTimer = setInterval(loadDisks, 5000)
-  gpuTimer = setInterval(loadGpus, 5000)
-  clockTimer = setInterval(() => { nowClock.value = fmtClock(Date.now() / 1000) }, 1000)
-})
-
-onUnmounted(() => {
-  if (sysTimer) clearInterval(sysTimer)
-  if (diskTimer) clearInterval(diskTimer)
-  if (gpuTimer) clearInterval(gpuTimer)
-  if (clockTimer) clearInterval(clockTimer)
-})</script>
+</script>
 
 <template>
   <div>
@@ -278,18 +285,20 @@ onUnmounted(() => {
         <div style="font-size:12px;color:var(--text-faint);">已安装插件</div>
       </div>
       <div>
-        <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">{{ funcCount }}</div>
+        <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">{{ ifaceTotal || '—' }}</div>
         <div style="font-size:12px;color:var(--text-faint);">可用功能</div>
       </div>
       <div>
-        <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">v1.0</div>
+        <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);">v1.0.0</div>
         <div style="font-size:12px;color:var(--text-faint);">应用版本</div>
       </div>
     </div>
 
+    <div v-if="sysErr" class="error" style="margin-bottom:8px;">服务器状态加载失败: {{ sysErr }}（下方数据可能滞后）</div>
+
     <div v-if="sys" class="section">
       <div class="section-title">服务器状态
-        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">服务器时间 {{ nowClock }}</span>
+        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">服务器时间 {{ fmtClock(sys.current_time) }}</span>
       </div>
 
       <div class="info-grid">
@@ -315,8 +324,8 @@ onUnmounted(() => {
           <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-faint);">{{ fmtClock(sys.boot_time) }} 启动</div>
         </div>
         <div>
-          <div style="font-size:12px;color:var(--text-faint);">Python</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.python_version || '-' }}</div>
+          <div style="font-size:12px;color:var(--text-faint);">Go 版本</div>
+          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.go_version || sys.python_version || '-' }}</div>
         </div>
       </div>
 
@@ -492,6 +501,7 @@ onUnmounted(() => {
         <button class="btn btn-sm btn-ghost" style="float:right;margin-right:10px;" @click="loadGpus">刷新</button>
       </div>
       <div v-if="!gpuLoaded" class="status-line">加载中...</div>
+      <div v-else-if="gpuErr" class="error">GPU 信息获取失败: {{ gpuErr }}</div>
       <div v-else-if="!gpus.length" class="hint">未检测到显卡 / 核显 (无显示设备的服务器属正常)</div>
       <div v-else class="gpu-grid">
         <div v-for="(g, i) in gpus" :key="g.pci || i" class="perf-card">
