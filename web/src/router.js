@@ -31,6 +31,7 @@ const router = createRouter({
     { path: '/envpkg', name: 'envpkg', component: EnvPkgMain },
     { path: '/tasks', name: 'tasks', component: TaskQueue },
     { path: '/sysfunc', name: 'sysfunc', component: SysFuncMain },
+    { path: '/sysfunc/:sub', name: 'sysfunc-sub', component: SysFuncMain },
     { path: '/store', name: 'store', component: StorePlugins },
     { path: '/plughealth', name: 'plughealth', component: ServiceHealth },
     { path: '/ifaces', name: 'ifaces', component: Ifaces },

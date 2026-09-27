@@ -1,12 +1,22 @@
 <script setup>
-import { ref, onMounted, computed, onErrorCaptured } from 'vue'
+import { ref, onMounted, computed, watch, onErrorCaptured } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../api'
 import Logs from '../logs/Logs.vue'
 import BackupMain from '../backup/BackupMain.vue'
 import Processes from '../processes/Processes.vue'
 
-// 子级选项卡(父级为「系统中心」)
+// 子级选项卡(父级为「系统中心」; 支持侧边栏深链 /sysfunc/<key>)
+const route = useRoute()
+const router = useRouter()
+const SUBKEYS = ['logs','processes','svc','fw','hw','up','cron','disk','snap','usr','clean','pwr','kern','tz','health','events','lr','backup','boot','api']
 const sub = ref('logs')
+function activate(k) {
+  if (!SUBKEYS.includes(k)) k = 'logs'
+  sub.value = k
+  if (k !== 'logs' && k !== 'processes' && k !== 'backup' && !data.value[k]) loadSection(k)
+  apiPoll(k)
+}
 const appErr = ref('')
 onErrorCaptured((e) => { appErr.value = String((e && (e.message || e)) || '渲染错误') })
 const open = ref({})
@@ -42,7 +52,11 @@ function loadSection(k) {
   };
   if (jobs[k]) call(k, jobs[k])
 }
-function switchSub(k) { sub.value = k; if (k !== 'logs' && k !== 'processes' && k !== 'backup' && !data.value[k]) loadSection(k); apiPoll(k) }
+function switchSub(k) {
+  activate(k)
+  const target = '/sysfunc/' + k
+  if (route.path !== target) router.replace(target)
+}
 async function svcAct(u, act) {
   try { const r = await api.sysfServiceAction(u.unit, act); data.value.svcMsg = (r && (r.out || r.error)) || 'ok' } catch (e) { data.value.svcMsg = e.message }
   loadSection('svc')
@@ -72,7 +86,14 @@ const sshKeys = ref('')
 async function sshLoad(u) { sshUser.value = u; await call('keys', () => api.sysfSshKeys(u)); const d = data.value.keys || {}; sshKeys.value = d.keys || d.error || '' }
 async function sshSave() { try { const r = await api.sysfSshKeysSave(sshUser.value, sshKeys.value); toast(r && r.ok ? '已保存(sshd 立即生效)' : ((r && r.error) || '失败')) } catch (e) { toast(e.message) } }
 const svcFilter = ref('')
-onMounted(() => { loadSection('svc') })
+onMounted(() => {
+  activate(route.params.sub || 'logs')
+  if (!route.params.sub) router.replace('/sysfunc/logs')
+})
+watch(() => route.params.sub, (v) => {
+  const k = SUBKEYS.includes(v) ? v : 'logs'
+  if (k !== sub.value) activate(k)
+})
 
 const SUBS = [
   { key: 'logs', label: '系统日志' },
@@ -99,7 +120,7 @@ const SUBS = [
 
 // ---- 第三批功能动作 ----
 async function healthRestart() {
-  if (!confirm('确认重启面板服务(touchgal)？连接会闪断几秒。')) return
+  if (!confirm('确认重启面板服务(raincough)？连接会闪断几秒。')) return
   try { const r = await api.sysfHealthRestart(); toast((r && r.ok !== false) ? '已发送重启' : ((r && r.error) || '失败')) } catch (e) { toast(e.message) }
 }
 const lrEdit = ref(null)
@@ -144,9 +165,17 @@ async function timeSyncDo() {
   try { const r = await api.sysfTimeSync(); toast(r && r.ok !== false ? '已同步' : ((r && r.error) || '同步失败')) } catch (e) { toast(e.message) }
   loadSection('tz')
 }
-async function pwrPlan(action, minutes) {
-  if (!confirm((action === 'reboot' ? '重启' : '关机') + ' ' + (minutes || 1) + ' 分钟后?')) return
-  try { const r = await api.sysfPwrPlan(action, minutes || 1); toast(r && r.ok !== false ? '已计划' : ((r && r.error) || '失败')) } catch (e) { toast(e.message) }
+const pwrAction = ref('reboot')
+const pwrMin = ref(1)
+const pwrEpoch = computed(() => {
+  const s = (data.value.pwr || {}).state
+  return (!s || s === 'none') ? '' : s
+})
+async function pwrPlan() {
+  const action = pwrAction.value
+  const minutes = Number(pwrMin.value) || 1
+  if (!confirm((action === 'reboot' ? '重启' : '关机') + ' ' + minutes + ' 分钟后?')) return
+  try { const r = await api.sysfPwrPlan(action, minutes); toast(r && r.ok !== false ? '已计划' : ((r && r.error) || '失败')) } catch (e) { toast(e.message) }
   loadSection('pwr')
 }
 async function pwrCancel() {
@@ -376,13 +405,13 @@ async function pwrCancel() {
         <div class="flex" style="margin-bottom:8px">
           <button class="btn btn-sm btn-primary" @click="loadSection('health')">重新检查</button>
           <button class="btn btn-sm btn-danger" @click="healthRestart">重启面板服务</button>
-          <span class="muted">健康自检: 磁盘/权限/依赖/服务/负载/端口</span>
+          <span class="muted">健康自检: 磁盘 / 内存 / 面板服务</span>
         </div>
-        <table class="table"><thead><tr><th>检查项</th><th>状态</th><th>详情</th></tr></thead>
-          <tbody><tr v-for="(it,i) in (data.health || {}).items || []" :key="i">
-            <td>{{ it.name }}</td>
-            <td><span :class="it.status === 'ok' ? 'ok' : (it.status === 'warn' ? 'run' : 'err')">{{ it.status === 'ok' ? '正常' : (it.status === 'warn' ? '注意' : '异常') }}</span></td>
-            <td class="mono faint" style="font-size:11px">{{ it.detail }}</td></tr></tbody></table>
+        <table class="table"><thead><tr><th>检查项</th><th>状态</th></tr></thead>
+          <tbody><tr v-for="(it,i) in (data.health || {}).checks || []" :key="i">
+            <td class="mono">{{ it.name }}</td>
+            <td><span :class="it.ok ? 'ok' : 'err'">{{ it.ok ? '正常' : '异常' }}</span></td></tr></tbody></table>
+        <div v-if="!((data.health || {}).checks || []).length" class="hint">暂无数据, 点击「重新检查」</div>
       </template>
 
       <template v-if="sub === 'events'">
@@ -432,7 +461,6 @@ async function pwrCancel() {
             <td><span :class="r.action === 'reboot' ? 'ok' : 'err'">{{ r.action }}</span></td><td class="mono faint">{{ r.when }}</td></tr></tbody></table>
         <div v-if="!((data.boot || {}).rows || []).length" class="hint">无记录(或 last 无法读取)</div>
       </template>
-
 
     </div>
   </div>

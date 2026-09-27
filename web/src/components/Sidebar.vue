@@ -13,11 +13,8 @@ onMounted(load)
 
 const PAGES = [
   { key: 'ws', label: '工作台', path: '/', desc: '概览与状态' },
-  { key: 'plughealth', label: '服务健康', path: '/plughealth', desc: '插件与服务健康诊断' },
-  { key: 'ifaces', label: '接口总览', path: '/ifaces', desc: '服务总线接口目录' },
   { key: 'fm', label: '文件管理', path: '/fm', desc: '文件系统' },
   { key: 'term', label: '终端', path: '/terminal', desc: 'Shell' },
-  { key: 'sysf', label: '系统中心', path: '/sysfunc', desc: '系统功能' },
   { key: 'media', label: '媒体中心', path: '/media', desc: '图片视频' },
   { key: 'store', label: '插件市场', path: '/store', desc: '安装更新' },
   { key: 'envpkg', label: '环境包', path: '/envpkg', desc: '运行时' },
@@ -25,7 +22,42 @@ const PAGES = [
   { key: 'settings', label: '设置', path: '/settings', desc: '偏好' },
   { key: 'docs', label: '开发文档', path: '/docs', desc: '插件指南' },
 ]
-const SYSTABS = ['日志','进程','服务','防火墙','硬件','更新','定时','磁盘','快照','用户','存储清理','关机重启','内核','时间','健康','事件','日志保留','系统备份','启动历史']
+// 「系统」分组: 系统中心20个子功能拆分为侧边栏直达项; 能融合的已融合
+// (系统日志/进程管理 与独立页面 /logs /processes 合一; 服务健康/接口总览/定时任务 并入组内)
+const sysOpen = ref(true)
+const SYS_GROUPS = [
+  { title: '监控与诊断', items: [
+    { label: '健康检查', path: '/sysfunc/health', desc: '面板自检与重启' },
+    { label: '硬件信息', path: '/sysfunc/hw', desc: 'CPU/内存/主板/温度' },
+    { label: '事件时间线', path: '/sysfunc/events', desc: '系统操作留痕' },
+    { label: '接口监控', path: '/sysfunc/api', desc: '路由与请求流水' },
+    { label: '接口总览', path: '/ifaces', desc: '服务总线接口目录' },
+    { label: '启动历史', path: '/sysfunc/boot', desc: '开机/重启记录' },
+  ]},
+  { title: '服务与系统', items: [
+    { label: '服务管理', path: '/sysfunc/svc', desc: 'systemd 启停' },
+    { label: '服务健康', path: '/plughealth', desc: '插件与服务健康诊断' },
+    { label: '防火墙/监听', path: '/sysfunc/fw', desc: '规则与端口' },
+    { label: '系统更新', path: '/sysfunc/up', desc: 'apt 升级' },
+    { label: '内核管理', path: '/sysfunc/kern', desc: '内核包' },
+    { label: '时间/NTP', path: '/sysfunc/tz', desc: '时区同步' },
+    { label: '用户/密钥', path: '/sysfunc/usr', desc: '用户与 SSH 密钥' },
+    { label: '关机/重启', path: '/sysfunc/pwr', desc: '电源计划' },
+  ]},
+  { title: '存储与数据', items: [
+    { label: '磁盘用量', path: '/sysfunc/disk', desc: 'df / lsblk' },
+    { label: '快照', path: '/sysfunc/snap', desc: '只读快照' },
+    { label: '存储清理', path: '/sysfunc/clean', desc: '缓存与占用 Top' },
+    { label: '系统备份', path: '/sysfunc/backup', desc: '备份与还原' },
+    { label: '日志保留', path: '/sysfunc/lr', desc: 'logrotate 配置' },
+  ]},
+  { title: '日志 · 进程 · 计划', items: [
+    { label: '系统日志', path: '/logs', desc: 'journal/面板日志(融合)' },
+    { label: '进程管理', path: '/processes', desc: '进程列表(融合)' },
+    { label: 'Crontab', path: '/sysfunc/cron', desc: '系统 crontab 文本' },
+    { label: '定时任务', path: '/scheduler', desc: '调度器编排' },
+  ]},
+]
 const searchQ = ref('')
 const favs = ref(loadFavs())
 function loadFavs() { try { return JSON.parse(localStorage.getItem('rc-favs') || '[]') } catch (e) { return [] } }
@@ -37,7 +69,7 @@ const searchResults = computed(() => {
   const out = []
   for (const p of PAGES) if ((p.label + p.desc).toLowerCase().includes(q)) out.push({ label: p.label, desc: p.desc, path: p.path })
   for (const p of plugins.value) if ((p.label + ' ' + (p.description || '')).toLowerCase().includes(q)) out.push({ label: p.label, desc: p.description || '', path: '/plugin/' + p.name })
-  for (const t of SYSTABS) if (t.toLowerCase().includes(q)) out.push({ label: '系统中心 · ' + t, desc: '系统功能子选项卡', path: '/sysfunc' })
+  for (const g of SYS_GROUPS) for (const p of g.items) if ((p.label + p.desc).toLowerCase().includes(q)) out.push({ label: '系统 · ' + p.label, desc: p.desc, path: p.path })
   return out.slice(0, 10)
 })
 function pick(entry) { go(entry.path); searchQ.value = '' }
@@ -65,11 +97,12 @@ function isActive(name) {
   if (name === 'media') return route.name === 'media'
   if (name === 'scheduler') return route.name === 'scheduler'
   if (name === 'tasks') return route.name === 'tasks'
-  if (name === 'sysfunc') return route.name === 'sysfunc'
+  if (name === 'sysfunc') return route.name === 'sysfunc' || route.name === 'sysfunc-sub'
   if (name === 'envpkg') return route.name === 'envpkg'
   if (name === 'store') return route.name === 'store'
   return route.name === 'plugin' && route.params.name === name
 }
+function activeByPath(p) { return route.path === p }
 </script>
 
 <template>
@@ -114,35 +147,30 @@ function isActive(name) {
         </div>
       </div>
 
-      <div class="sidebar-section-label">系统</div>
-      <div class="plugin-item" :class="{ active: isActive('ifaces') }" @click="go('/ifaces')">
-        <div class="info">
-          <div class="label">接口总览</div>
-          <div class="desc">服务总线接口目录</div>
-        </div>
+      <div class="sidebar-section-label" style="cursor:pointer;user-select:none" @click="sysOpen = !sysOpen">
+        系统 <span style="float:right;opacity:.65">{{ sysOpen ? '▾' : '▸' }}</span>
       </div>
-      <div class="plugin-item" :class="{ active: isActive('plughealth') }" @click="go('/plughealth')">
-        <div class="info">
-          <div class="label">服务健康</div>
-          <div class="desc">插件与服务健康诊断</div>
-        </div>
-      </div>
+      <template v-if="sysOpen">
+        <template v-for="g in SYS_GROUPS" :key="g.title">
+          <div class="sidebar-sub-label">{{ g.title }}</div>
+          <div
+            v-for="p in g.items"
+            :key="p.path"
+            class="plugin-item sys-sub"
+            :class="{ active: activeByPath(p.path) }"
+            @click="go(p.path)"
+          >
+            <div class="info">
+              <div class="label">{{ p.label }}</div>
+              <div class="desc">{{ p.desc }}</div>
+            </div>
+          </div>
+        </template>
+      </template>
       <div class="plugin-item" :class="{ active: isActive('media') }" @click="go('/media')">
         <div class="info">
           <div class="label">媒体中心</div>
           <div class="desc">图片与视频聚合</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('scheduler') }" @click="go('/scheduler')">
-        <div class="info">
-          <div class="label">定时任务</div>
-          <div class="desc">调度器编排</div>
-        </div>
-      </div>
-      <div class="plugin-item" :class="{ active: isActive('sysfunc') }" @click="go('/sysfunc')">
-        <div class="info">
-          <div class="label">系统中心</div>
-          <div class="desc">日志/进程/服务/硬件/更新等</div>
         </div>
       </div>
       <div class="plugin-item" :class="{ active: isActive('tasks') }" @click="go('/tasks')">
@@ -200,3 +228,22 @@ function isActive(name) {
     </div>
   </aside>
 </template>
+
+<style scoped>
+.sidebar-sub-label {
+  padding: 5px 10px 2px 14px;
+  font-size: 11px;
+  color: var(--text-faint);
+  border-left: 2px solid var(--border);
+  margin: 7px 0 2px;
+}
+.sys-sub {
+  padding-left: 6px;
+}
+.sys-sub .label {
+  font-size: 13px;
+}
+.sys-sub .desc {
+  font-size: 10px;
+}
+</style>
