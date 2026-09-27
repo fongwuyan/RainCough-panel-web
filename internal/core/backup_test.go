@@ -146,6 +146,27 @@ func TestBackupRunRejectsUnknownJob(t *testing.T) {
 	}
 }
 
+func TestBackupOrphanRunDeletable(t *testing.T) {
+	// 任务删除后, 其归档记录(孤儿)仍允许按记录路径删除
+	ns := newMockNS()
+	m := NewBackupManager(ns, nil)
+	orphan := filepath.Join(t.TempDir(), "job-x-20260928-000000.tar.gz")
+	m.mu.Lock()
+	m.runs = []BackupRun{{Job: "gone", Start: 1, Status: "done", File: orphan}}
+	m.mu.Unlock()
+
+	if err := m.DeleteRun(filepath.Join(t.TempDir(), "not-recorded.tar.gz")); err == nil {
+		t.Fatal("未记录且不在目标目录内的路径应拒绝")
+	}
+	// 记录在册的孤儿归档: 允许(文件不存在时静默忽略)
+	if err := m.DeleteRun(orphan); err != nil {
+		t.Fatalf("孤儿归档应可删除: %v", err)
+	}
+	if len(m.Runs()) != 0 {
+		t.Fatal("运行记录未被清除")
+	}
+}
+
 func TestBackupScheduleTickLogic(t *testing.T) {
 	ns := newMockNS()
 	m := NewBackupManager(ns, nil)

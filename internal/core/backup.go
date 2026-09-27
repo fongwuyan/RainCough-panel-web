@@ -284,7 +284,16 @@ func (m *BackupManager) DeleteRun(file string) error {
 		}
 	}
 	if !allowed {
-		return fmt.Errorf("拒绝删除: 不在任何任务的目标目录内")
+		// 孤儿归档: 任务已删除但运行记录仍在 —— 允许按记录路径删除(与旧面板行为一致)
+		for _, r := range m.runs {
+			if filepath.Clean(r.File) == abs {
+				allowed = true
+				break
+			}
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("拒绝删除: 不在任何任务的目标目录内, 也不是已记录的归档")
 	}
 	ext := strings.ToLower(filepath.Ext(abs))
 	if ext != ".gz" && ext != ".tar" && !strings.HasSuffix(strings.ToLower(abs), ".tar.gz") {
