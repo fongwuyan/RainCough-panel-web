@@ -214,6 +214,9 @@ func orDefault(v, def string) string {
 
 // InstallPlugin 安装插件(异步任务)。
 func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
+	if !validPluginName(name) {
+		return "", fmt.Errorf("非法插件名: %q", name)
+	}
 	select {
 	case s.mu <- struct{}{}:
 	default:
@@ -257,8 +260,21 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 	return "queued", nil
 }
 
+// validPluginName 插件名校验: 防空名/路径穿越(空名会让 filepath.Join 指向插件根目录,
+// RemoveAll 会把全部插件连根删掉 — 2026-09-27 审计实测踩过)。
+func validPluginName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 64 || name == "." || name == ".." {
+		return false
+	}
+	return filepath.Base(name) == name && !strings.ContainsAny(name, `/\`)
+}
+
 // RemovePlugin 卸载插件(目录删除 + 重扫)。
 func (s *Store) RemovePlugin(name string) error {
+	if !validPluginName(name) {
+		return fmt.Errorf("非法插件名: %q", name)
+	}
 	if name == "filemanager" {
 		return fmt.Errorf("filemanager 为系统模块不可卸载")
 	}

@@ -364,6 +364,11 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 // ---- 静态前端 ----
 func serveStatic(w http.ResponseWriter, r *http.Request, webDir string) {
 	p := r.URL.Path
+	// API 未知路径返回 JSON 404, 不落入 SPA fallback(否则缺路由伪装成 200 HTML)
+	if strings.HasPrefix(p, "/api/") {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not found: " + p})
+		return
+	}
 	if p == "/" {
 		p = "/index.html"
 	}
