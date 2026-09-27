@@ -30,7 +30,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
       <div><div style="font-size:12px;color:var(--text-faint);">公网 IP</div><div class="mono" style="font-size:15px;font-weight:700">{{ (data || {}).public_ip || '—' }}</div></div>
       <div><div style="font-size:12px;color:var(--text-faint);">速率</div><div class="mono" style="font-size:15px;font-weight:700">{{ fmtRate(((data || {}).rate || {}).rx || 0) }} ↓ / {{ fmtRate(((data || {}).rate || {}).tx || 0) }} ↑</div></div>
     </div>
-    <div v-if="loading" class="hint">加载中…</div>
+    <div v-if="loading && !data" class="hint">加载中…</div>
   </div>
 </template>
 

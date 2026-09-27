@@ -37,7 +37,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         <div v-for="(b,i) in bars(row[0])" :key="i" class="bar-cell" :title="b.v" :style="{ height: b.h + '%' }" :class="{ hot: b.v >= 85 }"></div>
       </div>
     </div>
-    <div v-if="loading" class="hint">加载中…</div>
+    <div v-if="loading && !data" class="hint">加载中…</div>
   </div>
 </template>
 
