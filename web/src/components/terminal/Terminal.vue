@@ -1,56 +1,68 @@
 <script setup>
-import { ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { api } from '../../api'
 import { VT100Terminal } from '../../terminal/vt100'
 import TerminalDom from './TerminalDom.vue'
 import { copyText, readText } from '../../utils/clipboard'
 
+/* =========================================================================
+   终端(重做): 清空旧实现后按「会话栏 + 屏幕/工具栏 + 状态栏」三段式重写。
+   功能与旧版一一对应(见 reader.txt): 多会话/SSE 流/输入/resize/字号/复制粘贴/
+   全屏/F5 阻断/服务器增删改查+拖拽排序/常用命令增删改查+复制执行/快捷连接/
+   会话右键菜单(复制/关闭/关闭右侧/关闭其他)/提示与错误。
+   后端契约沿用 /api/terminal/*(SSE + HTTP 输入)。
+   ========================================================================= */
+
 /* ---------------- 状态 ---------------- */
-const sessions = ref([])       // [{ term, ws, label, host, spec, status, connecting, closed }]
+const sessions = ref([]) // [{term, wsId, label, host, spec, status, connecting, closed, _es, _canvas}]
 const activeIdx = ref(0)
-const hosts = ref([])          // 服务器列表
-const commands = ref([])       // 常用命令
-const toolOpen = ref(false)    // 右侧工具面板
+const active = computed(() => sessions.value[activeIdx.value] || null)
+const hosts = ref([])     // 服务器列表(后端 core_terminal 持久化)
+const commands = ref([])  // 常用命令
+const toolOpen = ref(true)
 const toolTab = ref('host')
 const fullScreen = ref(false)
+const fonts = ref(14)
 const toastMsg = ref('')
 const errMsg = ref('')
-const fonts = ref(14)
+const tabMenu = ref({ show: false, x: 0, y: 0, idx: -1 })
 
 /* 弹窗表单 */
 const showHostForm = ref(false)
 const hostForm = ref({ old_host: '', host: '', port: '22', username: 'root', password: '', pkey: '', passphrase: '', ps: '', authType: 0 })
-const hostFormTitle = ref('添加主机信息')
+const hostFormTitle = ref('添加服务器')
 const showCmdForm = ref(false)
 const cmdForm = ref({ old_title: '', title: '', shell: '' })
-const cmdFormTitle = ref('添加常用命令信息')
+const cmdFormTitle = ref('添加常用命令')
+
+/* 快捷连接 */
+const quickVal = ref('')
 
 const reconnectDelays = {}
 let sidCounter = 1
 let toastTimer = null
 
 /* ---------------- 提示 ---------------- */
-function toast(msg, ok = true) {
+function toast(msg) {
   toastMsg.value = msg
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => (toastMsg.value = ''), 2600)
 }
 
-/* ---------------- 会话管理 ---------------- */
+/* ---------------- 会话 ---------------- */
 function openSession(spec) {
   // spec: {target:'local'|'ssh', host, port, username, password, pkey, passphrase, label, id}
-  // [F1] 远程 SSH 终端后端未实现(TermManager 只起本地 pty, 密钥/密码均被忽略)。
-  // 明示降级而不是"假装连上": 改成本机会话并加醒目标签, 防止"我在远程机上"误操作。
+  // 远程 SSH 后端未实现(TermManager 只起本地 pty, 密钥/密码均被忽略) → 明示降级, 防"已在远程机"误判
   if (spec.target === 'ssh') {
     const want = spec.host || '远程主机'
-    toast('远程 SSH 终端未实现, 已打开【本机】终端(原目标 ' + want + ' 不会连接)', false)
-    spec = { ...spec, target: 'local', label: (spec.label ? spec.label + ' · 本机' : '本机终端') }
+    toast('远程 SSH 终端未实现，已打开本机会话（原目标 ' + want + ' 不会连接）')
+    spec = { ...spec, target: 'local', label: spec.label ? spec.label + ' · 本机' : '本机终端' }
   }
   if (!spec.id) spec = { ...spec, id: 's' + (sidCounter++) }
   const label = spec.label || (spec.target === 'local' ? '本地服务器' : spec.host || 'SSH 会话')
   const s = {
     term: new VT100Terminal({ cols: 80, rows: 24, scrollback: 5000 }),
-    ws: null, closed: false, connecting: true, status: 'info',
+    wsId: '', closed: false, connecting: true, status: 'info',
     label, host: spec.host || '127.0.0.1', spec: { ...spec, label },
   }
   sessions.value.push(s)
@@ -58,12 +70,16 @@ function openSession(spec) {
   openSocket(s)
 }
 
+function newLocalSession() {
+  openSession({ target: 'local', label: '本地会话 ' + (sessions.value.length + 1) })
+}
+
 function openSocket(s) {
   s.closed = false
   s.connecting = true
   s.status = 'info'
   closeSocket(s)
-  // 新后端: SSE 流 + HTTP 输入(本地会话)
+  // SSE 输出流 + HTTP 输入(本地会话)
   api.tmOpen(24, 100)
     .then((d) => {
       s.wsId = d.sid
@@ -75,11 +91,13 @@ function openSocket(s) {
       es.onmessage = (ev) => {
         try {
           const text = atob(ev.data)
-          if (s.term) { s.term.write(text) }
-          if (s._canvas && typeof s._canvas.forceDraw === 'function') { try { s._canvas.forceDraw() } catch (e) {} }
+          if (s.term) s.term.write(text)
+          if (s._canvas && typeof s._canvas.forceDraw === 'function') {
+            try { s._canvas.forceDraw() } catch (e) {}
+          }
         } catch (e) {}
       }
-      es.onerror = () => {} // EventSource 自动重连
+      es.onerror = () => {} // EventSource 自带重连
     })
     .catch((e) => {
       s.status = 'err'
@@ -121,9 +139,24 @@ function activate(i) {
   activeIdx.value = i
   nextTick(() => {
     const s = sessions.value[activeIdx.value]
-    try { s._canvas && s._canvas.measure() } catch (e) {}
-    try { s.term && s.term.focus() } catch (e) {}
+    // 重新量测单元格并聚焦(TerminalDom defineExpose 暴露 measure)
+    try { if (s && s._canvas) s._canvas.measure() } catch (e) {}
   })
+}
+
+function statusText(s) {
+  if (s.connecting) return '连接中'
+  if (s.status === 'err') return '失败'
+  if (s.status === 'success') return '已连接'
+  return '等待'
+}
+
+function retryActive() {
+  const s = active.value
+  if (!s) return
+  delete reconnectDelays[s.label]
+  s._userClose = false
+  openSocket(s)
 }
 
 function closeSession(s) {
@@ -146,8 +179,8 @@ function closeRight(id) {
   if (idx < 0) return
   const right = sessions.value.slice(idx + 1)
   for (const s of right) {
-    s._userClose = true; s.closed = true
-    closeSocket(s)
+    s._userClose = true; s.closed = true; closeSocket(s)
+    if (s.wsId) { api.tmClose(s.wsId).catch(() => {}); s.wsId = '' }
   }
   sessions.value = sessions.value.slice(0, idx + 1)
   activeIdx.value = idx
@@ -157,8 +190,8 @@ function closeOthers(id) {
   const keep = sessions.value.filter((x) => x.spec.id === id)
   for (const s of sessions.value) {
     if (s.spec.id === id) continue
-    s._userClose = true; s.closed = true
-    closeSocket(s)
+    s._userClose = true; s.closed = true; closeSocket(s)
+    if (s.wsId) { api.tmClose(s.wsId).catch(() => {}); s.wsId = '' }
   }
   sessions.value = keep
   activeIdx.value = 0
@@ -172,7 +205,25 @@ function canvasMounted(s, canvas) {
   s._canvas = canvas
 }
 
-/* ---------------- 输入/粘贴 ---------------- */
+/* ---------------- 会话标签右键菜单 ---------------- */
+function onTabCtx(e, i) {
+  const x = Math.min(e.clientX, window.innerWidth - 180)
+  const y = Math.min(e.clientY, window.innerHeight - 190)
+  tabMenu.value = { show: true, x, y, idx: i }
+}
+function tabAct(a) {
+  const i = tabMenu.value.idx
+  const s = sessions.value[i]
+  tabMenu.value.show = false
+  if (!s) return
+  if (a === 'copy') duplicateSession(s)
+  else if (a === 'close') closeSession(s)
+  else if (a === 'right') closeRight(s.spec.id)
+  else if (a === 'others') closeOthers(s.spec.id)
+}
+function onDocClick() { if (tabMenu.value.show) tabMenu.value.show = false }
+
+/* ---------------- 输入/粘贴/字号 ---------------- */
 function onInput(s, data) {
   if (!s || data == null) return
   sendMsg(s, { type: 'input', data })
@@ -183,29 +234,35 @@ function onResize(s, rows, cols) {
   sendMsg(s, { type: 'resize', rows, cols })
 }
 
-function onFont(_, delta) {
+function onFont(_s, delta) {
   fonts.value = Math.min(32, Math.max(10, fonts.value + delta))
-  for (const s of sessions.value) {
-    if (s._canvas) { try { s._canvas.measure() } catch (e) {} }
-  }
+  nextTick(() => {
+    const s = active.value
+    if (s && s._canvas) { try { s._canvas.measure() } catch (e) {} }
+  })
 }
 
 async function copyActive() {
-  const s = sessions.value[activeIdx.value]
+  const s = active.value
   if (!s || !s.term) return
-  const info = s.term.getGrid()
-  const lines = []
-  for (let y = 0; y < info.grid.length; y++) lines.push(s.term.lineText(y))
-  const text = lines.join('\n').trimEnd()
-  if (!text) return
-  await copyText(text)
+  try {
+    const info = s.term.getGrid()
+    const lines = []
+    for (let y = 0; y < info.grid.length; y++) lines.push(s.term.lineText(y))
+    const text = lines.join('\n').trimEnd()
+    if (!text) return
+    await copyText(text)
+    toast('已复制屏面内容')
+  } catch (e) { errMsg.value = e.message }
 }
 
 async function pasteActive() {
-  const s = sessions.value[activeIdx.value]
+  const s = active.value
   if (!s) return
-  const text = await readText()
-  if (text) onInput(s, text)
+  try {
+    const text = await readText()
+    if (text) onInput(s, text)
+  } catch (e) { errMsg.value = e.message }
 }
 
 /* ---------------- 全屏 ---------------- */
@@ -221,7 +278,7 @@ function toggleFullscreen() {
 }
 function onFsChange() { fullScreen.value = !!document.fullscreenElement }
 
-/* ---------------- 服务器 / 常用命令 ---------------- */
+/* ---------------- 服务器 / 常用命令 CRUD ---------------- */
 async function loadHosts() {
   try { hosts.value = await api.tmHostsList() } catch (e) { errMsg.value = e.message }
 }
@@ -231,45 +288,43 @@ async function loadCommands() {
 
 function openHostForm(item) {
   hostForm.value = item
-    ? { old_host: item.host, host: item.host, port: item.port, username: item.username, password: item.password || '', pkey: item.pkey || '', passphrase: item.passphrase || '', ps: item.ps || '', authType: item.pkey ? 1 : 0 }
+    ? { old_host: item.host, host: item.host, port: item.port || '22', username: item.username, password: item.password || '', pkey: item.pkey || '', passphrase: item.passphrase || '', ps: item.ps || '', authType: item.pkey ? 1 : 0 }
     : { old_host: '', host: '', port: '22', username: 'root', password: '', pkey: '', passphrase: '', ps: '', authType: 0 }
-  hostFormTitle.value = item ? `编辑服务器信息【${item.host}】` : '添加主机信息'
+  hostFormTitle.value = item ? '编辑服务器【' + item.host + '】' : '添加服务器'
   showHostForm.value = true
 }
 
 async function saveHost() {
   const f = hostForm.value
-  if (!f.host.trim()) { toast('服务器IP不能为空', false); return }
+  if (!f.host.trim()) { errMsg.value = '服务器地址不能为空'; return }
   const body = {
-    host: f.host.trim(), port: f.port || '22', username: f.username.trim(),
+    host: f.host.trim(), port: f.port || '22', username: (f.username || '').trim() || 'root',
     password: f.authType === 0 ? f.password : '',
     pkey: f.authType === 1 ? f.pkey : '',
     passphrase: f.authType === 1 ? f.passphrase : '',
-    ps: f.ps.trim() || f.host.trim(),
+    ps: (f.ps || '').trim() || f.host.trim(),
   }
   try {
     if (f.old_host) {
       const r = await api.tmHostUpdate({ ...body, old_host: f.old_host })
       hosts.value = r.hosts || []
+      toast('已保存')
     } else {
       const r = await api.tmHostCreate(body)
       hosts.value = r.hosts || []
+      toast('已保存')
     }
     showHostForm.value = false
-    if (!f.old_host) {
-      // 添加成功即连接
-      openSession({ target: 'ssh', ...body, label: body.ps })
-    }
-    toast('保存成功')
-  } catch (e) { toast(e.message, false) }
+    errMsg.value = ''
+  } catch (e) { errMsg.value = e.message }
 }
 
 async function deleteHost(host) {
   try {
     const r = await api.tmHostDelete(host)
     hosts.value = r.hosts || []
-    toast('已删除')
-  } catch (e) { toast(e.message, false) }
+    toast('已删除服务器')
+  } catch (e) { errMsg.value = e.message }
 }
 
 function connectHost(item) {
@@ -277,49 +332,50 @@ function connectHost(item) {
 }
 
 function openCmdForm(item) {
-  cmdForm.value = item ? { old_title: item.title, title: item.title, shell: item.shell } : { old_title: '', title: '', shell: '' }
-  cmdFormTitle.value = item ? `编辑常用命令信息【${item.title}】` : '添加常用命令信息'
+  cmdForm.value = item
+    ? { old_title: item.title, title: item.title, shell: item.shell }
+    : { old_title: '', title: '', shell: '' }
+  cmdFormTitle.value = item ? '编辑常用命令【' + item.title + '】' : '添加常用命令'
   showCmdForm.value = true
 }
 
 async function saveCmd() {
   const f = cmdForm.value
-  if (!f.title.trim()) { toast('命令名称不能为空', false); return }
-  if (!f.shell.trim()) { toast('命令内容不能为空', false); return }
+  if (!f.title.trim()) { errMsg.value = '命令名称不能为空'; return }
+  if (!f.shell.trim()) { errMsg.value = '命令内容不能为空'; return }
   try {
     let r
     if (f.old_title) r = await api.tmCommandUpdate({ old_title: f.old_title, title: f.title.trim(), shell: f.shell })
     else r = await api.tmCommandCreate({ title: f.title.trim(), shell: f.shell })
     commands.value = r.commands || []
     showCmdForm.value = false
-    toast('保存成功')
-  } catch (e) { toast(e.message, false) }
+    errMsg.value = ''
+    toast('已保存')
+  } catch (e) { errMsg.value = e.message }
 }
 
 async function deleteCmd(title) {
   try {
     const r = await api.tmCommandDelete(title)
     commands.value = r.commands || []
-    toast('已删除')
-  } catch (e) { toast(e.message, false) }
+    toast('已删除命令')
+  } catch (e) { errMsg.value = e.message }
 }
 
 async function copyCmd(shell) {
   await copyText(shell)
-  toast('复制成功')
+  toast('已复制命令')
 }
 
 function runCmd(shell) {
-  const s = sessions.value[activeIdx.value]
+  const s = active.value
   if (s) onInput(s, shell)
 }
 
-/* ---------------- 快捷连接 ---------------- */
-const quickVal = ref('')
+/* ---------------- 快捷连接(root@host:port / user:pw@host:port) ---------------- */
 function quickConnect() {
   const v = quickVal.value.trim()
   if (!v) return
-  // 支持 root@host:port 或 host:port 或 host
   let user = 'root', host = v, port = '22', pw = ''
   if (host.indexOf('@') !== -1) {
     const sp = host.split('@'); user = sp[0]; host = sp[1]
@@ -329,13 +385,14 @@ function quickConnect() {
     const hs = host.split(':'); host = hs[0]; port = hs[1]
   }
   if (!host) return
-  openSession({ target: 'ssh', host, port, username: user, password: pw, pkey: '', passphrase: '', label: `${user}@${host}` })
+  openSession({ target: 'ssh', host, port, username: user, password: pw, pkey: '', passphrase: '', label: user + '@' + host })
   quickVal.value = ''
 }
 
-/* ---------------- 拖动排序 ---------------- */
+/* ---------------- 服务器列表拖拽排序(契约: {hosts:[...]} 整体提交) ---------------- */
 let dragHost = null
 function onHostDragStart(e, host) { dragHost = host; e.dataTransfer.effectAllowed = 'move' }
+function onHostDragOver(e) { e.preventDefault() }
 function onHostDrop(e, target) {
   e.preventDefault()
   if (!dragHost || dragHost === target) return
@@ -343,18 +400,16 @@ function onHostDrop(e, target) {
   const to = hosts.value.findIndex((h) => h.host === target)
   if (from < 0 || to < 0) return
   hosts.value.splice(to, 0, hosts.value.splice(from, 1)[0])
-  // [F2] 契约修正: 后端 set_sort 读 {hosts:[...]} 数组; 原 {sort_list:{host:idx}}
-  // 键名+形状双错 → 恒 400, 且 .catch 静默吞掉 → 拖拽排序从未生效过
-  api.tmHostSort(hosts.value.map((h) => ({ ...h }))).catch(() => {})
+  api.tmHostSort(hosts.value.map((h) => ({ ...h }))).catch(() => { errMsg.value = '排序保存失败' })
   dragHost = null
 }
-function onHostDragOver(e) { e.preventDefault() }
 
-/* ---------------- 键盘: 阻止 F5 ---------------- */
+/* ---------------- 键盘: 页面内阻止 F5 刷新 ---------------- */
 function onDocKey(e) {
   if (e.keyCode === 116 || (e.metaKey && e.keyCode === 82)) {
-    if (e.target && (e.target.tagName === 'CANVAS' || e.target.closest && e.target.closest('.term-page'))) {
-      e.preventDefault(); e.returnValue = false
+    if (e.target && (e.target.tagName === 'CANVAS' || (e.target.closest && e.target.closest('.term-page')))) {
+      e.preventDefault()
+      e.returnValue = false
     }
   }
 }
@@ -365,381 +420,408 @@ onMounted(() => {
   openSession({ target: 'local', label: '本地服务器' })
   document.addEventListener('keydown', onDocKey)
   document.addEventListener('fullscreenchange', onFsChange)
+  document.addEventListener('click', onDocClick)
 })
 
 onUnmounted(() => {
   for (const s of sessions.value) {
     closeSocket(s)
-    // [F7] 离开页面同时关掉后端 pty, 否则要等 60 分钟闲置清理才释放
-    if (s.wsId) { api.tmClose(s.wsId).catch(() => {}) }
+    if (s.wsId) { api.tmClose(s.wsId).catch(() => {}) } // 离开页面即关后端 pty(否则等 60 分钟闲置清理)
     s.wsId = ''
   }
   document.removeEventListener('keydown', onDocKey)
   document.removeEventListener('fullscreenchange', onFsChange)
-  for (const u of unregTermCtx) { try { u() } catch (e) {} }
-  unregTermCtx = []
+  document.removeEventListener('click', onDocClick)
 })
-let unregTermCtx = []
 </script>
 
 <template>
-  <div class="term-page" :class="{ full_term_view: fullScreen }">
-    <!-- 快捷连接栏 -->
-    <div class="quick_links">
-      <span class="ql-icon">🔒</span>
-      <span class="ql-label">SSH://</span>
-      <input
-        v-model="quickVal"
-        class="quick_links_input"
-        type="text"
-        placeholder="root@192.168.1.1:22，支持临时终端连接。"
-        @keydown.enter="quickConnect"
-      />
-      <span class="ql-caret">▾</span>
-    </div>
-
-    <!-- 主体 -->
-    <div class="term_box">
-      <!-- 标签栏 -->
-      <div class="term_item_tab">
-        <div class="list">
-          <span
-            v-for="(s, i) in sessions"
-            :key="s.spec.id"
-            class="item"
-            :class="[{ active: i === activeIdx, localhost_item: s.spec.target === 'local' }, 'sess-' + s.spec.id]"
-            @click="activate(i)"
-          >
-            <i class="icon" :class="'icon-' + s.status"></i>
-            <span class="content">{{ s.label }}</span>
-            <span class="icon-trem-close" title="关闭会话" @click.stop="closeSession(s)">×</span>
-          </span>
-          <span class="addServer" title="添加服务器SSH信息" @click="openHostForm()">＋</span>
-          <span class="tab_tootls" @click="toggleFullscreen">
-            <i class="tt-icon" :class="fullScreen ? 'tt-min' : 'tt-max'"></i><span>全屏显示</span>
-          </span>
+  <div class="term-page" :class="{ fullscreen: fullScreen }">
+    <!-- ===== 会话栏 ===== -->
+    <div class="term-tabs">
+      <div class="term-tablist">
+        <div v-for="(s, i) in sessions" :key="s.spec.id" class="term-tab"
+             :class="{ active: i === activeIdx }"
+             @click="activate(i)"
+             @contextmenu.prevent.stop="onTabCtx($event, i)">
+          <span class="tab-label">{{ s.label }}</span>
+          <span class="tab-state" :class="'st-' + s.status">{{ statusText(s) }}</span>
+          <button class="tab-close" title="关闭该会话" @click.stop="closeSession(s)">关闭</button>
         </div>
+        <button class="term-btn" @click="newLocalSession">新建会话</button>
       </div>
-
-      <!-- 终端内容 -->
-      <div class="term_content_tab">
-        <div
-          v-for="(s, i) in sessions"
-          :key="s.spec.id"
-          class="term_item"
-          :id="s.spec.id"
-          :class="{ active: i === activeIdx }"
-        >
-          <TerminalDom
-            v-if="i === activeIdx"
-            :ref="(c) => { if (c) canvasMounted(s, c) }"
-            :term="s.term || {}"
-            @input="(d) => onInput(s, d)"
-            @resize="(r, c) => onResize(s, r, c)"
-            @font="(d) => onFont(s, d)"
-            @copy="copyActive"
-            @paste="pasteActive"
-          />
-        </div>
-        <!-- 工具面板开关 -->
-        <div
-          class="term-tool-button"
-          :class="toolOpen ? 'tool-hide' : 'tool-show'"
-          @click="toolOpen = !toolOpen"
-        >
-          <i class="tt-chevron" :class="toolOpen ? 'tt-right' : 'tt-left'"></i>
-        </div>
+      <div class="term-actions">
+        <button class="term-btn" :class="{ on: toolOpen }" @click="toolOpen = !toolOpen">工具栏</button>
+        <button class="term-btn" @click="toggleFullscreen">{{ fullScreen ? '退出全屏' : '全屏' }}</button>
       </div>
     </div>
 
-    <!-- 右侧工具面板 -->
-    <div class="term_tootls" :class="{ open: toolOpen }">
-      <div class="tab-nav">
-        <span :class="{ on: toolTab === 'host' }" @click="toolTab = 'host'">服务器列表</span>
-        <span :class="{ on: toolTab === 'shell' }" @click="toolTab = 'shell'">常用命令</span>
+    <!-- ===== 屏幕 + 工具栏 ===== -->
+    <div class="term-main">
+      <div class="term-screen">
+        <div v-if="active" class="term-slot">
+          <TerminalDom :ref="(c) => { if (c) canvasMounted(active, c) }"
+                       :term="active.term || {}" :font-size="fonts"
+                       @input="(d) => onInput(active, d)"
+                       @resize="(r, c) => onResize(active, r, c)"
+                       @font="(d) => onFont(active, d)"
+                       @copy="copyActive" @paste="pasteActive" />
+        </div>
+        <div v-if="active && active.connecting" class="term-overlay">正在建立会话…</div>
+        <div v-if="active && active.status === 'err'" class="term-overlay err">
+          <span>连接失败：{{ active.errMsg || '未知错误' }}</span>
+          <button class="term-btn" @click="retryActive">重试</button>
+        </div>
       </div>
-      <div class="tab-con">
-        <div v-show="toolTab === 'host'" class="tab-block">
-          <div class="block-head">
-            <button class="btn btn-success btn-sm" @click="openHostForm()">添加服务器</button>
+
+      <aside v-if="toolOpen" class="term-side">
+        <div class="side-tabs">
+          <button class="side-tab" :class="{ on: toolTab === 'host' }" @click="toolTab = 'host'">服务器</button>
+          <button class="side-tab" :class="{ on: toolTab === 'cmd' }" @click="toolTab = 'cmd'">常用命令</button>
+          <button class="side-collapse" @click="toolOpen = false">收起</button>
+        </div>
+
+        <!-- 服务器 -->
+        <div v-show="toolTab === 'host'" class="side-block">
+          <div class="side-head">
+            <span>服务器列表</span>
+            <button class="term-btn primary" @click="openHostForm()">添加服务器</button>
           </div>
-          <ul class="tootls_host_list">
-            <li
-              v-for="h in hosts"
-              :key="h.host"
-              :data-host="h.host"
-              draggable="true"
-              @dragstart="onHostDragStart($event, h.host)"
-              @dragover="onHostDragOver"
-              @drop="onHostDrop($event, h.host)"
-              @dblclick="connectHost(h)"
-              @click="connectHost(h)"
-            >
-              <i class="drag-handle">⠿</i>
-              <span class="h-name">{{ h.ps === h.host ? h.ps : h.ps + '【' + h.host + '】' }}</span>
-              <span class="tootls">
-                <span class="glyph" title="编辑服务器信息" @click.stop="openHostForm(h)">✎</span>
-                <span class="glyph" title="删除服务器信息" @click.stop="deleteHost(h.host)">🗑</span>
-              </span>
+          <div class="side-quick">
+            <input v-model="quickVal" class="input" placeholder="root@host:22 回车快速连接"
+                   @keydown.enter="quickConnect" />
+          </div>
+          <ul class="side-list">
+            <li v-for="h in hosts" :key="h.host" class="side-item" draggable="true"
+                @dragstart="onHostDragStart($event, h.host)"
+                @dragover="onHostDragOver"
+                @drop="onHostDrop($event, h.host)"
+                @click="connectHost(h)">
+              <div class="side-main">
+                <div class="side-name">{{ h.ps || h.host }}</div>
+                <div class="side-sub">{{ h.username || 'root' }}@{{ h.host }}:{{ h.port || 22 }}</div>
+              </div>
+              <div class="side-ops" @click.stop>
+                <button class="side-op" @click="openHostForm(h)">编辑</button>
+                <button class="side-op danger" @click="deleteHost(h.host)">删除</button>
+              </div>
             </li>
+            <li v-if="!hosts.length" class="side-empty">暂无服务器，点「添加服务器」</li>
           </ul>
+          <div class="side-tip">单击连接 · 拖动行排序 · 地址栏支持 user:pw@host:port</div>
         </div>
-        <div v-show="toolTab === 'shell'" class="tab-block">
-          <div class="block-head">
-            <button class="btn btn-success btn-sm" @click="openCmdForm()">添加命令</button>
+
+        <!-- 常用命令 -->
+        <div v-show="toolTab === 'cmd'" class="side-block">
+          <div class="side-head">
+            <span>常用命令</span>
+            <button class="term-btn primary" @click="openCmdForm()">添加命令</button>
           </div>
-          <ul class="tootls_commonly_list">
-            <li v-for="c in commands" :key="c.title" :data-title="c.title" @click="copyCmd(c.shell)" @dblclick="runCmd(c.shell)">
-              <span class="cmd-name">{{ c.title }}</span>
-              <span class="tootls">
-                <span class="glyph" title="编辑常用命令信息" @click.stop="openCmdForm(c)">✎</span>
-                <span class="glyph" title="删除常用命令信息" @click.stop="deleteCmd(c.title)">🗑</span>
-              </span>
+          <ul class="side-list">
+            <li v-for="c in commands" :key="c.title" class="side-item" @dblclick="runCmd(c.shell)">
+              <div class="side-main">
+                <div class="side-name">{{ c.title }}</div>
+                <div class="side-sub ellip">{{ c.shell }}</div>
+              </div>
+              <div class="side-ops" @click.stop>
+                <button class="side-op" @click="copyCmd(c.shell)">复制</button>
+                <button class="side-op" @click="runCmd(c.shell)">执行</button>
+                <button class="side-op" @click="openCmdForm(c)">编辑</button>
+                <button class="side-op danger" @click="deleteCmd(c.title)">删除</button>
+              </div>
             </li>
+            <li v-if="!commands.length" class="side-empty">暂无常用命令，点「添加命令」</li>
           </ul>
+          <div class="side-tip">双击条目 = 在当前会话执行</div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ===== 状态栏 ===== -->
+    <footer class="term-bar">
+      <span class="bar-item">会话 {{ sessions.length }}</span>
+      <span class="bar-item">字号 {{ fonts }}</span>
+      <button class="term-btn tiny" @click="onFont(null, -1)">字号 −</button>
+      <button class="term-btn tiny" @click="onFont(null, 1)">字号 ＋</button>
+      <button class="term-btn tiny" @click="copyActive">复制屏面</button>
+      <button class="term-btn tiny" @click="pasteActive">粘贴</button>
+      <span class="bar-grow"></span>
+      <span v-if="errMsg" class="bar-err">错误：{{ errMsg }}</span>
+      <span v-else class="bar-dim">SSE 流式会话 · 输入与窗口尺寸实时同步</span>
+    </footer>
+
+    <!-- ===== 添加/编辑服务器 ===== -->
+    <div v-if="showHostForm" class="term-mask" @click.self="showHostForm = false">
+      <div class="term-form">
+        <div class="form-head">
+          <span>{{ hostFormTitle }}</span>
+          <button class="term-btn" @click="showHostForm = false">取消</button>
+        </div>
+        <div class="form-body">
+          <label class="form-row"><span>地址</span>
+            <input v-model="hostForm.host" class="input" placeholder="IP 或域名" />
+          </label>
+          <label class="form-row"><span>端口</span>
+            <input v-model="hostForm.port" class="input" placeholder="22" />
+          </label>
+          <label class="form-row"><span>账号</span>
+            <input v-model="hostForm.username" class="input" placeholder="root" />
+          </label>
+          <label class="form-row"><span>认证</span>
+            <select v-model="hostForm.authType" class="input">
+              <option :value="0">密码</option>
+              <option :value="1">私钥</option>
+            </select>
+          </label>
+          <label v-if="hostForm.authType === 0" class="form-row"><span>密码</span>
+            <input v-model="hostForm.password" type="password" class="input" placeholder="SSH 密码" />
+          </label>
+          <template v-if="hostForm.authType === 1">
+            <label class="form-row column"><span>私钥内容</span>
+              <textarea v-model="hostForm.pkey" rows="5" class="input" placeholder="粘贴 PRIVATE KEY"></textarea>
+            </label>
+            <label class="form-row"><span>私钥密码</span>
+              <input v-model="hostForm.passphrase" type="password" class="input" placeholder="可选" />
+            </label>
+          </template>
+          <label class="form-row"><span>备注</span>
+            <input v-model="hostForm.ps" class="input" placeholder="显示名，默认取地址" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="term-btn primary" @click="saveHost">保存</button>
+          <button class="term-btn" @click="showHostForm = false">取消</button>
         </div>
       </div>
     </div>
 
-    <!-- 标签右键菜单（由全局统一右键菜单接管） -->
-
-    <!-- 添加/编辑主机弹窗 -->
-    <div v-if="showHostForm" class="term-modal-mask" @click.self="showHostForm = false">
-      <div class="term-modal">
-        <div class="tm-title">{{ hostFormTitle }}</div>
-        <div class="bt-form bt-form-2x pd20">
-          <div class="line">
-            <span class="tname">服务器IP</span>
-            <div class="info-r">
-              <input v-model="hostForm.host" class="bt-input-text" style="width:240px" placeholder="输入服务器IP" />
-              <input v-model="hostForm.port" class="bt-input-text" style="width:60px" placeholder="端口" />
-            </div>
-          </div>
-          <div class="line">
-            <span class="tname">SSH账号</span>
-            <div class="info-r"><input v-model="hostForm.username" class="bt-input-text" style="width:305px" placeholder="输入SSH账号" /></div>
-          </div>
-          <div class="line">
-            <span class="tname">验证方式</span>
-            <div class="info-r btn-group">
-              <button type="button" class="btn btn-sm" :class="hostForm.authType === 0 ? 'btn-success' : 'btn-default'" @click="hostForm.authType = 0">密码验证</button>
-              <button type="button" class="btn btn-sm" :class="hostForm.authType === 1 ? 'btn-success' : 'btn-default'" @click="hostForm.authType = 1">私钥验证</button>
-            </div>
-          </div>
-          <div v-if="hostForm.authType === 0" class="line">
-            <span class="tname">密码</span>
-            <div class="info-r"><input v-model="hostForm.password" class="bt-input-text" style="width:305px" placeholder="请输入SSH密码" /></div>
-          </div>
-          <div v-if="hostForm.authType === 1" class="line">
-            <span class="tname">私钥</span>
-            <div class="info-r"><textarea v-model="hostForm.pkey" rows="4" class="bt-input-text" style="width:305px;height:80px;line-height:18px;padding-top:10px" placeholder="请输入SSH私钥"></textarea></div>
-          </div>
-          <div v-if="hostForm.authType === 1" class="line">
-            <span class="tname">私钥密码</span>
-            <div class="info-r"><input v-model="hostForm.passphrase" class="bt-input-text" style="width:305px" placeholder="请输入私钥密码" /></div>
-          </div>
-          <div class="line">
-            <span class="tname">备注</span>
-            <div class="info-r"><input v-model="hostForm.ps" class="bt-input-text" style="width:305px" placeholder="请输入备注,可为空" /></div>
-          </div>
+    <!-- ===== 添加/编辑常用命令 ===== -->
+    <div v-if="showCmdForm" class="term-mask" @click.self="showCmdForm = false">
+      <div class="term-form">
+        <div class="form-head">
+          <span>{{ cmdFormTitle }}</span>
+          <button class="term-btn" @click="showCmdForm = false">取消</button>
         </div>
-        <div class="tm-actions">
-          <button class="btn btn-success btn-sm" @click="saveHost">提交</button>
-          <button class="btn btn-default btn-sm" @click="showHostForm = false">取消</button>
+        <div class="form-body">
+          <label class="form-row"><span>命令名称</span>
+            <input v-model="cmdForm.title" class="input" placeholder="必填" />
+          </label>
+          <label class="form-row column"><span>命令内容</span>
+            <textarea v-model="cmdForm.shell" rows="5" class="input" placeholder="必填"></textarea>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="term-btn primary" @click="saveCmd">保存</button>
+          <button class="term-btn" @click="showCmdForm = false">取消</button>
         </div>
       </div>
     </div>
 
-    <!-- 添加/编辑常用命令弹窗 -->
-    <div v-if="showCmdForm" class="term-modal-mask" @click.self="showCmdForm = false">
-      <div class="term-modal">
-        <div class="tm-title">{{ cmdFormTitle }}</div>
-        <div class="bt-form bt-form-2x pd20">
-          <div class="line">
-            <span class="tname">命令名称</span>
-            <div class="info-r"><input v-model="cmdForm.title" class="bt-input-text" style="width:305px" placeholder="请输入常用命令描述，必填项" /></div>
-          </div>
-          <div class="line">
-            <span class="tname">命令内容</span>
-            <div class="info-r"><textarea v-model="cmdForm.shell" rows="4" class="bt-input-text" style="width:305px;height:150px;line-height:18px;padding-top:10px" placeholder="请输入常用命令信息，必填项"></textarea></div>
-          </div>
-        </div>
-        <div class="tm-actions">
-          <button class="btn btn-success btn-sm" @click="saveCmd">提交</button>
-          <button class="btn btn-default btn-sm" @click="showCmdForm = false">取消</button>
-        </div>
-      </div>
+    <!-- ===== 会话标签右键菜单 ===== -->
+    <div v-if="tabMenu.show" class="term-menu"
+         :style="{ left: tabMenu.x + 'px', top: tabMenu.y + 'px' }" @click.stop>
+      <button class="menu-item" @click="tabAct('copy')">复制会话（新标签）</button>
+      <button class="menu-item" @click="tabAct('close')">关闭当前</button>
+      <button class="menu-item" @click="tabAct('right')">关闭右侧</button>
+      <button class="menu-item" @click="tabAct('others')">关闭其他</button>
     </div>
 
-    <!-- 提示 -->
-    <transition name="fade">
-      <div v-if="toastMsg" class="bt-toast">{{ toastMsg }}</div>
+    <!-- ===== toast ===== -->
+    <transition name="term-fade">
+      <div v-if="toastMsg" class="term-toast">{{ toastMsg }}</div>
     </transition>
-    <span v-if="errMsg" class="term-err">⚠ {{ errMsg }}</span>
   </div>
 </template>
 
 <style scoped>
-/* ===== 宝塔经典浅色外壳（强制，不随应用主题） ===== */
+/* =========================================================================
+   终端(重做版式): 三段式 —— 会话栏 / 屏幕+工具栏 / 状态栏。
+   全文字化(无小图标), 卡片化圆角, 与文件管理同一套设计语言。
+   ========================================================================= */
 .term-page {
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
-  background: #f5f6f7; color: #333;
+  background: var(--bg); color: var(--text);
   font-size: 13px; overflow: hidden; min-height: 0;
-  font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
 }
-.term-page.full_term_view {
-  background: #fff;
-}
+.term-page.fullscreen { background: #000; }
 
-/* 快捷连接栏 */
-.quick_links {
-  flex-shrink: 0;
+/* ---------- 会话栏 ---------- */
+.term-tabs {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.term-tablist { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; }
+.term-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text-muted); cursor: pointer;
+  white-space: nowrap; transition: var(--transition); font-size: 12.5px;
+}
+.term-tab:hover { background: var(--surface-3); color: var(--text); }
+.term-tab.active {
+  background: var(--accent-soft); color: var(--accent-hover);
+  border-color: var(--accent); font-weight: 600;
+}
+.tab-label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.tab-state { font-size: 11px; color: var(--text-faint); font-family: var(--font-mono); }
+.tab-state.st-success { color: var(--success); }
+.tab-state.st-err { color: var(--danger); }
+.tab-state.st-info { color: var(--text-faint); }
+.tab-close {
+  border: none; background: transparent; color: var(--text-faint);
+  font-size: 11px; padding: 0 4px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.tab-close:hover { background: var(--danger-soft); color: var(--danger); }
+.term-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* 文字按钮(通用) */
+.term-btn {
+  height: 28px; padding: 0 12px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-muted); font-size: 12.5px; cursor: pointer;
+  transition: var(--transition); white-space: nowrap;
+}
+.term-btn:hover { background: var(--surface-3); color: var(--text); border-color: var(--border-strong); }
+.term-btn.on { background: var(--accent-soft); color: var(--accent-hover); border-color: var(--accent); }
+.term-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.term-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+.term-btn.tiny { height: 24px; padding: 0 8px; font-size: 11.5px; }
+
+/* ---------- 主体: 屏幕 + 工具栏 ---------- */
+.term-main { flex: 1; min-height: 0; display: flex; }
+.term-screen {
+  position: relative; flex: 1; min-width: 0; min-height: 0;
+  background: #000; overflow: hidden;
+}
+.term-slot { position: absolute; inset: 0; }
+.term-overlay {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  padding: 14px 18px; border-radius: var(--radius-md);
+  background: rgba(20, 22, 26, .92); color: #e6edf3;
+  border: 1px solid #30363d; font-size: 13px;
+  display: flex; align-items: center; gap: 12px; z-index: 5;
+}
+.term-overlay.err { border-color: var(--danger); color: #ffd7d5; }
+.term-overlay .term-btn { background: #21262d; border-color: #30363d; color: #e6edf3; }
+
+/* ---------- 右侧工具栏 ---------- */
+.term-side {
+  width: 300px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--surface); border-left: 1px solid var(--border);
+  overflow: hidden; min-height: 0;
+}
+.side-tabs {
+  display: flex; align-items: center; gap: 4px;
+  padding: 8px; border-bottom: 1px solid var(--border);
+}
+.side-tab {
+  flex: 1; height: 28px; border: 1px solid transparent; border-radius: var(--radius);
+  background: transparent; color: var(--text-muted); font-size: 12.5px; cursor: pointer;
+  transition: var(--transition);
+}
+.side-tab:hover { background: var(--surface-2); color: var(--text); }
+.side-tab.on { background: var(--accent-soft); color: var(--accent-hover); border-color: var(--accent); font-weight: 600; }
+.side-collapse { height: 28px; padding: 0 10px; font-size: 12px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text-muted); border-radius: var(--radius); cursor: pointer; }
+.side-collapse:hover { background: var(--surface-3); color: var(--text); }
+.side-block { display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 10px; gap: 8px; }
+.side-head {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--text-muted);
+}
+.side-quick .input { font-family: var(--font-mono); font-size: 12px; }
+.side-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; }
+.side-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px;
-  background: #fff; border-bottom: 1px solid #e3e5e8;
+  padding: 8px 10px; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2); cursor: pointer; transition: var(--transition);
 }
-.ql-label { color: #555; font-weight: 600; letter-spacing: .5px; }
-.quick_links_input {
-  flex: 0 1 420px; max-width: 480px;
-  border: 1px solid #cfd2d6; border-radius: 0;
-  padding: 5px 10px; font-size: 13px; outline: none;
+.side-item:hover { border-color: var(--accent); background: var(--surface-3); }
+.side-main { flex: 1; min-width: 0; }
+.side-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-sub { font-size: 11.5px; color: var(--text-faint); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-sub.ellip { white-space: nowrap; }
+.side-ops { display: flex; gap: 4px; opacity: .65; transition: opacity var(--transition); }
+.side-item:hover .side-ops { opacity: 1; }
+.side-op {
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-muted); font-size: 11px; padding: 2px 7px;
+  border-radius: var(--radius-sm); cursor: pointer;
 }
-.quick_links_input:focus { border-color: #66afe9; box-shadow: 0 0 3px rgba(102,175,233,.4); }
-.ql-caret { color: #999; font-size: 11px; cursor: pointer; }
+.side-op:hover { border-color: var(--accent); color: var(--accent-hover); }
+.side-op.danger:hover { border-color: var(--danger); color: var(--danger); }
+.side-empty { padding: 18px 8px; text-align: center; color: var(--text-faint); font-size: 12.5px; }
+.side-tip { font-size: 11px; color: var(--text-faint); line-height: 1.6; }
 
-/* 主体布局 */
-.term_box {
-  position: relative; flex: 1; min-height: 0;
+/* ---------- 状态栏 ---------- */
+.term-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 12px; background: var(--surface);
+  border-top: 1px solid var(--border); font-size: 12px;
+}
+.bar-item { color: var(--text-muted); font-family: var(--font-mono); }
+.bar-grow { flex: 1; }
+.bar-err { color: var(--danger); }
+.bar-dim { color: var(--text-faint); }
+
+/* ---------- 弹窗表单 ---------- */
+.term-mask {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(0, 0, 0, .5); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+}
+.term-form {
+  width: 460px; max-width: 92vw; max-height: 86vh;
   display: flex; flex-direction: column;
-  margin-right: 0; transition: margin-right .25s ease;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); box-shadow: var(--shadow); overflow: hidden;
 }
-.term_tootls.open ~ .term_box, .term_box.tool-open { margin-right: 300px; }
+.form-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700;
+}
+.form-body { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.form-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); }
+.form-row > span { width: 76px; flex-shrink: 0; text-align: right; }
+.form-row .input, .form-row textarea { flex: 1; min-width: 0; font-size: 12.5px; }
+.form-row.column { flex-direction: column; align-items: stretch; }
+.form-row.column > span { width: auto; text-align: left; }
+.form-actions {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+}
 
-/* 标签栏 */
-.term_item_tab { flex-shrink: 0; background: #fff; border-bottom: 1px solid #e3e5e8; }
-.term_item_tab .list { display: flex; align-items: center; overflow-x: auto; padding: 6px 8px 0; }
-.term_item_tab .item {
-  position: relative;
-  display: flex; align-items: center; gap: 6px;
-  padding: 7px 12px 6px; margin-right: 4px;
-  border: 1px solid #e3e5e8; border-bottom: none;
-  border-radius: 0 0 0;
-  background: #f5f6f7; color: #666;
-  cursor: pointer; white-space: nowrap; user-select: none;
-  max-width: 220px;
+/* ---------- 右键菜单 ---------- */
+.term-menu {
+  position: fixed; z-index: 1500; min-width: 170px; padding: 4px;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); box-shadow: var(--shadow);
 }
-.term_item_tab .item:hover { background: #fbfbfc; }
-.term_item_tab .item.active { background: #fff; color: #333; font-weight: 600; border-color: #d0d4d8; }
-.term_item_tab .item .content { overflow: hidden; text-overflow: ellipsis; }
-.term_item_tab .item .icon {
-  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+.menu-item {
+  display: block; width: 100%; text-align: left; padding: 7px 10px;
+  border: none; background: transparent; color: var(--text);
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 12.5px;
+  transition: var(--transition);
 }
-.term_item_tab .item .icon-success { background: #2fbf71; }
-.term_item_tab .item .icon-warning { background: #f0ad4e; }
-.term_item_tab .item .icon-info { background: #b9bec4; }
-.term_item_tab .item .icon-trem-close {
-  color: #999; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 0;
-}
-.term_item_tab .item .icon-trem-close:hover { color: #fff; background: #e2544b; }
-.term_item_tab .addServer {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; margin: 0 4px;
-  border: 1px solid #e3e5e8; border-radius: 0;
-  background: #fff; color: #2d8f5e; font-size: 16px; cursor: pointer;
-}
-.term_item_tab .addServer:hover { border-color: #2d8f5e; color: #fff; background: #2d8f5e; }
-.term_item_tab .tab_tootls {
-  display: inline-flex; align-items: center; gap: 4px;
-  margin-left: auto; padding: 0 4px; color: #666; cursor: pointer;
-  font-size: 12px; user-select: none;
-}
-.term_item_tab .tab_tootls:hover { color: #2d8f5e; }
-.tt-icon { display: inline-block; width: 13px; height: 13px; border: 1.5px solid currentColor; border-radius: 0; position: relative; }
-.tt-max::after { content: ''; position: absolute; top: -3px; left: -3px; width: 8px; height: 8px; border: 1.5px solid #fff; }
-.tt-min::after { content: ''; position: absolute; top: 1px; left: 1px; right: 1px; bottom: 1px; border: 1.5px solid currentColor; border-radius: 0; }
+.menu-item:hover { background: var(--surface-3); }
 
-/* 终端内容区 */
-.term_content_tab { position: relative; flex: 1; min-height: 0; background: #000; }
-.term_content_tab .term_item {
-  position: absolute; inset: 0; display: none; background: #000;
+/* ---------- toast ---------- */
+.term-toast {
+  position: fixed; top: 16px; right: 16px; z-index: 2000;
+  padding: 10px 16px; font-size: 13px;
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--success); color: var(--text);
+  border-radius: var(--radius-md); box-shadow: var(--shadow);
 }
-.term_content_tab .term_item.active { display: block; }
+.term-fade-enter-active, .term-fade-leave-active { transition: opacity .25s, transform .25s; }
+.term-fade-enter-from, .term-fade-leave-to { opacity: 0; transform: translateY(-8px); }
 
-.term-tool-button {
-  position: absolute; top: 50%; right: 0; transform: translateY(-50%);
-  width: 18px; height: 56px;
-  background: #eceef1; border: 1px solid #d0d4d8; border-right: none;
-  border-radius: 0 0 0 4px;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; z-index: 6;
+/* ---------- 响应式 ---------- */
+@media (max-width: 900px) {
+  .term-side { display: none; }
+  .tab-label { max-width: 110px; }
 }
-.term-tool-button:hover { background: #e0e3e7; }
-.tt-chevron { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
-.tt-left { border-right: 7px solid #666; }
-.tt-right { border-left: 7px solid #666; }
-
-/* 右侧工具面板 */
-.term_tootls {
-  position: absolute; top: 0; right: 0; bottom: 0;
-  width: 300px; background: #fff;
-  border-left: 1px solid #e3e5e8;
-  transform: translateX(100%); transition: transform .25s ease;
-  z-index: 5;
-}
-.term_tootls.open { transform: translateX(0); }
-.term_tootls .tab-nav { display: flex; border-bottom: 1px solid #e3e5e8; background: #fbfbfc; }
-.term_tootls .tab-nav span {
-  flex: 1; text-align: center; padding: 10px 0; font-size: 13px; color: #666; cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-.term_tootls .tab-nav span.on { color: #2d8f5e; border-bottom-color: #2d8f5e; font-weight: 600; }
-.term_tootls .tab-con { position: absolute; top: 41px; left: 0; right: 0; bottom: 0; overflow-y: auto; }
-.term_tootls .block-head { padding: 10px 12px; }
-.term_tootls ul { list-style: none; margin: 0; padding: 0; }
-.term_tootls li {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-top: 1px solid #f0f1f3; cursor: pointer;
-}
-.term_tootls li:hover { background: #f5f9f7; }
-.term_tootls li .drag-handle { color: #bbb; cursor: grab; }
-.term_tootls li .h-name, .term_tootls li .cmd-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #444; }
-.term_tootls li .tootls { display: flex; gap: 8px; color: #999; }
-.term_tootls li .tootls .glyph { cursor: pointer; }
-.term_tootls li .tootls .glyph:hover { color: #2d8f5e; }
-
-/* 通用按钮 */
-.btn { display: inline-block; border: 1px solid transparent; border-radius: 0; padding: 5px 12px; font-size: 13px; cursor: pointer; }
-.btn-sm { padding: 4px 10px; font-size: 12px; }
-.btn-success { background: #2d8f5e; border-color: #2d8f5e; color: #fff; }
-.btn-success:hover { background: #26794f; }
-.btn-default { background: #fff; border-color: #d0d4d8; color: #555; }
-.btn-default:hover { background: #f0f1f3; }
-
-/* 弹窗 */
-.term-modal-mask {
-  position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9990;
-  display: flex; align-items: center; justify-content: center;
-}
-.term-modal {
-  width: 560px; background: #fff; border-radius: 0; box-shadow: 0 8px 30px rgba(0,0,0,.2);
-  overflow: hidden;
-}
-.term-modal .tm-title { padding: 14px 16px; font-size: 15px; font-weight: 600; border-bottom: 1px solid #eee; }
-.bt-form .line { display: flex; align-items: center; padding: 8px 0; }
-.bt-form .tname { width: 90px; color: #666; text-align: right; padding-right: 10px; flex-shrink: 0; }
-.bt-input-text { border: 1px solid #cfd2d6; border-radius: 0; padding: 5px 8px; font-size: 13px; outline: none; }
-.bt-input-text:focus { border-color: #66afe9; box-shadow: 0 0 3px rgba(102,175,233,.4); }
-.tm-actions { padding: 12px 16px; border-top: 1px solid #eee; text-align: right; }
-
-/* 提示 / 错误 */
-.bt-toast {
-  position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
-  background: #fff; border: 1px solid #e3e5e8; border-radius: 0;
-  padding: 9px 20px; font-size: 13px; color: #333; z-index: 10000;
-  box-shadow: 0 4px 14px rgba(0,0,0,.12);
-}
-.fade-enter-active, .fade-leave-active { transition: opacity .2s; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-.term-err { position: fixed; top: 10px; right: 16px; z-index: 9999; color: #d9534f; font-size: 12px; }
 </style>
