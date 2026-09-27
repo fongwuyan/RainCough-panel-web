@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -362,21 +363,24 @@ func wsHumanBytes(b uint64) string {
 	return fmt.Sprintf("%dB", b)
 }
 
+// 取整助手: NaN/Inf 一律归 0(无 swap/除零等场景会产生 NaN,
+// 而 int64(NaN) 在 amd64 上是 -9223372036854775808, 会写进历史毒化图表)。
 func round0(v float64) float64 {
-	if v < 0 {
+	if badFloat(v) || v < 0 {
 		return 0
 	}
 	return float64(int64(v + 0.5))
 }
 func round1(v float64) float64 {
-	if v < 0 {
+	if badFloat(v) || v < 0 {
 		return 0
 	}
 	return float64(int64(v*10+0.5)) / 10
 }
 func round2(v float64) float64 {
-	if v < 0 {
+	if badFloat(v) || v < 0 {
 		return 0
 	}
 	return float64(int64(v*100+0.5)) / 100
 }
+func badFloat(v float64) bool { return math.IsNaN(v) || math.IsInf(v, 0) }

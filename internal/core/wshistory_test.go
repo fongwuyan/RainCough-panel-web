@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -155,5 +156,12 @@ func TestWSHistoryRounding(t *testing.T) {
 	}
 	if round2(0.1234) != 0.12 {
 		t.Fatalf("round2: %v", round2(0.1234))
+	}
+	// NaN/Inf 必须归 0(int64(NaN) 会产生 -9223372036854775808 毒化数据)
+	if round0(math.NaN()) != 0 || round1(math.NaN()) != 0 || round2(math.NaN()) != 0 {
+		t.Fatalf("NaN 未归零: %v %v %v", round0(math.NaN()), round1(math.NaN()), round2(math.NaN()))
+	}
+	if round0(math.Inf(1)) != 0 || round1(math.Inf(-1)) != 0 {
+		t.Fatal("Inf 未归零")
 	}
 }

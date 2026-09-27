@@ -79,7 +79,9 @@ func (m *SystemMonitor) Snapshot() *SystemSnapshot {
 		Uptime:        uptimeSec(),
 		CurrentTime:   time.Now().Unix(),
 	}
-	if mem.Total > 0 {
+	// 无 swap 的机器(如 VM)必须走这里: 原判据误用 mem.Total, 0/0=NaN 会让
+	// json.Marshal 直接失败 → /api/system 返回 200 但 body 为空
+	if mem.SwapTotal > 0 {
 		snap.SwapPercent = float64(snap.SwapUsed) / float64(mem.SwapTotal) * 100
 	}
 	// 磁盘总量汇总(取第一个真实盘, 与旧版一致)
