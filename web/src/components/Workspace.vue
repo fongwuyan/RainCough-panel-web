@@ -4,7 +4,6 @@ import { usePlugins } from '../stores/plugins'
 import { api } from '../api'
 import RealtimeChart from './sys/RealtimeChart.vue'
 import SysPerf from './sysfunc/SysPerf.vue'
-import SysNet from './sysfunc/SysNet.vue'
 
 const { plugins } = usePlugins()
 
@@ -19,6 +18,12 @@ async function loadIfaceTotal() {
   } catch (e) {
     // 保留上次值, 不打断页面
   }
+}
+
+// --- 网络摘要(原独立 SysNet 组件已并入「网络」卡, 避免区块重复) ---
+const netStat = ref({})
+async function loadNetStat() {
+  try { netStat.value = await api.sysfNet() } catch (e) { /* 静默, 不影响实时曲线 */ }
 }
 
 const sys = ref(null)
@@ -229,11 +234,12 @@ function pctBar(p) {
 onMounted(() => {
   // 全部并行、零等待: 实时数据先出, 常驻历史异步补齐(见 hydrateHistory)
   loadSys()
+  loadNetStat()
   loadDisks()
   loadGpus()
   loadIfaceTotal()
   hydrateHistory()
-  sysTimer = setInterval(loadSys, 1000)
+  sysTimer = setInterval(() => { loadSys(); loadNetStat() }, 1000)
   diskTimer = setInterval(loadDisks, 5000)
   gpuTimer = setInterval(loadGpus, 5000)
   ifaceTimer = setInterval(loadIfaceTotal, 60000)
@@ -325,43 +331,32 @@ async function loadSys() {
 </script>
 
 <template>
-  <div>
-    <!-- 概览: 页头标题/副标题已按需求移除, 用带标题的指标条给页面锚点 -->
-    <div class="section">
+  <div class="ws-grid">
+    <!-- 概览 KPI: 12 列通栏, 6 格一眼看全 -->
+    <section class="section span-12">
       <div class="section-title">概览
-        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">服务器时间 {{ fmtClock(sys ? sys.current_time : 0) }}</span>
+        <span class="card-side">服务器时间 {{ fmtClock(sys ? sys.current_time : 0) }} · v1.0.0 · 曲线每秒采样(窗口 200 点)</span>
       </div>
       <div class="ov-grid">
-        <div class="ov-tile">
-          <b>{{ plugins.length }}</b>
-          <span>已安装插件</span>
-        </div>
-        <div class="ov-tile">
-          <b>{{ ifaceTotal || '—' }}</b>
-          <span>可用功能</span>
-        </div>
+        <div class="ov-tile"><b>{{ plugins.length }}</b><span>已安装插件</span></div>
+        <div class="ov-tile"><b>{{ ifaceTotal || '—' }}</b><span>可用功能</span></div>
         <div class="ov-tile">
           <b>{{ sys ? fmtDuration(sys.uptime) : '—' }}</b>
           <span>运行时长 · {{ sys ? fmtClock(sys.boot_time) + ' 启动' : '—' }}</span>
         </div>
         <div class="ov-tile">
-          <b>v1.0.0</b>
-          <span>应用版本</span>
+          <b>{{ sys && sys.load_avg && sys.load_avg.length ? sys.load_avg[0].toFixed(2) : '—' }}</b>
+          <span>负载 (1m)</span>
         </div>
+        <div class="ov-tile"><b>{{ sys ? fmtBytes(sys.memory_available) : '—' }}</b><span>内存可用</span></div>
+        <div class="ov-tile"><b>{{ sys ? diskAgg.percent.toFixed(1) + '%' : '—' }}</b><span>磁盘占用</span></div>
       </div>
-    </div>
+    </section>
 
-    <div v-if="sysErr" class="error" style="margin-bottom:8px;">系统数据加载失败: {{ sysErr }}（核心指标/服务器信息可能滞后）</div>
+    <div v-if="sysErr" class="error span-12">系统数据加载失败: {{ sysErr }}（核心指标/服务器信息可能滞后）</div>
 
-    <!-- 核心指标: 图表提到最前(仪表盘先看数), 文字信息下沉到「服务器信息」 -->
-    <div v-if="sys" class="section">
-      <div class="section-title">核心指标
-        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">每秒采样 · 曲线窗口 200 点</span>
-      </div>
-
-      <div class="perf-grid">
-        <!-- CPU -->
-        <div class="perf-card perf-card-wide">
+    <!-- ===== CPU (span 6, 含每核迷你图) ===== -->
+    <section v-if="sys" class="section span-6">
           <div class="perf-head">
             <span>CPU（{{ sys.cpu_count }}核）</span>
             <span class="perf-val">{{ (sys.cpu_percent || 0).toFixed(1) }}%</span>
@@ -370,16 +365,16 @@ async function loadSys() {
             <div v-for="(c, i) in sys.cpu_per_core" :key="i" class="core-card">
               <div class="core-head">
                 <span>核 {{ i + 1 }}</span>
-                <span class="perf-val" style="font-size:12px;">{{ (c || 0).toFixed(0) }}%</span>
+                <span class="perf-val">{{ (c || 0).toFixed(0) }}%</span>
               </div>
               <RealtimeChart :series="[{ name: '核' + (i + 1), data: hist.pc[i] || [], color: perCoreColor(i) }]" :max="100" :height="64" />
             </div>
-            <div v-if="!sys.cpu_per_core || !sys.cpu_per_core.length" class="hint" style="grid-column:1/-1;">无核数据</div>
+            <div v-if="!sys.cpu_per_core || !sys.cpu_per_core.length" class="hint span-all">无核数据</div>
           </div>
-        </div>
+        </section>
 
-        <!-- 内存 + 交换 -->
-        <div class="perf-card">
+    <!-- ===== 内存 + 交换 (span 3) ===== -->
+    <section v-if="sys" class="section span-3">
           <div class="perf-head">
             <span>内存</span>
             <span class="perf-val">{{ fmtBytes(sys.memory_used) }} / {{ fmtBytes(sys.memory_total) }}</span>
@@ -388,27 +383,27 @@ async function loadSys() {
             { name: '内存', data: hist.mem, color: C.mem },
             { name: '交换', data: hist.swap, color: C.swap },
           ]" :max="100" :height="120" />
-          <div v-if="sys.swap_total" style="display:flex;justify-content:space-between;font-size:11px;margin-top:8px;">
-            <span style="color:var(--text-faint);">交换 {{ fmtBytes(sys.swap_used) }} / {{ fmtBytes(sys.swap_total) }}</span>
-            <span style="font-family:var(--font-mono);">{{ sys.swap_percent }}%</span>
+          <div v-if="sys.swap_total" class="row-between">
+            <span class="muted">交换 {{ fmtBytes(sys.swap_used) }} / {{ fmtBytes(sys.swap_total) }}</span>
+            <span class="mono">{{ sys.swap_percent }}%</span>
           </div>
-        </div>
+        </section>
 
-        <!-- 磁盘总览 -->
-        <div class="perf-card">
+    <!-- ===== 磁盘总览 (span 3) ===== -->
+    <section v-if="sys" class="section span-3">
           <div class="perf-head">
             <span>磁盘</span>
             <span class="perf-val">{{ fmtBytes(diskAgg.used) }} / {{ fmtBytes(diskAgg.total) }}</span>
           </div>
           <RealtimeChart :series="[{ name: '磁盘', data: hist.disk, color: C.disk }]" :max="100" :height="120" />
-          <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:8px;">
-            <span style="color:var(--text-faint);">总占用 {{ diskAgg.percent.toFixed(1) }}%</span>
-            <span style="color:var(--text-faint);">剩余 {{ fmtBytes((diskAgg.total || 0) - (diskAgg.used || 0)) }}</span>
+          <div class="row-between">
+            <span class="muted">总占用 {{ diskAgg.percent.toFixed(1) }}%</span>
+            <span class="muted">剩余 {{ fmtBytes((diskAgg.total || 0) - (diskAgg.used || 0)) }}</span>
           </div>
-        </div>
+        </section>
 
-        <!-- Load Average -->
-        <div class="perf-card">
+    <!-- ===== 负载 (span 4) ===== -->
+    <section v-if="sys" class="section span-4">
           <div class="perf-head">
             <span>Load Average</span>
             <span class="perf-val" v-if="sys.load_avg && sys.load_avg.length">
@@ -420,10 +415,10 @@ async function loadSys() {
             { name: '5m', data: hist.load5, color: C.load[1] },
             { name: '15m', data: hist.load15, color: C.load[2] },
           ]" :height="120" />
-        </div>
+        </section>
 
-        <!-- 网络（多曲线，两栏） -->
-        <div class="perf-card perf-card-wide">
+    <!-- ===== 网络 (span 8, 内含并入的「网络摘要」四砖) ===== -->
+    <section v-if="sys" class="section span-8">
           <div class="perf-head">
             <span>网络</span>
             <span class="perf-val">
@@ -436,19 +431,19 @@ async function loadSys() {
                 { name: '下行', data: hist.netDown, color: C.down },
                 { name: '上行', data: hist.netUp, color: C.up },
               ]" :height="150" />
-              <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-faint);margin-top:6px;">
+              <div class="meta">
                 累计收 {{ fmtBytes(sys.net_recv) }} / 发 {{ fmtBytes(sys.net_sent) }}
               </div>
             </div>
-            <div v-if="activeIfaces.length" style="border-left:1px solid var(--border);padding-left:14px;">
-              <div style="font-size:11px;color:var(--text-faint);margin-bottom:6px;">分接口</div>
-              <div v-for="ifc in activeIfaces" :key="ifc.name" style="margin-bottom:8px;">
-                <div style="display:flex;justify-content:space-between;font-size:11px;font-family:var(--font-mono);margin-bottom:2px;">
+            <div v-if="activeIfaces.length" class="ifc-col">
+              <div class="ifc-label">分接口</div>
+              <div v-for="ifc in activeIfaces" :key="ifc.name" class="ifc-item">
+                <div class="ifc-row">
                   <span>{{ ifc.name }}</span>
                   <span>
-                    <span style="color:var(--success);">↓{{ fmtRate(ifc.down[ifc.down.length - 1]) }}</span>
+                    <span class="txt-up">↓{{ fmtRate(ifc.down[ifc.down.length - 1]) }}</span>
                     &nbsp;
-                    <span style="color:var(--accent);">↑{{ fmtRate(ifc.up[ifc.up.length - 1]) }}</span>
+                    <span class="txt-accent">↑{{ fmtRate(ifc.up[ifc.up.length - 1]) }}</span>
                   </span>
                 </div>
                 <RealtimeChart :series="[
@@ -458,105 +453,124 @@ async function loadSys() {
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
+
+          <!-- 并入原「网络摘要」独立区块: DNS / TCP / 实时速率 / 公网 IP -->
+          <div class="stat-4">
+            <div><span>DNS</span><b>{{ netStat.dns || '—' }}</b></div>
+            <div><span>TCP 连接</span><b>{{ netStat.tcp_conns || 0 }}</b></div>
+            <div>
+              <span>实时速率</span>
+              <b>{{ fmtRate((netStat.rate || {}).rx || 0) }} ↓ / {{ fmtRate((netStat.rate || {}).tx || 0) }} ↑</b>
+            </div>
+            <div><span>公网 IP</span><b>{{ netStat.public_ip || '—' }}</b></div>
+          </div>
+        </section>
 
     <!-- 服务器信息: 文字信息(原「服务器状态」上半部)下沉到图表之后 -->
-    <div v-if="sys" class="section">
+    <section v-if="sys" class="section span-6">
       <div class="section-title">服务器信息</div>
       <div class="info-grid">
         <div>
-          <div style="font-size:12px;color:var(--text-faint);">主机名</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.hostname || '-' }}</div>
+          <div class="kv-label">主机名</div>
+          <div class="kv-value">{{ sys.hostname || '-' }}</div>
         </div>
         <div>
-          <div style="font-size:12px;color:var(--text-faint);">系统</div>
-          <div style="font-size:13px;font-weight:600;">{{ sys.platform || '-' }} ({{ sys.arch || '-' }})</div>
+          <div class="kv-label">系统</div>
+          <div class="kv-value-sm">{{ sys.platform || '-' }} ({{ sys.arch || '-' }})</div>
         </div>
         <div>
-          <div style="font-size:12px;color:var(--text-faint);">CPU 型号</div>
-          <div style="font-size:13px;font-weight:600;font-family:var(--font-mono);">{{ sys.cpu_model || '-' }}</div>
+          <div class="kv-label">CPU 型号</div>
+          <div class="kv-value-sm">{{ sys.cpu_model || '-' }}</div>
         </div>
         <div>
-          <div style="font-size:12px;color:var(--text-faint);">内存可用</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ fmtBytes(sys.memory_available) }}</div>
+          <div class="kv-label">内存可用</div>
+          <div class="kv-value">{{ fmtBytes(sys.memory_available) }}</div>
         </div>
         <div>
-          <div style="font-size:12px;color:var(--text-faint);">Go 版本</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.go_version || sys.python_version || '-' }}</div>
+          <div class="kv-label">Go 版本</div>
+          <div class="kv-value">{{ sys.go_version || sys.python_version || '-' }}</div>
         </div>
         <div>
-          <div style="font-size:12px;color:var(--text-faint);">进程 / 线程</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);">{{ sys.process_count }} / {{ sys.thread_count }}</div>
+          <div class="kv-label">进程 / 线程</div>
+          <div class="kv-value">{{ sys.process_count }} / {{ sys.thread_count }}</div>
         </div>
       </div>
 
-      <div class="info-grid" style="margin-top:12px;">
-        <div style="grid-column:1/-1;">
-          <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">网卡 IP</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;">
-            <span v-for="ni in sys.net_interfaces" :key="ni.name"
-                  style="font-size:12px;font-family:var(--font-mono);background:var(--bg);border:1px solid var(--border);padding:3px 8px;">
-              <span :style="{ color: ni.up ? 'var(--success)' : 'var(--danger)' }">●</span>
-              {{ ni.name }} {{ ni.addr || '-' }}
-            </span>
-          </div>
+      <div class="ip-block">
+        <div class="kv-label">网卡 IP</div>
+        <div class="ip-chips">
+          <span v-for="ni in sys.net_interfaces" :key="ni.name" class="ip-chip">
+            <span class="ip-dot" :class="ni.up ? 'up' : 'down'">●</span>
+            {{ ni.name }} {{ ni.addr || '-' }}
+          </span>
         </div>
       </div>
-    </div>
+    </section>
 
-    <SysPerf />
-    <SysNet />
+    <!-- ===== 性能趋势 (span 6) ===== -->
+    <SysPerf class="span-6" />
 
-<div class="section">
+    <!-- ===== 磁盘设备 (span 7, 表格化) ===== -->
+    <section class="section span-7">
       <div class="section-title">磁盘设备
-        <button class="btn btn-sm btn-ghost" style="float:right;" @click="loadDisks">刷新</button>
+        <span class="card-side">{{ disks.length }} 盘</span>
+        <button class="btn btn-sm btn-ghost" @click="loadDisks">⟳ 刷新</button>
       </div>
-      <div v-if="diskError" class="error" style="margin-bottom:8px;">{{ diskError }}</div>
+      <div v-if="diskError" class="error disk-err">{{ diskError }}</div>
       <div v-if="!disks.length && !diskError" class="status-line">加载中...</div>
 
-      <div v-for="d in disks" :key="d.path" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span style="font-family:var(--font-mono);font-weight:700;">{{ d.path }}</span>
-          <span style="color:var(--text-faint);font-size:12px;">{{ d.model || d.tran || '磁盘' }}</span>
-          <span style="font-size:12px;font-family:var(--font-mono);">{{ fmtBytes(d.size) }}</span>
-          <span v-if="d.hotplug" class="tag-chip" style="background:var(--accent);color:#fff;">热插拔</span>
-          <span v-if="d.removable" class="tag-chip" style="background:var(--text-faint);color:#fff;">可移动</span>
-          <span v-if="newDisks.has(d.path)" class="tag-chip" style="background:var(--success);color:#fff;">新识别</span>
-        </div>
-        <div v-if="d.partitions && d.partitions.length" style="margin-top:8px;margin-left:18px;">
-          <div v-for="p in d.partitions" :key="p.path"
-               style="display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--border);border-radius: 0;margin-bottom:6px;background:var(--surface-2);">
-            <span style="font-family:var(--font-mono);font-size:12px;min-width:110px;">{{ p.path }}</span>
-            <span style="font-size:11px;color:var(--text-muted);min-width:60px;">{{ p.fstype || '-' }}</span>
-            <span style="font-size:12px;font-family:var(--font-mono);min-width:80px;">{{ fmtBytes(p.size) }}</span>
-            <span v-if="p.label" style="font-size:11px;color:var(--text-muted);">{{ p.label }}</span>
-            <span style="font-size:12px;flex:1;font-family:var(--font-mono);" :class="{ 'text-faint': !p.mounted }">
-              {{ p.mounted ? p.mountpoint : '未挂载' }}
-            </span>
-            <span v-if="diskUsedPct(p) !== null && diskUsedPct(p) !== undefined" style="font-size:11px;font-family:var(--font-mono);color:var(--text-muted);min-width:52px;">
-              {{ diskUsedPct(p).toFixed(0) }}%
-            </span>
-            <div v-if="diskUsedPct(p) !== null && diskUsedPct(p) !== undefined" class="progress" style="flex:1;max-width:120px;">
-              <div :style="{ width: pctBar(diskUsedPct(p)) + '%' }"></div>
-            </div>
-            <button v-if="p.mounted" class="btn btn-sm" :disabled="unmounting === p.path" @click="doUnmount(p)">
-              {{ unmounting === p.path ? '卸载中...' : '卸载' }}
-            </button>
-          </div>
-        </div>
-        <div v-else style="margin-top:6px;margin-left:18px;color:var(--text-faint);font-size:12px;">无分区</div>
-      </div>
-    </div>
+      <table v-else class="table disk-table">
+        <thead>
+          <tr>
+            <th>分区</th><th>类型</th><th>大小</th><th>挂载点</th>
+            <th class="w-use">占用</th><th class="w-act"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template v-for="d in disks" :key="d.path">
+            <tr class="disk-grp">
+              <td colspan="6">
+                <span class="mono disk-path">{{ d.path }}</span>
+                <span class="muted">{{ d.model || d.tran || '磁盘' }}</span>
+                <span class="mono">{{ fmtBytes(d.size) }}</span>
+                <span v-if="d.hotplug" class="tag-chip chip-hot">热插拔</span>
+                <span v-if="d.removable" class="tag-chip chip-mut">可移动</span>
+                <span v-if="newDisks.has(d.path)" class="tag-chip chip-ok">新识别</span>
+              </td>
+            </tr>
+            <tr v-if="!d.partitions || !d.partitions.length">
+              <td colspan="6" class="hint">无分区</td>
+            </tr>
+            <tr v-for="p in (d.partitions || [])" :key="p.path">
+              <td class="mono">{{ p.path }}</td>
+              <td class="muted">{{ p.fstype || '-' }}</td>
+              <td class="mono">{{ fmtBytes(p.size) }}</td>
+              <td class="mono" :class="{ 'text-faint': !p.mounted }">
+                {{ p.mounted ? p.mountpoint : '未挂载' }}<span v-if="p.label" class="muted"> · {{ p.label }}</span>
+              </td>
+              <td>
+                <div v-if="diskUsedPct(p) !== null && diskUsedPct(p) !== undefined" class="use-cell">
+                  <span class="mono use-num">{{ diskUsedPct(p).toFixed(0) }}%</span>
+                  <div class="progress"><div :style="{ width: pctBar(diskUsedPct(p)) + '%' }"></div></div>
+                </div>
+                <span v-else class="text-faint">—</span>
+              </td>
+              <td class="act">
+                <button v-if="p.mounted" class="btn btn-sm" :disabled="unmounting === p.path" @click="doUnmount(p)">
+                  {{ unmounting === p.path ? '卸载中…' : '卸载' }}
+                </button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </section>
 
-    <!-- GPU: 全部核显与显卡 -->
-    <div class="section">
+    <!-- ===== GPU (span 5, 全部核显与显卡) ===== -->
+    <section class="section span-5">
       <div class="section-title">GPU
-        <span style="float:right;font-weight:400;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">
-          {{ gpus.length }} 个显示核心
-        </span>
-        <button class="btn btn-sm btn-ghost" style="float:right;margin-right:10px;" @click="loadGpus">刷新</button>
+        <span class="card-side">{{ gpus.length }} 个显示核心</span>
+        <button class="btn btn-sm btn-ghost" @click="loadGpus">⟳ 刷新</button>
       </div>
       <div v-if="!gpuLoaded" class="status-line">加载中...</div>
       <div v-else-if="gpuErr" class="error">GPU 信息获取失败: {{ gpuErr }}</div>
@@ -564,8 +578,8 @@ async function loadSys() {
       <div v-else class="gpu-grid">
         <div v-for="(g, i) in gpus" :key="g.pci || i" class="perf-card">
           <div class="perf-head">
-            <span style="display:flex;align-items:center;gap:8px;min-width:0;">
-              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ g.name || ('GPU ' + (i + 1)) }}</span>
+            <span class="gpu-name">
+              <span class="gpu-name-txt">{{ g.name || ('GPU ' + (i + 1)) }}</span>
               <span class="tag-chip" :style="gpuKindStyle(g.kind)">{{ g.kind || '未知' }}</span>
             </span>
             <span class="perf-val" v-if="g.usage >= 0">{{ g.usage.toFixed(0) }}%</span>
@@ -578,32 +592,70 @@ async function loadSys() {
             <div><span class="gpu-label">温度</span>{{ g.temp ? g.temp + '°C' : '—' }}</div>
             <div><span class="gpu-label">利用率</span>{{ g.usage >= 0 ? g.usage.toFixed(1) + '%' : '—' }}</div>
           </div>
-          <div v-if="g.usage >= 0" class="progress" style="margin-top:8px;">
+          <div v-if="g.usage >= 0" class="progress gpu-progress">
             <div :style="{ width: Math.min(100, g.usage) + '%', background: gpuUsageColor(g.usage) }"></div>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.perf-grid {
+/* ===== 12 列卡片网格(工作台全面重设) ===== */
+.ws-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(12, 1fr);
   gap: 14px;
+}
+/* 网格内卡片抵消 .section 自带下外边距, 保证行距均匀; 错误条通栏 */
+.ws-grid > .section,
+.ws-grid > .error { margin-bottom: 0; }
+.ws-grid > .error { grid-column: 1 / -1; }
+.span-3 { grid-column: span 3; }
+.span-4 { grid-column: span 4; }
+.span-5 { grid-column: span 5; }
+.span-6 { grid-column: span 6; }
+.span-7 { grid-column: span 7; }
+.span-8 { grid-column: span 8; }
+.span-12 { grid-column: span 12; }
+@media (max-width: 1200px) {
+  .ws-grid > * { grid-column: 1 / -1; } /* 窄屏一律单列 */
+}
+/* 卡片右上角注记(section-title 内 margin-left:auto 推到右侧) */
+.card-side {
+  margin-left: auto;
+  font-weight: 400;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+/* 通用:两端对齐脚注 / 单行元信息 */
+.row-between {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-top: 8px;
+}
+.meta {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  margin-top: 6px;
 }
 .info-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px 16px;
 }
-/* 概览指标条 */
+/* 概览 KPI 条: 桌面一行 6 格 */
 .ov-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(6, 1fr);
   gap: 12px;
 }
+@media (max-width: 1100px) { .ov-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .ov-grid { grid-template-columns: repeat(2, 1fr); } }
 .ov-tile {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -624,9 +676,6 @@ async function loadSys() {
   background: var(--bg);
   border: 1px solid var(--border);
   padding: 14px;
-}
-.perf-card-wide {
-  grid-column: span 3;
 }
 .net-grid {
   display: grid;
@@ -660,6 +709,20 @@ async function loadSys() {
   color: var(--text-muted);
   margin-bottom: 6px;
 }
+.core-head .perf-val { font-size: 12px; }
+.span-all { grid-column: 1 / -1; }
+.ifc-col { border-left: 1px solid var(--border); padding-left: 14px; }
+.ifc-label { font-size: 11px; color: var(--text-faint); margin-bottom: 6px; }
+.ifc-item { margin-bottom: 8px; }
+.ifc-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  margin-bottom: 2px;
+}
+.txt-up { color: var(--success); }
+.txt-accent { color: var(--accent); }
 .perf-head {
   display: flex;
   justify-content: space-between;
@@ -673,14 +736,6 @@ async function loadSys() {
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
-}
-@media (max-width: 1100px) {
-  .perf-grid { grid-template-columns: 1fr 1fr; }
-  .perf-card-wide { grid-column: span 2; }
-}
-@media (max-width: 720px) {
-  .perf-grid { grid-template-columns: 1fr; }
-  .perf-card-wide { grid-column: span 1; }
 }
 /* GPU 卡 */
 .gpu-grid {
@@ -706,4 +761,85 @@ async function loadSys() {
   color: var(--text-faint);
   margin-bottom: 2px;
 }
+
+/* ===== 服务器信息 ===== */
+.kv-label { font-size: 12px; color: var(--text-faint); }
+.kv-value {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+.kv-value-sm { font-size: 13px; font-weight: 600; }
+.ip-block { margin-top: 14px; }
+.ip-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.ip-chip {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+}
+.ip-dot.up { color: var(--success); }
+.ip-dot.down { color: var(--danger); }
+
+/* ===== 网络摘要四砖(并入网络卡) ===== */
+.stat-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+}
+.stat-4 > div {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 8px 10px;
+}
+.stat-4 span {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+.stat-4 b {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+@media (max-width: 900px) { .stat-4 { grid-template-columns: repeat(2, 1fr); } }
+
+/* ===== 磁盘设备表格 ===== */
+.disk-err { margin-bottom: 8px; }
+.disk-table td, .disk-table th { vertical-align: middle; }
+.disk-table .w-use { width: 150px; }
+.disk-table .w-act { width: 86px; }
+.disk-table td.act { text-align: right; }
+.disk-grp td {
+  background: var(--surface-2);
+  font-weight: 700;
+}
+.disk-path { margin-right: 8px; }
+.disk-table td .muted { margin-left: 6px; font-size: 12px; }
+.use-cell { display: flex; align-items: center; gap: 8px; }
+.use-num { min-width: 34px; font-size: 11px; color: var(--text-muted); }
+.use-cell .progress { flex: 1; }
+
+/* ===== 磁盘徽标 ===== */
+.tag-chip.chip-hot { background: var(--accent); color: #fff; }
+.tag-chip.chip-mut { background: var(--text-faint); color: #fff; }
+.tag-chip.chip-ok { background: var(--success); color: #fff; }
+
+/* ===== GPU ===== */
+.gpu-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.gpu-name-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gpu-progress { margin-top: 8px; }
 </style>
