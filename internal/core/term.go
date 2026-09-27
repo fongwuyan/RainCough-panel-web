@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/creack/pty"
 )
@@ -270,6 +271,15 @@ func utf8HoldIdx(data []byte) int {
 	return -1
 }
 
+// sanitizeUTF8 保证分块是合法 UTF-8: 不可恢复的残余字节(输出被 pty 缓冲从
+// 多字节中间截断、上游损坏)→ 用 U+FFFD 占位。合法输入原样返回(不分配)。
+func sanitizeUTF8(b []byte) []byte {
+	if len(b) == 0 || utf8.Valid(b) {
+		return b
+	}
+	return []byte(strings.ToValidUTF8(string(b), "\uFFFD"))
+}
+
 // readLoop 读 pty 输出, 增量 UTF-8 解码入缓冲。
 func (s *TermSession) readLoop() {
 	raw := make([]byte, 8192)
@@ -290,6 +300,10 @@ func (s *TermSession) readLoop() {
 				pending = append(pending[:0], data[hold:]...)
 				data = data[:hold]
 			}
+			// 消毒: pty 的 8KB 缓冲可能把一个多字节字符从中间截断(大输出时 tty
+			// 写半截), 残首字节与后续 ASCII 拼在一起不构成合法序列 → 换成替换符,
+			// 保证每个 SSE 分块都是合法 UTF-8(否则客户端解出整段乱码)。
+			data = sanitizeUTF8(data)
 			if len(data) > 0 {
 				s.appendOutput(data)
 			}
