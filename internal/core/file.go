@@ -24,6 +24,87 @@ type FileEntry struct {
 	MTime     int64  `json:"mtime"`
 	Mode      string `json:"mode,omitempty"`
 	Extension string `json:"ext,omitempty"`
+	// Kind 取值域与前端 kindName/kindIcon 完全一致:
+	// dir|image|video|audio|archive|text|file —— 前端的类型列、图标、
+	// 文本"查看/编辑"、图片灯箱、右键"解压"全部由它把门, 缺失即整组功能失效。
+	Kind string `json:"kind"`
+	// 软链接信息(前端链接箭头 + 悬停提示)
+	IsLink     bool   `json:"is_link"`
+	LinkTarget string `json:"link_target,omitempty"`
+}
+
+// fmExtSet 扩展名集合(小写、不带点)。
+func fmExtSet(items ...string) map[string]bool {
+	m := make(map[string]bool, len(items))
+	for _, s := range items {
+		m[s] = true
+	}
+	return m
+}
+
+var (
+	fmImageExt   = fmExtSet("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico", "tif", "tiff", "heic", "heif", "avif", "raw")
+	fmVideoExt   = fmExtSet("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "ts", "m2ts")
+	fmAudioExt   = fmExtSet("mp3", "wav", "flac", "ogg", "aac", "m4a", "wma", "opus", "mid", "midi")
+	fmArchiveExt = fmExtSet("zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "zst", "lz4", "lzma", "iso", "jar")
+	fmTextExt    = fmExtSet("txt", "md", "log", "json", "xml", "yaml", "yml", "ini", "conf", "cfg", "csv", "tsv",
+		"html", "htm", "css", "js", "mjs", "cjs", "ts", "jsx", "tsx", "vue", "go", "py", "sh", "bash", "zsh",
+		"fish", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php", "sql", "toml", "env", "rst", "bat", "ps1", "lock")
+	// 无扩展名但天然是文本的文件名
+	fmTextNames = fmExtSet("dockerfile", "makefile", "license", "readme", "procfile", "gemfile", "rakefile",
+		".gitignore", ".gitattributes", ".editorconfig", ".bashrc", ".profile", ".npmrc", ".env", ".vimrc")
+)
+
+// FileKind 文件分类(与前端 kindName/kindIcon 的键一一对应)。
+func FileKind(isDir bool, name string) string {
+	if isDir {
+		return "dir"
+	}
+	// 先按【整名】匹配: Dockerfile/README/.gitignore/.env 等
+	// (注意 .gitignore 的 filepath.Ext 是 ".gitignore", 走扩展会判成 file)
+	if fmTextNames[strings.ToLower(name)] {
+		return "text"
+	}
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
+	if ext == "" {
+		return "file"
+	}
+	switch {
+	case fmImageExt[ext]:
+		return "image"
+	case fmVideoExt[ext]:
+		return "video"
+	case fmAudioExt[ext]:
+		return "audio"
+	case fmArchiveExt[ext]:
+		return "archive"
+	case fmTextExt[ext]:
+		return "text"
+	}
+	return "file"
+}
+
+// EntryFrom 由目录项构造列表项(ListDir 与搜索结果共用同一口径)。
+func EntryFrom(dir, name string, info os.FileInfo) FileEntry {
+	fe := FileEntry{
+		Name:  name,
+		Path:  filepath.Join(dir, name),
+		IsDir: info.IsDir(),
+		Size:  info.Size(),
+		MTime: info.ModTime().Unix(),
+		Mode:  info.Mode().String(),
+		Kind:  FileKind(info.IsDir(), name),
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		fe.IsLink = true
+		if t, err := os.Readlink(fe.Path); err == nil {
+			fe.LinkTarget = t
+		}
+	}
+	if !info.IsDir() {
+		fe.Extension = strings.TrimPrefix(filepath.Ext(name), ".")
+	}
+	return fe
 }
 
 const (
@@ -45,18 +126,7 @@ func ListDir(dir string) ([]FileEntry, error) {
 		if err != nil {
 			continue
 		}
-		fe := FileEntry{
-			Name:  e.Name(),
-			Path:  filepath.Join(dir, e.Name()),
-			IsDir: e.IsDir(),
-			Size:  info.Size(),
-			MTime: info.ModTime().Unix(),
-			Mode:  info.Mode().String(),
-		}
-		if !e.IsDir() {
-			fe.Extension = strings.TrimPrefix(filepath.Ext(e.Name()), ".")
-		}
-		out = append(out, fe)
+		out = append(out, EntryFrom(dir, e.Name(), info))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].IsDir != out[j].IsDir {

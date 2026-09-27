@@ -67,6 +67,11 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/list":
+		// 旧实现对"文件路径"直接 500 且空 body → 前端只能看到 HTTP500
+		if fi, err := os.Stat(abs); err == nil && !fi.IsDir() {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "不是目录: " + abs})
+			return
+		}
 		entries, err := core.ListDir(abs)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
@@ -75,6 +80,10 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"path": abs, "items": entries, "count": len(entries),
 		})
+
+	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/search":
+		// 修复: 此前该路径无任何实现 → 404, 搜索框完全不可用
+		s.handleFmSearch(w, r, abs)
 
 	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/read":
 		content, tooBig, err := core.ReadFileText(abs, core.ReadLimitMax)
@@ -91,9 +100,19 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 		var b struct {
 			Path    string `json:"path"`
 			Content string `json:"content"`
+			// 修复: 前端一直在传 encoding(编辑器有编码下拉), 后端 struct 无此字段
+			// → 静默忽略(用户选 GBK 却写出 UTF-8 字节)。现明确契约:
+			// 未接入 x/text 转码, 仅接受 utf-8, 其余显式拒绝。
+			Encoding string `json:"encoding"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		if enc := strings.ToLower(strings.TrimSpace(b.Encoding)); enc != "" && enc != "utf-8" && enc != "utf8" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"error": "暂仅支持 UTF-8 读写(未接入转码库), 收到 encoding=" + b.Encoding,
+			})
 			return
 		}
 		target, err := resolveFM(b.Path)
@@ -105,7 +124,7 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "path": target})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "path": target, "encoding": "utf-8"})
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/mkdir":
 		// 前端契约: body {path}(旧契约也兼容 query ?path=)
@@ -202,8 +221,12 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
 
+	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/upload/chunk":
+		// 修复: 前端唯一上传路径(分块+进度条), 此前 404 → 文件管理完全无法上传
+		s.handleFmUploadChunk(w, r)
+
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/upload":
-		// 单请求上传(旧版另有 /upload/chunk 分块, 单请求先支持小文件)
+		// 单请求上传(兼容入口; 前端主路径是 /upload/chunk)
 		file, header, err := r.FormFile("file")
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "缺少 file 字段"})

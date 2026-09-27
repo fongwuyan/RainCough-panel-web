@@ -1004,13 +1004,8 @@ watch(paged, () => setupObserver())
           <button class="btn btn-sm btn-ghost" @click="closeEditor">关闭</button>
         </div>
         <div class="fm-edit-toolbar">
-          <select v-model="editorEncoding" class="input">
-            <option value="utf-8">UTF-8</option>
-            <option value="gb18030">GB18030</option>
-            <option value="gbk">GBK</option>
-            <option value="ascii">ASCII</option>
-            <option value="latin-1">latin-1</option>
-          </select>
+          <!-- 后端未接入 x/text 转码: 读写恒 UTF-8, 选其它编码保存会被 400 拒绝(见 fm.go save) -->
+          <span class="status-line" title="后端仅支持 UTF-8 读写(未接入转码库); 选其它编码保存会被明确拒绝, 避免静默写坏文件">编码 {{ editorEncoding }}（仅 UTF-8）</span>
           <span class="status-line">Ctrl+S 保存</span>
           <span v-if="editorMsg" class="status-line fm-warn-text">{{ editorMsg }}</span>
           <span class="fm-grow"></span>
