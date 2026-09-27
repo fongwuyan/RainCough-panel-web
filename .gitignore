@@ -37,5 +37,8 @@ plugins/demo/
 # 前端构建产物(不入库, 部署时由 web build 生成)
 public/
 
+# 面板主体打包产物(Release 资产, 不入库)
+dist/
+
 # Go 模块缓存
 .go/
