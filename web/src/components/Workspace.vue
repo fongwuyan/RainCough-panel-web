@@ -286,6 +286,14 @@ const activeIfaces = computed(() => {
     .slice(0, 3)
 })
 
+// 主图高度与右侧「分接口」列实际高度对齐 —— 否则左列矮一截, 网络卡左侧中下方留白。
+// 右列高 ≈ 标签 22 + 每条 ifc-item 85(行15 + 图60 + 间距10); 左列 = 图高 + 累计行 21
+const netMainH = computed(() => {
+  const n = activeIfaces.value.length
+  if (!n) return 150
+  return Math.max(90, Math.min(320, 22 + n * 85 - 21))
+})
+
 function diskUsedPct(part) {
   const u = mountUsage.value[part.mountpoint]
   if (!u) return null
@@ -452,7 +460,7 @@ async function loadSys() {
               <RealtimeChart :series="[
                 { name: '下行', data: hist.netDown, color: C.down },
                 { name: '上行', data: hist.netUp, color: C.up },
-              ]" :height="150" />
+              ]" :height="netMainH" />
               <div class="meta">
                 累计收 {{ fmtBytes(sys.net_recv) }} / 发 {{ fmtBytes(sys.net_sent) }}
               </div>
@@ -702,11 +710,12 @@ async function loadSys() {
 }
 .core-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  /* auto-fit 而非 auto-fill: 按核数折叠空轨道, 避免 CPU 卡右侧留下空白轨道 */
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 10px;
 }
 @media (min-width: 1200px) {
-  .core-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  .core-grid { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
 }
 .core-card {
   background: var(--surface);
