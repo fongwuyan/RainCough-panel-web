@@ -78,6 +78,11 @@ func (s *server) handleTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleTaskDetail(w http.ResponseWriter, r *http.Request) {
+	// 只读详情: 显式拒绝写方法(原先 PUT/DELETE 也会 200 返回任务体)。
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
 	id := r.URL.Path[len("/api/tasks/"):]
 	t, ok := globalTasks.Get(id)
 	if !ok {

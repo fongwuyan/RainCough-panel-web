@@ -168,7 +168,8 @@ func (ts *TaskStore) Cleanup(retainDays int) int {
 	var keep []string
 	for _, id := range ts.order {
 		t := ts.tasks[id]
-		if (t.Status == "done" || t.Status == "failed") && t.UpdatedAt < cutoff {
+		// cutoff 为秒级时间戳: 用 <= 避免同一秒内刚完成的任务在清理时漏网
+		if (t.Status == "done" || t.Status == "failed") && t.UpdatedAt <= cutoff {
 			delete(ts.tasks, id)
 			_ = ts.ns.Set("task:"+id, nil) // 尽力清库
 			removed++

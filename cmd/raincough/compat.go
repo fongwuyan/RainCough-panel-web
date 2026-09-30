@@ -115,7 +115,12 @@ func (s *server) handleSysProcessesKill(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleTasksPurge POST /api/tasks/purge
+// 只接受 POST: 清理是破坏性操作, 不能让 GET(链接/图片/预取)误触发。
 func (s *server) handleTasksPurge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
 	n := globalTasks.Cleanup(0)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "removed": n})
 }
