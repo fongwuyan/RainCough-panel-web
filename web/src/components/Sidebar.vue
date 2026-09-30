@@ -2,21 +2,23 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
+import { useExtensions } from '../stores/extensions'
 import { useUi } from '../stores/ui'
 
 const route = useRoute()
 const router = useRouter()
 const { plugins, load } = usePlugins()
+const { extensions, load: loadExts } = useExtensions()
 const { installOpen } = useUi()
 
-onMounted(load)
+onMounted(() => { load(); loadExts() })
 
+// 内置功能(随面板主体安装): 共 7 项, 其余功能一律是系统扩展(在「系统扩展」页安装)
 const PAGES = [
   { key: 'workspace', label: '工作台', path: '/', desc: '概览与状态', icon: 'WD' },
   { key: 'fm', label: '文件管理', path: '/fm', desc: '文件系统', icon: 'FM' },
   { key: 'terminal', label: '终端', path: '/terminal', desc: 'Shell', icon: 'TM' },
-  { key: 'media', label: '媒体中心', path: '/media', desc: '图片视频', icon: 'MD' },
-  { key: 'tasks', label: '任务队列', path: '/tasks', desc: '下载安装', icon: 'TQ' },
+  { key: 'ext', label: '系统扩展', path: '/ext', desc: '扩展安装与管理', icon: 'EX' },
   { key: 'plugins', label: '插件', path: '/plugins', desc: '管理与安装', icon: 'PL' },
   { key: 'settings', label: '设置', path: '/settings', desc: '偏好', icon: 'SG' },
   { key: 'docs', label: '开发文档', path: '/docs', desc: '插件指南', icon: 'DC' },
@@ -68,6 +70,7 @@ const searchResults = computed(() => {
   const out = []
   for (const p of PAGES) if ((p.label + p.desc).toLowerCase().includes(q)) out.push({ label: p.label, desc: p.desc, path: p.path })
   for (const p of plugins.value) if ((p.label + ' ' + (p.description || '')).toLowerCase().includes(q)) out.push({ label: p.label, desc: p.description || '', path: '/plugin/' + p.name })
+  for (const x of extensions.value) if (((x.label || '') + ' ' + (x.description || '')).toLowerCase().includes(q)) out.push({ label: x.label || x.name, desc: x.description || '系统扩展', path: x.route || ('/ext/' + x.name) })
   for (const g of SYS_GROUPS) for (const p of g.items) if ((p.label + p.desc).toLowerCase().includes(q)) out.push({ label: '系统 · ' + p.label, desc: p.desc, path: p.path })
   return out.slice(0, 10)
 })
@@ -89,6 +92,7 @@ function isActive(name) {
   if (name === 'fm') return route.name === 'fm'
   if (name === 'filemanager') return route.name === 'plugin' && route.params.name === 'filemanager'
   if (name === 'terminal') return route.name === 'terminal'
+  if (name === 'ext') return route.name === 'ext' || route.name === 'ext-view'
   if (name === 'media') return route.name === 'media'
   if (name === 'scheduler') return route.name === 'scheduler'
   if (name === 'tasks') return route.name === 'tasks'
@@ -96,6 +100,9 @@ function isActive(name) {
   if (name === 'plugins') return route.name === 'plugins'
   return route.name === 'plugin' && route.params.name === name
 }
+
+// 已装系统扩展的侧边栏项(挂在「系统扩展」页下)
+function extActive(x) { return route.name === 'ext-view' && String(route.params.name) === x.name }
 function activeByPath(p) { return route.path === p }
 const sysActive = computed(() => SYS_GROUPS.some((g) => g.items.some((i) => activeByPath(i.path))))
 const sysCount = computed(() => SYS_GROUPS.reduce((n, g) => n + g.items.length, 0))
@@ -176,6 +183,25 @@ const sysCount = computed(() => SYS_GROUPS.reduce((n, g) => n + g.items.length, 
         <div class="info">
           <div class="label">{{ p.label }}</div>
           <div class="desc">{{ p.desc }}</div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-section-label">已装扩展</div>
+      <div v-if="!extensions.length" class="hint" style="padding:4px 12px 8px;font-size:11px;">
+        未安装扩展, 到「系统扩展」页安装
+      </div>
+      <div
+        v-for="x in extensions"
+        :key="'ext-' + x.name"
+        class="plugin-item"
+        :class="{ active: extActive(x) }"
+        @click="go(x.route || ('/ext/' + x.name))"
+      >
+        <div class="nav-icon">{{ x.icon || 'EX' }}</div>
+        <div class="info">
+          <div class="label">{{ x.label || x.name }}</div>
+          <div class="desc">{{ x.description || ('v' + (x.version || '-')) }}</div>
         </div>
       </div>
 

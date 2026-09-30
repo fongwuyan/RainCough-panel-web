@@ -132,6 +132,13 @@ func main() {
 		globalPX.Reload()
 	})
 
+	// 系统扩展仓储: 内置功能之外的功能包, 存放于主面板库 extensions/, 按需安装
+	globalExt = core.NewExtStore(
+		filepath.Join(cfg.BaseDir, "extensions"),
+		filepath.Join(cfg.BaseDir, "extension-src", "extensions"),
+		globalStore,
+	)
+
 	// 系统中心(服务/进程/日志/防火墙)
 	globalSys = core.NewSysCenter(cfg.SudoPW)
 
@@ -248,6 +255,13 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/store/registry", s.handleStoreRegistry)
 	mux.HandleFunc("/api/store/plugin/install", s.handleStorePluginInstall)
 	mux.HandleFunc("/api/store/plugin/remove", s.handleStorePluginRemove)
+	// 系统扩展(内置功能之外的扩展包安装/卸载/产物服务)
+	mux.HandleFunc("/api/ext", s.handleExtList)
+	mux.HandleFunc("/api/ext/registry", s.handleExtRegistry)
+	mux.HandleFunc("/api/ext/install", s.handleExtInstall)
+	mux.HandleFunc("/api/ext/update", s.handleExtUpdate)
+	mux.HandleFunc("/api/ext/remove", s.handleExtRemove)
+	mux.HandleFunc("/api/ext/", s.handleExtAsset)
 
 	// ---- 系统中心(服务/进程/日志/防火墙) ----
 	mux.HandleFunc("/api/sysfunc/", s.handleSysCenter)

@@ -248,6 +248,14 @@ export const api = {
   storePluginUpdate: (name) => req('POST', '/api/store/plugin/update', { name }),
   storePluginRemove: (name) => req('POST', '/api/store/plugin/remove', { name }),
   storeProjectStatus: () => req('GET', '/api/store/project/status'),
+
+  // 系统扩展(内置 7 项之外的功能包, 存于主面板库 extensions/)
+  extList: () => req('GET', '/api/ext'),
+  extRegistry: () => req('GET', '/api/ext/registry'),
+  extInstall: (name) => req('POST', '/api/ext/install', { name }),
+  extUpdate: (name) => req('POST', '/api/ext/update', { name }),
+  extRemove: (name) => req('POST', '/api/ext/remove', { name }),
+  extEntry: (name) => `/api/ext/${encodeURIComponent(name)}/assets/extension.js`,
   // 已删除 storeProjectUpdateInfo / storeProjectCheck / storeProjectInstall:
   // 后端这三处只回伪造的 current=latest=v1.0.0 与空 env, 没有真实能力, 前端
   // 据此谎报"已开始更新…服务将重启""环境不满足"。面板更新走部署脚本(StoreProject.vue)。

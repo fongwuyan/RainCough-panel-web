@@ -1,0 +1,14 @@
+{
+  "extensions": [
+    {
+      "name": "media",
+      "label": "媒体中心",
+      "version": "1.0.0",
+      "description": "聚合浏览服务器图片与视频, 支持标签筛选、批量打标与相似图片检测",
+      "author": "RainCough",
+      "icon": "MD",
+      "entry": "assets/extension.js",
+      "route": "/ext/media"
+    }
+  ]
+}
