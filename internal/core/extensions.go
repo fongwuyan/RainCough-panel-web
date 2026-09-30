@@ -303,10 +303,11 @@ func (e *ExtStore) Install(name string, task *TaskStore) (string, error) {
 			}
 		}()
 
-		task.Update(tid, "拉取主面板库", 20, "拉取主面板库扩展...")
-		if err := e.installFromGitHub(name); err != nil {
-			task.Update(tid, "本地回退", 45, "GitHub 拉取失败, 尝试本地源: "+err.Error())
-			if err2 := e.installFromLocal(name); err2 != nil {
+		task.Update(tid, "取件", 20, "获取扩展包...")
+		// 本地源优先(离线/开发环境): 命中就直接装, 不去拉远端的整仓包
+		if err := e.installFromLocal(name); err != nil {
+			task.Update(tid, "主面板库", 45, "从主面板库取件...")
+			if err2 := e.installFromGitHub(name); err2 != nil {
 				task.Update(tid, "", 0, "安装失败: 主面板库与本地源均不可用 ("+err2.Error()+")")
 				return
 			}
@@ -331,7 +332,9 @@ func (e *ExtStore) Install(name string, task *TaskStore) (string, error) {
 	return "queued", nil
 }
 
-// installFromGitHub 下载主面板库 zipball 并取 extensions/<name>。
+// installFromGitHub 从主面板库取扩展目录。
+// 走 contents API 逐级取件(扩展只有清单 + 十几个 KB 产物), 不下载整仓 zipball ——
+// 主仓包含 plugins/web 等, 整包下载在慢网络上会让安装卡到分钟级。
 func (e *ExtStore) installFromGitHub(name string) error {
 	if e.store == nil {
 		return fmt.Errorf("市场未初始化")
@@ -341,37 +344,62 @@ func (e *ExtStore) installFromGitHub(name string) error {
 	if branch == "" {
 		branch = "main"
 	}
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/zipball/%s", repo.Owner, repo.Repo, branch)
-	data, err := e.store.ghDownload(url)
+	tmp := filepath.Join(e.dir, name+".tmp")
+	_ = os.RemoveAll(tmp)
+	if err := e.fetchGitHubDir(repo, branch, "extensions/"+name, tmp); err != nil {
+		_ = os.RemoveAll(tmp)
+		return err
+	}
+	if _, err := readExtManifest(tmp); err != nil {
+		_ = os.RemoveAll(tmp)
+		return fmt.Errorf("主面板库中的扩展缺少 extension.json")
+	}
+	dst := filepath.Join(e.dir, name)
+	if err := os.RemoveAll(dst); err != nil {
+		_ = os.RemoveAll(tmp)
+		return err
+	}
+	return os.Rename(tmp, dst)
+}
+
+// ghEntry contents API 目录项。
+type ghEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
+
+// fetchGitHubDir 递归取仓库目录到本地(apiPath 为仓库相对路径)。
+func (e *ExtStore) fetchGitHubDir(repo Repo, branch, apiPath, dst string) error {
+	url := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", repo.Owner, repo.Repo, apiPath, branch)
+	raw, err := e.ghRaw(url)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.MkdirTemp("", "rc-ext-*")
-	if err != nil {
-		return err
+	var entries []ghEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return fmt.Errorf("目录列表解析失败: %s", apiPath)
 	}
-	defer os.RemoveAll(tmp)
-	zipPath := filepath.Join(tmp, "repo.zip")
-	if err := os.WriteFile(zipPath, data, 0o644); err != nil {
-		return err
-	}
-	if err := extractArchive(zipPath, tmp); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(tmp)
-	if err != nil {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
 	for _, ent := range entries {
-		if !ent.IsDir() {
-			continue
-		}
-		src := filepath.Join(tmp, ent.Name(), "extensions", name)
-		if st, err := os.Stat(src); err == nil && st.IsDir() {
-			return e.copyInto(src, name)
+		switch ent.Type {
+		case "dir":
+			if err := e.fetchGitHubDir(repo, branch, ent.Path, filepath.Join(dst, ent.Name)); err != nil {
+				return err
+			}
+		case "file":
+			data, err := e.ghRaw(fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", repo.Owner, repo.Repo, ent.Path, branch))
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(dst, ent.Name), data, 0o644); err != nil {
+				return err
+			}
 		}
 	}
-	return fmt.Errorf("主面板库中未找到扩展目录: extensions/%s", name)
+	return nil
 }
 
 // installFromLocal 从本地源目录复制(离线/开发)。
