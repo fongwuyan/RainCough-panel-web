@@ -1,20 +1,27 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useUi } from '../stores/ui'
+import StoreRepoSettings from './store/StoreRepoSettings.vue'
+import StoreProject from './store/StoreProject.vue'
 
-// 插件设置与面板更新已迁至「插件」页(/plugins), 设置页只保留外观
+// 插件设置(已并入插件页)之外的全局配置都在这里:
+// 外观 / 仓库配置(插件市场与面板仓库) / 面板更新
 const { theme, setTheme } = useUi()
 
 const activeCat = ref('appearance')
 
-const navItems = computed(() => [{ key: 'appearance', label: '外观' }])
+const navItems = [
+  { key: 'appearance', label: '外观' },
+  { key: 'repo', label: '仓库配置' },
+  { key: 'project', label: '面板更新' },
+]
 </script>
 
 <template>
   <div class="page">
     <div class="page-head">
       <h1>设置</h1>
-      <div class="subtitle">界面主题</div>
+      <div class="subtitle">界面主题、仓库配置与面板更新</div>
     </div>
 
     <div class="page-body">
@@ -40,6 +47,9 @@ const navItems = computed(() => [{ key: 'appearance', label: '外观' }])
               </div>
             </div>
           </div>
+
+          <StoreRepoSettings v-else-if="activeCat === 'repo'" />
+          <StoreProject v-else-if="activeCat === 'project'" />
         </div>
       </div>
     </div>

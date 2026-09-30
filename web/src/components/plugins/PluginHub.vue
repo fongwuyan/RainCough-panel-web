@@ -4,10 +4,9 @@ import { useRouter } from 'vue-router'
 import { api } from '../../api'
 import { usePlugins } from '../../stores/plugins'
 import { useUi } from '../../stores/ui'
-import StoreProject from '../store/StoreProject.vue'
 
 // 「插件」中心: 已装插件管理 + 插件市场 两页签合一
-// (原 /store 市场页与设置页里的插件设置在此合并, 设置页只保留外观)
+// (仓库配置与面板更新在「设置」页; 旧 /store 市场页重定向到这里)
 const router = useRouter()
 const { plugins: installed, load: loadInstalled } = usePlugins()
 const { installOpen } = useUi()
@@ -55,57 +54,8 @@ async function loadRegistry() {
   }
 }
 
-// ============ 仓库配置(市场页签) ============
-const cfg = ref(null)
-const showSettings = ref(false)
-const tokenInput = ref('')
-const pingUser = ref('')
-
-async function loadSettings() {
-  try {
-    const d = await api.storeSettings()
-    cfg.value = d.config || {}
-  } catch (e) { /* 配置读不到时下方显示加载提示, 不阻塞页面 */ }
-}
-
-async function saveSettings() {
-  try {
-    // 只提交后端真正接收的字段: machine_label/port/bind 是旧 store.py 遗留,
-    // Go 侧既不解析也不回传(2026-09-28 审计定位后已从表单移除)。
-    const body = { plugin_repo: cfg.value.plugin_repo, panel_repo: cfg.value.panel_repo }
-    if (tokenInput.value) body.github_token = tokenInput.value
-    const d = await api.storeSaveSettings(body)
-    cfg.value = d.config
-    tokenInput.value = ''
-    pingUser.value = ''
-    flash('配置已保存')
-    await loadRegistry()
-  } catch (e) {
-    flash(`保存失败: ${e.message}`, false)
-  }
-}
-
-async function ping() {
-  // 后端契约 {net:bool, auth:bool}; 旧版读 d.ok/d.user/d.error 恒报"Token 无效"
-  try {
-    const d = await api.storePing()
-    if (d.net === false) {
-      pingUser.value = ''
-      flash('网络不通: 无法访问 api.github.com', false)
-      return
-    }
-    if (d.auth) {
-      pingUser.value = '已授权'
-      flash('Token 校验通过 (GitHub 返回 200)')
-    } else {
-      pingUser.value = ''
-      flash('Token 无效或未配置 (GitHub 未授权)', false)
-    }
-  } catch (e) {
-    pingUser.value = ''
-    flash(`校验失败: ${e.message}`, false)
-  }
-}
+// ============ 仓库配置与面板更新 ============
+// 已移至「设置」页(仓库配置 / 面板更新两个类目), 本页只消费清单与回退提示。
 
 // ============ 已装页签 ============
 const installedQ = ref('')
@@ -298,7 +248,7 @@ const repoLabel = computed(() => {
 async function refreshAll() {
   refreshing.value = true
   try {
-    await Promise.all([loadInstalled(), loadRegistry(), loadHealth(), loadUnits(), loadSettings()])
+    await Promise.all([loadInstalled(), loadRegistry(), loadHealth(), loadUnits()])
     flash('已刷新')
   } finally { refreshing.value = false }
 }
@@ -306,7 +256,6 @@ async function refreshAll() {
 onMounted(() => {
   loadInstalled()
   loadRegistry()
-  loadSettings()
   loadHealth()
   loadUnits()
 })
@@ -346,6 +295,10 @@ onMounted(() => {
         <div :style="{ width: progressPct + '%' }"></div>
       </div>
       <div v-if="progress" class="hint" style="margin:-6px 0 10px;">{{ progress }}</div>
+
+      <div v-if="tab === 'market'" class="hint" style="margin:-2px 0 10px;">
+        仓库配置与面板更新已放在 设置 页；改完仓库或 Token 后回到本页点刷新即可拉取新清单。
+      </div>
 
       <!-- ============ 页签 1: 已装插件 ============ -->
       <template v-if="tab === 'installed'">
@@ -404,61 +357,6 @@ onMounted(() => {
       <!-- ============ 页签 2: 插件市场 ============ -->
       <template v-else>
         <div class="section">
-          <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;">
-            <span>仓库配置</span>
-            <button class="btn btn-sm btn-ghost" @click="showSettings = !showSettings">
-              {{ showSettings ? '收起' : '展开' }}
-            </button>
-          </div>
-          <template v-if="cfg">
-            <div v-if="showSettings" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
-              <div>
-                <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">插件仓库 owner/repo/branch</div>
-                <div style="display:flex;gap:8px;">
-                  <input v-model="cfg.plugin_repo.owner" class="input" type="text" placeholder="owner" style="flex:1;" />
-                  <input v-model="cfg.plugin_repo.repo" class="input" type="text" placeholder="repo" style="flex:1;" />
-                  <input v-model="cfg.plugin_repo.branch" class="input" type="text" placeholder="branch" style="width:90px;" />
-                </div>
-              </div>
-              <div>
-                <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">程序仓库 owner/repo/branch</div>
-                <div style="display:flex;gap:8px;">
-                  <input v-model="cfg.panel_repo.owner" class="input" type="text" placeholder="owner" style="flex:1;" />
-                  <input v-model="cfg.panel_repo.repo" class="input" type="text" placeholder="repo" style="flex:1;" />
-                  <input v-model="cfg.panel_repo.branch" class="input" type="text" placeholder="branch" style="width:90px;" />
-                </div>
-              </div>
-              <div>
-                <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">
-                  GitHub Token {{ cfg.has_token ? '(已配置, 留空则不修改)' : '(未配置)' }}
-                </div>
-                <div style="display:flex;gap:8px;">
-                  <input v-model="tokenInput" class="input" type="password" placeholder="ghp_xxx 个人访问令牌" style="flex:1;" />
-                  <button class="btn btn-sm" @click="ping">校验</button>
-                </div>
-                <div v-if="pingUser" style="font-size:12px;color:var(--success);margin-top:4px;">{{ pingUser }}</div>
-              </div>
-              <div style="display:flex;align-items:flex-end;gap:8px;">
-                <button class="btn btn-primary" @click="saveSettings">保存配置</button>
-              </div>
-            </div>
-            <div v-else style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--text-muted);">
-              <span>插件仓:
-                <b style="color:var(--text);font-family:var(--font-mono);">
-                  {{ cfg.plugin_repo.owner }}/{{ cfg.plugin_repo.repo }}
-                </b>
-              </span>
-              <span>Token:
-                <b :style="{ color: cfg.has_token ? 'var(--success)' : 'var(--danger)' }">
-                  {{ cfg.has_token ? '已配置' : '未配置' }}
-                </b>
-              </span>
-            </div>
-          </template>
-          <div v-else class="hint" style="padding:12px;">加载配置中...</div>
-        </div>
-
-        <div class="section">
           <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
             <span>插件清单 ({{ marketView.length }})</span>
             <div style="display:flex;gap:8px;align-items:center;">
@@ -477,7 +375,7 @@ onMounted(() => {
           <div v-if="regSource === 'local' && !regError" class="error"
                style="padding:10px 12px;text-align:left;color:var(--danger);border:1px solid var(--danger);border-radius:6px;margin-bottom:10px;">
             远程仓库清单不可用，已回退为本机已安装插件列表 —— 此列表不会出现可安装的新插件。
-            {{ regHasToken ? 'Token 已配置，可能是仓库名/分支不符或该 Token 无权访问。' : '未配置 GitHub Token，私有仓库的 registry.json 读不到：请在上方展开配置并校验 Token 后刷新。' }}
+            {{ regHasToken ? 'Token 已配置，可能是仓库名/分支不符或该 Token 无权访问。' : '未配置 GitHub Token，私有仓库的 registry.json 读不到：请到 设置 → 仓库配置 配好 Token 并校验，再回本页点刷新。' }}
           </div>
           <div v-if="regError" class="error" style="padding:12px;">{{ regError }}</div>
           <div v-else-if="regLoading && !regPlugins.length" class="hint" style="padding:16px;">加载中...</div>
@@ -517,12 +415,6 @@ onMounted(() => {
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- 面板更新(自设置页迁入: 属"获取与更新"语义) -->
-        <div class="section">
-          <div class="section-title">面板更新</div>
-          <StoreProject />
         </div>
       </template>
     </div>
