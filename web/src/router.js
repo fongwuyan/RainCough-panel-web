@@ -8,7 +8,7 @@ import MediaCenter from './components/media/MediaCenter.vue'
 import Scheduler from './components/scheduler/Scheduler.vue'
 import TaskQueue from './components/tasks/TaskQueue.vue'
 import SysFuncMain from './components/sysfunc/SysFuncMain.vue'
-import StorePlugins from './components/store/StorePlugins.vue'
+import PluginHub from './components/plugins/PluginHub.vue'
 import FmMain from './components/filemanager/FmMain.vue'
 
 const router = createRouter({
@@ -24,8 +24,10 @@ const router = createRouter({
     { path: '/tasks', name: 'tasks', component: TaskQueue },
     { path: '/sysfunc', name: 'sysfunc', component: SysFuncMain },
     { path: '/sysfunc/:sub', name: 'sysfunc-sub', component: SysFuncMain },
-    { path: '/store', name: 'store', component: StorePlugins },
+    { path: '/plugins', name: 'plugins', component: PluginHub }, // 插件: 管理 + 市场
     { path: '/plugin/:name', name: 'plugin', component: PluginView },
+    // 旧市场深链 -> 新插件页(保留书签/收藏夹可用)
+    { path: '/store', redirect: '/plugins' },
     // 已融合页面的旧深链 -> 系统中心子页(保留书签/收藏夹可用)
     { path: '/logs', redirect: '/sysfunc/logs' },
     { path: '/processes', redirect: '/sysfunc/processes' },

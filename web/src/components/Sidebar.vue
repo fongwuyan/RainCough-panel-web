@@ -17,7 +17,7 @@ const PAGES = [
   { key: 'terminal', label: '终端', path: '/terminal', desc: 'Shell', icon: 'TM' },
   { key: 'media', label: '媒体中心', path: '/media', desc: '图片视频', icon: 'MD' },
   { key: 'tasks', label: '任务队列', path: '/tasks', desc: '下载安装', icon: 'TQ' },
-  { key: 'store', label: '插件市场', path: '/store', desc: '安装更新', icon: 'MK' },
+  { key: 'plugins', label: '插件', path: '/plugins', desc: '管理与安装', icon: 'PL' },
   { key: 'settings', label: '设置', path: '/settings', desc: '偏好', icon: 'SG' },
   { key: 'docs', label: '开发文档', path: '/docs', desc: '插件指南', icon: 'DC' },
 ]
@@ -93,7 +93,7 @@ function isActive(name) {
   if (name === 'scheduler') return route.name === 'scheduler'
   if (name === 'tasks') return route.name === 'tasks'
   if (name === 'sysfunc') return route.name === 'sysfunc' || route.name === 'sysfunc-sub'
-  if (name === 'store') return route.name === 'store'
+  if (name === 'plugins') return route.name === 'plugins'
   return route.name === 'plugin' && route.params.name === name
 }
 function activeByPath(p) { return route.path === p }
@@ -180,7 +180,7 @@ const sysCount = computed(() => SYS_GROUPS.reduce((n, g) => n + g.items.length, 
       </div>
 
       <div class="sidebar-divider"></div>
-      <div class="sidebar-section-label">插件</div>
+      <div class="sidebar-section-label">已装插件</div>
       <template v-if="plugins.length">
         <div
           v-for="p in plugins.filter((x) => x.name !== 'filemanager')"
