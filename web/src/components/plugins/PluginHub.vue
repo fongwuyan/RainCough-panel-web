@@ -32,7 +32,6 @@ function flash(msg, ok = true) {
 // ============ 市场清单(两页签共用: 已装页签拿它做"有更新"对比) ============
 const regPlugins = ref([])
 const regSource = ref('')      // github | local
-const regHasToken = ref(null)
 const regLoading = ref(false)
 const regError = ref('')
 
@@ -43,19 +42,16 @@ async function loadRegistry() {
     const d = await api.storeRegistry()
     regPlugins.value = d.plugins || []
     regSource.value = d.source || ''
-    regHasToken.value = typeof d.has_token === 'boolean' ? d.has_token : null
   } catch (e) {
     regError.value = e.message
     regPlugins.value = []
     regSource.value = ''
-    regHasToken.value = null
   } finally {
     regLoading.value = false
   }
 }
 
-// ============ 仓库配置与面板更新 ============
-// 已移至「设置」页(仓库配置 / 面板更新两个类目), 本页只消费清单与回退提示。
+// 仓库配置与面板更新在「设置」页; 本页只消费清单, 清单不可用时只提示"仓库不可用"。
 
 // ============ 已装页签 ============
 const installedQ = ref('')
@@ -296,10 +292,6 @@ onMounted(() => {
       </div>
       <div v-if="progress" class="hint" style="margin:-6px 0 10px;">{{ progress }}</div>
 
-      <div v-if="tab === 'market'" class="hint" style="margin:-2px 0 10px;">
-        仓库配置与面板更新已放在 设置 页；改完仓库或 Token 后回到本页点刷新即可拉取新清单。
-      </div>
-
       <!-- ============ 页签 1: 已装插件 ============ -->
       <template v-if="tab === 'installed'">
         <div class="section">
@@ -372,14 +364,13 @@ onMounted(() => {
             </div>
           </div>
 
-          <div v-if="regSource === 'local' && !regError" class="error"
-               style="padding:10px 12px;text-align:left;color:var(--danger);border:1px solid var(--danger);border-radius:6px;margin-bottom:10px;">
-            远程仓库清单不可用，已回退为本机已安装插件列表 —— 此列表不会出现可安装的新插件。
-            {{ regHasToken ? 'Token 已配置，可能是仓库名/分支不符或该 Token 无权访问。' : '未配置 GitHub Token，私有仓库的 registry.json 读不到：请到 设置 → 仓库配置 配好 Token 并校验，再回本页点刷新。' }}
+          <!-- 仓库不可用: 未配置 / 远程清单读不到 / 请求出错, 一律只给这一句 -->
+          <div v-if="regSource === 'local' || regError" class="error"
+               style="padding:10px 12px;text-align:center;color:var(--danger);border:1px solid var(--danger);border-radius:6px;margin-bottom:10px;">
+            仓库不可用
           </div>
-          <div v-if="regError" class="error" style="padding:12px;">{{ regError }}</div>
-          <div v-else-if="regLoading && !regPlugins.length" class="hint" style="padding:16px;">加载中...</div>
-          <div v-else-if="!marketView.length" class="hint" style="padding:16px;">
+          <div v-if="regLoading && !regPlugins.length" class="hint" style="padding:16px;">加载中...</div>
+          <div v-else-if="!marketView.length && !regError" class="hint" style="padding:16px;">
             {{ regSource === 'local' ? '本机暂无可安装的新插件' : '没有匹配的插件' }}
           </div>
           <div v-else v-for="p in marketView" :key="p.name" class="result-item hub-item">
