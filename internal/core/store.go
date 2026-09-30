@@ -36,6 +36,7 @@ type StorePlugin struct {
 	Name        string `json:"name"`
 	Label       string `json:"label"`
 	Version     string `json:"version"`
+	Author      string `json:"author,omitempty"` // registry.json/plugin.json 的作者(前端有展示位)
 	Path        string `json:"path"`
 	Description string `json:"description"`
 	Installed   bool   `json:"installed"`
@@ -124,6 +125,15 @@ func (s *Store) Ping() (map[string]bool, error) {
 
 // Registry 拉取插件注册表(GitHub, 失败时回退本地扫描)。
 func (s *Store) Registry() ([]StorePlugin, error) {
+	plugins, _, err := s.RegistryWithSource()
+	return plugins, err
+}
+
+// RegistryWithSource 同 Registry, 额外返回数据来源: "github"(仓库清单)
+// 或 "local"(GitHub 拉取失败后回退的本机扫描)。
+// 来源给前端做明确提示: local 模式下列表全是已装插件, 安装按钮永不出现,
+// 用户若不知情会以为"市场里没有新插件"(2026-09-28 审计定位)。
+func (s *Store) RegistryWithSource() ([]StorePlugin, string, error) {
 	repo := s.config.PluginRepo
 	path := fmt.Sprintf("/repos/%s/%s/contents/registry.json?ref=%s",
 		repo.Owner, repo.Repo, repo.Branch)
@@ -141,6 +151,7 @@ func (s *Store) Registry() ([]StorePlugin, error) {
 							Name        string `json:"name"`
 							Label       string `json:"label"`
 							Version     string `json:"version"`
+							Author      string `json:"author"`
 							Path        string `json:"path"`
 							Description string `json:"description"`
 						} `json:"plugins"`
@@ -151,18 +162,19 @@ func (s *Store) Registry() ([]StorePlugin, error) {
 							installed, ver := s.installedVersion(p.Name)
 							out = append(out, StorePlugin{
 								Name: p.Name, Label: p.Label, Version: p.Version,
-								Path: p.Path, Description: p.Description,
+								Author: p.Author, Path: p.Path, Description: p.Description,
 								Installed: installed, InstalledV: ver,
 							})
 						}
-						return out, nil
+						return out, "github", nil
 					}
 				}
 			}
 		}
 	}
 	// 回退: 扫描本地插件目录生成注册表
-	return s.localRegistry()
+	out, err := s.localRegistry()
+	return out, "local", err
 }
 
 // localRegistry 从本地插件目录扫描生成注册表(无 GitHub 时兜底)。
@@ -178,13 +190,14 @@ func (s *Store) localRegistry() ([]StorePlugin, error) {
 		}
 		name := e.Name()
 		dir := filepath.Join(s.pluginsDir, name)
-		label, version, desc := name, "", ""
+		label, version, desc, author := name, "", "", ""
 		// 读 plugin.json(若有)
 		if raw, err := os.ReadFile(filepath.Join(dir, "plugin.json")); err == nil {
 			var m struct {
 				Name        string `json:"name"`
 				Label       string `json:"label"`
 				Version     string `json:"version"`
+				Author      string `json:"author"`
 				Description string `json:"description"`
 			}
 			if json.Unmarshal(raw, &m) == nil {
@@ -192,13 +205,14 @@ func (s *Store) localRegistry() ([]StorePlugin, error) {
 					label = m.Label
 				}
 				version = m.Version
+				author = m.Author
 				desc = m.Description
 			}
 		}
 		installed, ver := s.installedVersion(name)
 		out = append(out, StorePlugin{
 			Name: name, Label: label, Version: orDefault(version, ver),
-			Path: dir, Description: desc,
+			Author: author, Path: dir, Description: desc,
 			Installed: installed, InstalledV: ver,
 		})
 	}
@@ -225,7 +239,16 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 	go func() {
 		defer func() { <-s.mu }()
 		tid := task.Begin("store", "安装插件 "+name, "install", nil)
-		defer task.Finish(tid, false, "", "安装失败", 0)
+		// 失败兜底收尾: 仅当没走到成功 Finish 时才置失败。
+		// 旧版用 `defer task.Finish(tid, false, ..., 0)` 直接收尾 — 任务成功后 defer
+		// 仍会执行, 把 status=done 翻回 failed、error=安装失败、progress 100 归 0,
+		// 导致装成功也永远在任务队列里显示"安装失败"(2026-09-28 审计定位)。
+		done := false
+		defer func() {
+			if !done {
+				task.Finish(tid, false, "", "安装失败", 0)
+			}
+		}()
 		task.Update(tid, "", 20, "拉取插件仓库...")
 		// 下载 zipball
 		repo := s.config.PluginRepo
@@ -255,6 +278,7 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 		if s.onInstalled != nil {
 			s.onInstalled()
 		}
+		done = true
 		task.Finish(tid, true, "插件安装成功: "+name, "", 100)
 	}()
 	return "queued", nil
@@ -317,14 +341,23 @@ func (s *Store) ghDownload(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// installedVersion 检查插件目录是否存在(版本从 plugin.json/registry 获取)。
+// installedVersion 检查插件是否已安装, 并返回 plugin.json 里的真实版本。
+// 旧版固定返回字面量 "installed" — 前端芯片因此显示"已装 installed",
+// 且拿不到真实版本就永远无法提示"有更新"(2026-09-28 审计定位)。
+// 版本读不到时返回空串, 前端按"已装"显示且不参与更新对比。
 func (s *Store) installedVersion(name string) (bool, string) {
 	dir := filepath.Join(s.pluginsDir, name)
-	if _, err := os.Stat(filepath.Join(dir, "plugin.json")); err == nil {
-		return true, "installed"
+	if raw, err := os.ReadFile(filepath.Join(dir, "plugin.json")); err == nil {
+		var m struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal(raw, &m) == nil {
+			return true, m.Version
+		}
+		return true, ""
 	}
 	if _, err := os.Stat(filepath.Join(dir, "plugin.py")); err == nil {
-		return true, "installed"
+		return true, ""
 	}
 	return false, ""
 }

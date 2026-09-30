@@ -8,6 +8,9 @@ const error = ref('')
 const status = ref('')
 const statusOk = ref(false)
 const busy = ref('')
+// 清单来源: github=仓库清单可用; local=拉取失败已回退本机扫描(此时列表全是已装插件)
+const regSource = ref('')
+const regHasToken = ref(null)
 
 const cfg = ref(null)
 const showSettings = ref(false)
@@ -20,9 +23,13 @@ async function loadRegistry() {
   try {
     const d = await api.storeRegistry()
     plugins.value = d.plugins || []
+    regSource.value = d.source || ''
+    regHasToken.value = typeof d.has_token === 'boolean' ? d.has_token : null
   } catch (e) {
     error.value = e.message
     plugins.value = []
+    regSource.value = ''
+    regHasToken.value = null
   } finally {
     loading.value = false
   }
@@ -43,10 +50,10 @@ function flash(msg, ok = true) {
 
 async function saveSettings() {
   try {
+    // 只提交后端真正接收的字段: 旧版还发 machine_label / port / bind,
+    // Go 后端既不解析也不回传(Go 侧 machine_label 零命中, 旧 store.py 遗留),
+    // 三个框填了保存即丢、收起态永远显示"机器: 未设置"(2026-09-28 审计定位)。
     const body = {
-      machine_label: cfg.value.machine_label,
-      port: Number(cfg.value.port),
-      bind: cfg.value.bind,
       plugin_repo: cfg.value.plugin_repo,
       panel_repo: cfg.value.panel_repo,
     }
@@ -62,19 +69,35 @@ async function saveSettings() {
 }
 
 async function ping() {
+  // 后端契约是 {net:bool, auth:bool}(实测 {"auth":false,"net":true})。
+  // 旧版读 d.ok/d.user/d.error — 三个键后端一个都没有, 恒走 else,
+  // 于是无论 token 是否有效都显示"Token 无效"(2026-09-28 审计定位)。
   try {
     const d = await api.storePing()
-    if (d.ok) {
-      pingUser.value = d.user || 'ok'
-      flash(`Token 有效, 用户: ${d.user || '?'}`)
+    if (d.net === false) {
+      pingUser.value = ''
+      flash('网络不通: 无法访问 api.github.com', false)
+      return
+    }
+    if (d.auth) {
+      pingUser.value = '已授权'
+      flash('Token 校验通过 (GitHub 返回 200)')
     } else {
       pingUser.value = ''
-      flash(`Token 无效: ${d.error || ''}`, false)
+      flash('Token 无效或未配置 (GitHub 未授权)', false)
     }
   } catch (e) {
     pingUser.value = ''
     flash(`校验失败: ${e.message}`, false)
   }
+}
+
+// 该插件是否有可用更新: 仅当本地版本与清单版本都拿得到且不同才亮徽标。
+// 本机回退清单里 version 就来自本地 plugin.json, 与 installed_version 恒相等,
+// 因此 local 模式下不会误报"有更新"。
+function canUpdate(p) {
+  return !!(p.installed && p.installed_version && p.version &&
+    p.installed_version !== p.version)
 }
 
 async function doInstall(name) {
@@ -133,20 +156,6 @@ onMounted(() => { loadSettings(); loadRegistry() })
         <template v-if="cfg">
           <div v-if="showSettings" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
             <div>
-              <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">机器标识</div>
-              <input v-model="cfg.machine_label" class="input" type="text" placeholder="备注本机用途" style="width:100%;" />
-            </div>
-            <div style="display:flex;gap:8px;">
-              <div style="flex:1;">
-                <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">端口</div>
-                <input v-model.number="cfg.port" class="input" type="number" style="width:100%;" />
-              </div>
-              <div style="flex:1;">
-                <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">绑定地址</div>
-                <input v-model="cfg.bind" class="input" type="text" style="width:100%;" />
-              </div>
-            </div>
-            <div>
               <div style="font-size:12px;color:var(--text-faint);margin-bottom:4px;">插件仓库 owner/repo/branch</div>
               <div style="display:flex;gap:8px;">
                 <input v-model="cfg.plugin_repo.owner" class="input" type="text" placeholder="owner" style="flex:1;" />
@@ -177,7 +186,6 @@ onMounted(() => { loadSettings(); loadRegistry() })
             </div>
           </div>
           <div v-else style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--text-muted);">
-            <span>机器: <b style="color:var(--text);">{{ cfg.machine_label || '未设置' }}</b></span>
             <span>插件仓: <b style="color:var(--text);font-family:var(--font-mono);">{{ cfg.plugin_repo.owner }}/{{ cfg.plugin_repo.repo }}</b></span>
             <span>Token: <b :style="{ color: cfg.has_token ? 'var(--success)' : 'var(--danger)' }">{{ cfg.has_token ? '已配置' : '未配置' }}</b></span>
           </div>
@@ -189,6 +197,11 @@ onMounted(() => { loadSettings(); loadRegistry() })
         <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;">
           <span>插件列表</span>
           <button class="btn btn-sm" :disabled="loading" @click="loadRegistry">刷新</button>
+        </div>
+        <div v-if="regSource === 'local' && !error" class="error"
+             style="padding:10px 12px;text-align:left;color:var(--danger);border:1px solid var(--danger);border-radius:6px;margin-bottom:10px;">
+          远程仓库清单不可用，已回退为本机已安装插件列表 —— 此列表不会出现可安装的新插件。
+          {{ regHasToken ? 'Token 已配置，可能是仓库名/分支不符或该 Token 无权访问。' : '未配置 GitHub Token，私有仓库的 registry.json 读不到：请在上方展开配置并校验 Token 后刷新。' }}
         </div>
         <div v-if="error" class="error" style="padding:12px;">{{ error }}</div>
         <div v-else-if="loading" class="hint" style="padding:16px;">加载中...</div>
@@ -206,6 +219,8 @@ onMounted(() => { loadSettings(); loadRegistry() })
             <span v-if="p.installed" class="tag-chip">
               {{ p.installed_version ? `已装 ${p.installed_version}` : '已装' }}
             </span>
+            <span v-if="canUpdate(p)" class="tag-chip tag-chip-sm"
+                  style="border-color:var(--accent);color:var(--accent);">有更新 → {{ p.version }}</span>
             <button
               v-if="!p.installed"
               class="btn btn-primary btn-sm"

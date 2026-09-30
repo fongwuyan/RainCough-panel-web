@@ -248,9 +248,9 @@ export const api = {
   storePluginUpdate: (name) => req('POST', '/api/store/plugin/update', { name }),
   storePluginRemove: (name) => req('POST', '/api/store/plugin/remove', { name }),
   storeProjectStatus: () => req('GET', '/api/store/project/status'),
-  storeProjectUpdateInfo: () => req('GET', '/api/store/project/update-info'),
-  storeProjectCheck: (net) => req('POST', '/api/store/project/check', { net }),
-  storeProjectInstall: (dryRun) => req('POST', '/api/store/project/install', { dry_run: !!dryRun }),
+  // 已删除 storeProjectUpdateInfo / storeProjectCheck / storeProjectInstall:
+  // 后端这三处只回伪造的 current=latest=v1.0.0 与空 env, 没有真实能力, 前端
+  // 据此谎报"已开始更新…服务将重启""环境不满足"。面板更新走部署脚本(StoreProject.vue)。
   tmOpen: (rows, cols) => req('POST', '/api/terminal/open', { rows: rows || 24, cols: cols || 100 }),
   tmInput: (sid, data) => req('POST', '/api/terminal/input', { sid, data }),
   tmResize: (sid, rows, cols) => req('POST', '/api/terminal/resize', { sid, rows, cols }),

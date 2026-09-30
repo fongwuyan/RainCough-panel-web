@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"raincough/internal/config"
 	"raincough/internal/core"
 )
 
@@ -68,13 +69,17 @@ func (s *server) handleStorePing(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStoreRegistry GET /api/store/registry
+// 附带 source(github|local) 与 has_token: local 说明仓库清单拉取失败已回退到
+// 本机扫描, 前端据此明确提示"当前仅显示已装插件、无法安装新插件"。
 func (s *server) handleStoreRegistry(w http.ResponseWriter, r *http.Request) {
-	plugins, err := globalStore.Registry()
+	plugins, source, err := globalStore.RegistryWithSource()
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]interface{}{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": plugins})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"plugins": plugins, "source": source, "has_token": globalStore.Token() != "",
+	})
 }
 
 // handleStorePluginInstall POST /api/store/plugin/install {name}
@@ -145,21 +150,29 @@ func (s *server) handleStorePluginUpdate(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "message": "已重新安装(更新)"})
 }
 
-// handleStoreProject GET /api/store/project/status|check|update-info + POST /api/store/project/install
+// handleStoreProject GET /api/store/project/status + POST /api/store/project/install
+// 面板自更新【未实现】: 运行中的二进制无法就地替换, 更新必须走部署脚本。
+// 旧版返回伪造的 current=v1.0.0 / latest=v1.0.0 / up_to_date=true / 环境检查数据,
+// 前端据此显示"环境不满足, 将自动拉取离线环境包" "已开始更新…服务将重启" 等不实信息
+// (2026-09-28 审计定位)。现在只回真实版本与明确说明; check / update-info 已无调用方,
+// 归 404 而不是继续返回假数据。
 func (s *server) handleStoreProject(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/store/project/")
 	repo := globalStore.GetConfig().PanelRepo
 	repoStr := repo.Owner + "/" + repo.Repo
 	switch sub {
-	case "status", "check", "update-info":
+	case "status":
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status": "unknown", "repo": repoStr, "current": "v1.0.0",
-			"latest": "v1.0.0", "up_to_date": true, "checking": false,
+			"implemented": false,
+			"current":      config.Version,
+			"repo":         repoStr,
+			"message":      "面板更新通过部署脚本完成(运行中的二进制不可就地替换)",
+			"howto": "部署机: git pull -> go build -> npm run build -> 同步面板与测试机 -> systemctl restart raincough",
 		})
 	case "install":
-		// 面板更新无法在运行中自升级, 提示需手动
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status": true, "message": "面板更新请通过部署脚本完成(运行中不可自升级)", "deferred": true,
+			"status": false, "implemented": false, "deferred": true,
+			"message": "面板更新请通过部署脚本完成(运行中不可自升级)",
 		})
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unknown"})
