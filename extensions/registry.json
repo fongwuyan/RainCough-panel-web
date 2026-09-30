@@ -29,6 +29,16 @@
       "icon": "SC",
       "entry": "assets/extension.js",
       "route": "/ext/scheduler"
+    },
+    {
+      "name": "syscenter",
+      "label": "系统中心",
+      "version": "1.0.0",
+      "description": "系统诊断与运维: 硬件、磁盘、服务、日志、进程、环境包、备份、内核、时间、电源等",
+      "author": "RainCough",
+      "icon": "SY",
+      "entry": "assets/extension.js",
+      "route": "/ext/syscenter"
     }
   ]
 }

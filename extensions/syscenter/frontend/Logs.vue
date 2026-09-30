@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { api } from '../../api'
+import { api } from 'rc-api'
 
 const text = ref('')
 const grep = ref('')

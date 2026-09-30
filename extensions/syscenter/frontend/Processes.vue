@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { api } from '../../api'
+import { api } from 'rc-api'
 
 const procs = ref([])
 const sortKey = ref('cpu')

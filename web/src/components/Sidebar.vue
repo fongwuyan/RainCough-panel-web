@@ -23,41 +23,9 @@ const PAGES = [
   { key: 'settings', label: '设置', path: '/settings', desc: '偏好', icon: 'SG' },
   { key: 'docs', label: '开发文档', path: '/docs', desc: '插件指南', icon: 'DC' },
 ]
-// 「系统」分组: 系统中心子功能拆分为侧边栏直达项; 已融合去重:
-// 系统日志/进程管理 = /sysfunc/logs|processes; 服务健康/环境包/接口总览 = 子组件 /sysfunc/sh|env|ifa
-// (原独立页 /logs /processes /envpkg /plughealth /ifaces 已删, router 留旧链重定向)
-const sysOpen = ref(true)
-const SYS_GROUPS = [
-  { title: '监控与诊断', items: [
-    { label: '健康检查', path: '/sysfunc/health', desc: '面板自检与重启', icon: 'HI' },
-    { label: '硬件信息', path: '/sysfunc/hw', desc: 'CPU/内存/主板/温度', icon: 'HW' },
-    { label: '事件时间线', path: '/sysfunc/events', desc: '系统操作留痕', icon: 'EV' },
-    { label: '接口监控', path: '/sysfunc/api', desc: '路由与请求流水', icon: 'IM' },
-    { label: '接口总览', path: '/sysfunc/ifa', desc: '服务总线接口目录', icon: 'IF' },
-    { label: '启动历史', path: '/sysfunc/boot', desc: '开机/重启记录', icon: 'BT' },
-  ]},
-  { title: '服务与系统', items: [
-    { label: '服务管理', path: '/sysfunc/svc', desc: 'systemd 启停', icon: 'SV' },
-    { label: '服务健康', path: '/sysfunc/sh', desc: '插件与服务健康诊断', icon: 'HC' },
-    { label: '系统更新', path: '/sysfunc/up', desc: 'apt 升级', icon: 'UP' },
-    { label: '内核管理', path: '/sysfunc/kern', desc: '内核包', icon: 'KN' },
-    { label: '时间/NTP', path: '/sysfunc/tz', desc: '时区同步', icon: 'TZ' },
-    { label: '用户/密钥', path: '/sysfunc/usr', desc: '用户与 SSH 密钥', icon: 'US' },
-    { label: '环境包', path: '/sysfunc/env', desc: '运行时 node/python/go', icon: 'EN' },
-    { label: '关机/重启', path: '/sysfunc/pwr', desc: '电源计划', icon: 'PW' },
-  ]},
-  { title: '存储与数据', items: [
-    { label: '磁盘用量', path: '/sysfunc/disk', desc: 'df / lsblk', icon: 'DS' },
-    { label: '快照', path: '/sysfunc/snap', desc: '只读快照', icon: 'SN' },
-    { label: '存储清理', path: '/sysfunc/clean', desc: '缓存与占用 Top', icon: 'CL' },
-    { label: '系统备份', path: '/sysfunc/backup', desc: '备份与还原', icon: 'BK' },
-    { label: '日志保留', path: '/sysfunc/lr', desc: 'logrotate 配置', icon: 'LR' },
-  ]},
-  { title: '日志 · 进程 · 计划', items: [
-    { label: '系统日志', path: '/sysfunc/logs', desc: 'journal/面板日志(融合)', icon: 'LG' },
-    { label: '进程管理', path: '/sysfunc/processes', desc: '进程列表(融合)', icon: 'PS' },
-  ]},
-]
+// 「系统中心」已迁为系统扩展(extensions/syscenter): 侧边栏不再拆分其子功能,
+// 已装后在本列表的「已装扩展」分组里进入; 旧 /sysfunc/* 深链由 router 重定向到
+// /ext/syscenter?sub=xxx(见 router.js)。
 const searchQ = ref('')
 const favs = ref(loadFavs())
 function loadFavs() { try { return JSON.parse(localStorage.getItem('rc-favs') || '[]') } catch (e) { return [] } }
@@ -70,7 +38,6 @@ const searchResults = computed(() => {
   for (const p of PAGES) if ((p.label + p.desc).toLowerCase().includes(q)) out.push({ label: p.label, desc: p.desc, path: p.path })
   for (const p of plugins.value) if ((p.label + ' ' + (p.description || '')).toLowerCase().includes(q)) out.push({ label: p.label, desc: p.description || '', path: '/plugin/' + p.name })
   for (const x of extensions.value) if (((x.label || '') + ' ' + (x.description || '')).toLowerCase().includes(q)) out.push({ label: x.label || x.name, desc: x.description || '系统扩展', path: x.route || ('/ext/' + x.name) })
-  for (const g of SYS_GROUPS) for (const p of g.items) if ((p.label + p.desc).toLowerCase().includes(q)) out.push({ label: '系统 · ' + p.label, desc: p.desc, path: p.path })
   return out.slice(0, 10)
 })
 function pick(entry) { go(entry.path); searchQ.value = '' }
@@ -92,16 +59,12 @@ function isActive(name) {
   if (name === 'filemanager') return route.name === 'plugin' && route.params.name === 'filemanager'
   if (name === 'terminal') return route.name === 'terminal'
   if (name === 'ext') return route.name === 'ext' || route.name === 'ext-view'
-  if (name === 'sysfunc') return route.name === 'sysfunc' || route.name === 'sysfunc-sub'
   if (name === 'plugins') return route.name === 'plugins'
   return route.name === 'plugin' && route.params.name === name
 }
 
 // 已装系统扩展的侧边栏项(挂在「系统扩展」页下)
 function extActive(x) { return route.name === 'ext-view' && String(route.params.name) === x.name }
-function activeByPath(p) { return route.path === p }
-const sysActive = computed(() => SYS_GROUPS.some((g) => g.items.some((i) => activeByPath(i.path))))
-const sysCount = computed(() => SYS_GROUPS.reduce((n, g) => n + g.items.length, 0))
 </script>
 
 <template>
@@ -141,33 +104,6 @@ const sysCount = computed(() => SYS_GROUPS.reduce((n, g) => n + g.items.length, 
         </div>
       </div>
 
-      <div
-        class="sidebar-section-label sys-toggle"
-        :class="{ 'sys-active': sysActive }"
-        @click="sysOpen = !sysOpen"
-      >
-        <span class="sys-caret">{{ sysOpen ? '▾' : '▸' }}</span>
-        <span>系统</span>
-        <span class="sys-count">{{ sysCount }}</span>
-      </div>
-      <template v-if="sysOpen">
-        <template v-for="g in SYS_GROUPS" :key="g.title">
-          <div class="sidebar-sub-label">{{ g.title }}</div>
-          <div
-            v-for="p in g.items"
-            :key="p.path"
-            class="plugin-item sys-sub"
-            :class="{ active: activeByPath(p.path) }"
-            @click="go(p.path)"
-          >
-            <div class="nav-icon sys-ico">{{ p.icon }}</div>
-            <div class="info">
-              <div class="label">{{ p.label }}</div>
-              <div class="desc">{{ p.desc }}</div>
-            </div>
-          </div>
-        </template>
-      </template>
       <div
         v-for="p in PAGES.slice(3)"
         :key="p.key"

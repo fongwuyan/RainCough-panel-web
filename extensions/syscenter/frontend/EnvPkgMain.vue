@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { api } from '../../api'
+import { api } from 'rc-api'
 
 const envs = ref({})
 const catalog = ref(null)

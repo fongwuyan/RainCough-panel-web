@@ -4,7 +4,6 @@ import PluginView from './components/PluginView.vue'
 import Settings from './components/Settings.vue'
 import PluginDocs from './components/PluginDocs.vue'
 import Terminal from './components/terminal/Terminal.vue'
-import SysFuncMain from './components/sysfunc/SysFuncMain.vue'
 import PluginHub from './components/plugins/PluginHub.vue'
 import ExtHub from './components/ext/ExtHub.vue'
 import ExtView from './components/ext/ExtView.vue'
@@ -24,21 +23,20 @@ const router = createRouter({
     // 系统扩展运行位(扩展产物由 /api/ext/<name>/assets/extension.js 提供)
     { path: '/ext/:name', name: 'ext-view', component: ExtView },
     { path: '/plugin/:name', name: 'plugin', component: PluginView },
-    // ---- 待迁移为扩展的功能(暂仍在主体内) ----
-    { path: '/sysfunc', name: 'sysfunc', component: SysFuncMain },
-    { path: '/sysfunc/:sub', name: 'sysfunc-sub', component: SysFuncMain },
-    // ---- 已迁为系统扩展的旧路径(保留书签/收藏夹可用) ----
-    { path: '/media', redirect: '/ext/media' },       // 媒体中心
-    { path: '/tasks', redirect: '/ext/tasks' },       // 任务队列
+    // ---- 已迁为系统扩展的旧路径(保留书签/收藏夹可用, 子页参数一并带过去) ----
+    { path: '/media', redirect: '/ext/media' },         // 媒体中心
+    { path: '/tasks', redirect: '/ext/tasks' },         // 任务队列
     { path: '/scheduler', redirect: '/ext/scheduler' }, // 调度器
+    { path: '/sysfunc', redirect: '/ext/syscenter' },   // 系统中心
+    { path: '/sysfunc/:sub', redirect: (to) => ({ path: '/ext/syscenter', query: { sub: to.params.sub } }) },
+    // 旧独立页深链 -> 系统中心对应子页
+    { path: '/logs', redirect: { path: '/ext/syscenter', query: { sub: 'logs' } } },
+    { path: '/processes', redirect: { path: '/ext/syscenter', query: { sub: 'processes' } } },
+    { path: '/envpkg', redirect: { path: '/ext/syscenter', query: { sub: 'env' } } },
+    { path: '/plughealth', redirect: { path: '/ext/syscenter', query: { sub: 'sh' } } },
+    { path: '/ifaces', redirect: { path: '/ext/syscenter', query: { sub: 'ifa' } } },
     // 旧市场深链 -> 新插件页(保留书签/收藏夹可用)
     { path: '/store', redirect: '/plugins' },
-    // 已融合页面的旧深链 -> 系统中心子页(保留书签/收藏夹可用)
-    { path: '/logs', redirect: '/sysfunc/logs' },
-    { path: '/processes', redirect: '/sysfunc/processes' },
-    { path: '/envpkg', redirect: '/sysfunc/env' },
-    { path: '/plughealth', redirect: '/sysfunc/sh' },
-    { path: '/ifaces', redirect: '/sysfunc/ifa' },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })

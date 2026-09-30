@@ -3,7 +3,7 @@
 // 数据: /api/services/health(v4 接口库) + /api/sys/plugins-health(v3 兼容)
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../api.js'
+import { api } from 'rc-api'
 
 const router = useRouter()
 const loading = ref(false)

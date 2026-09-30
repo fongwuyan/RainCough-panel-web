@@ -2,7 +2,7 @@
 // 接口总览: 接口库 v4 目录(系统+插件), 支持筛选/详情/试调用
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
-import { api } from '../api.js'
+import { api } from 'rc-api'
 
 const route = useRoute()
 

@@ -25,6 +25,7 @@ const hostShim = {
   name: 'rc-host-shim',
   setup(build) {
     build.onResolve({ filter: /^vue$/ }, () => ({ path: 'vue', namespace: 'rc-host' }))
+    build.onResolve({ filter: /^vue-router$/ }, () => ({ path: 'vue-router', namespace: 'rc-host' }))
     build.onResolve({ filter: /^rc-api$/ }, () => ({ path: 'rc-api', namespace: 'rc-host' }))
     build.onLoad({ filter: /.*/, namespace: 'rc-host' }, (args) => {
       if (args.path === 'rc-api') {
@@ -34,6 +35,41 @@ const hostShim = {
             var host = window.__rcHost
             if (!host || !host.api) throw new Error('系统扩展宿主运行时缺失: window.__rcHost.api')
             module.exports = host.api
+          `,
+        }
+      }
+      if (args.path === 'vue-router') {
+        // 扩展挂载在 router-view 之外: 提供主路由实例 + 扩展自身 hash 查询
+        return {
+          loader: 'js',
+          contents: `
+            var host = window.__rcHost
+            var R = host && host.router && host.router()
+            if (!R) throw new Error('系统扩展宿主运行时缺失: window.__rcHost.router')
+            function hashQuery() {
+              var h = String(window.location.hash || ''), i = h.indexOf('?'), o = {}
+              if (i >= 0) {
+                var p = new URLSearchParams(h.slice(i + 1))
+                p.forEach(function (v, k) { o[k] = v })
+              }
+              return o
+            }
+            module.exports = {
+              useRouter: function () { return R },
+              useRoute: function () {
+                var cur = (R.currentRoute && R.currentRoute.value) || { query: {} }
+                return {
+                  path: cur.path || '', name: cur.name, hash: cur.hash || '',
+                  fullPath: cur.fullPath || '', meta: cur.meta || {},
+                  params: cur.params || {},
+                  query: Object.assign({}, cur.query || {}, hashQuery()),
+                }
+              },
+              createRouter: function () { return R },
+              createWebHashHistory: function () { return null },
+              RouterLink: { name: 'RouterLink', render: function () { return null } },
+              RouterView: { name: 'RouterView', render: function () { return null } },
+            }
           `,
         }
       }

@@ -1,17 +1,16 @@
 <script setup>
 import { ref, onMounted, computed, watch, onErrorCaptured } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { api } from '../../api'
-import Logs from '../logs/Logs.vue'
-import BackupMain from '../backup/BackupMain.vue'
-import Processes from '../processes/Processes.vue'
-import ServiceHealth from '../ServiceHealth.vue'
-import EnvPkgMain from '../envpkg/EnvPkgMain.vue'
-import Ifaces from '../Ifaces.vue'
+import { api } from 'rc-api'
+import Logs from './Logs.vue'
+import BackupMain from './BackupMain.vue'
+import Processes from './Processes.vue'
+import ServiceHealth from './ServiceHealth.vue'
+import EnvPkgMain from './EnvPkgMain.vue'
+import Ifaces from './Ifaces.vue'
 
 // 子级选项卡(父级为「系统中心」; 支持侧边栏深链 /sysfunc/<key>)
-const route = useRoute()
-const router = useRouter()
+const route = null // 扩展内不用 vue-router(见下方 initialSub)
+const router = null
 const SUBKEYS = ['logs','processes','svc','sh','hw','up','disk','snap','usr','clean','env','pwr','kern','tz','health','events','lr','backup','boot','api','ifa']
 // 页面型子组件(自带取数, 不走 loadSection)
 const COMP_SUBS = ['logs', 'processes', 'backup', 'sh', 'env', 'ifa']
@@ -81,13 +80,17 @@ const sshKeys = ref('')
 async function sshLoad(u) { sshUser.value = u; await call('keys', () => api.sysfSshKeys(u)); const d = data.value.keys || {}; sshKeys.value = d.keys || d.error || '' }
 async function sshSave() { try { const r = await api.sysfSshKeysSave(sshUser.value, sshKeys.value); toast(r && r.ok ? '已保存(sshd 立即生效)' : ((r && r.error) || '失败')) } catch (e) { toast(e.message) } }
 const svcFilter = ref('')
+// 扩展挂载在 router-view 之外, 不用 vue-router: 初始子页从 #/ext/syscenter?sub=xxx 取
+function initialSub() {
+  const h = String(window.location.hash || '')
+  const i = h.indexOf('?')
+  if (i < 0) return 'logs'
+  const q = new URLSearchParams(h.slice(i + 1))
+  const s = q.get('sub') || ''
+  return SUBKEYS.includes(s) ? s : 'logs'
+}
 onMounted(() => {
-  activate(route.params.sub || 'logs')
-  if (!route.params.sub) router.replace('/sysfunc/logs')
-})
-watch(() => route.params.sub, (v) => {
-  const k = SUBKEYS.includes(v) ? v : 'logs'
-  if (k !== sub.value) activate(k)
+  activate(initialSub())
 })
 
 const SUBS = [
