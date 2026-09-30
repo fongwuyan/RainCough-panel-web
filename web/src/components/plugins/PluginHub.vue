@@ -466,9 +466,12 @@ onBeforeUnmount(() => {
                   </button>
                 </template>
                 <template v-else>
-                  <button class="btn btn-sm" :disabled="!!busy" @click="doUpdate(p.name)">
+                  <!-- 版本相同时不冒充升级: 只有真有新版才给可点的[更新] -->
+                  <button v-if="canUpdate(p)" class="btn btn-sm" :disabled="!!busy" @click="doUpdate(p.name)">
                     {{ busy === p.name ? '更新中…' : '更新' }}
                   </button>
+                  <button v-else class="btn btn-sm" disabled style="opacity:.6;cursor:default;"
+                          title="版本已是最新, 如需修复可先卸载再安装">已是最新</button>
                   <button class="btn btn-sm" @click="tab = 'installed'; installedQ = p.name">管理</button>
                 </template>
               </div>
