@@ -27,9 +27,17 @@ func (s *server) handleExtList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "扩展仓储未初始化"})
 		return
 	}
+	installed := globalExt.Installed()
+	if installed == nil {
+		installed = []core.Extension{}
+	}
+	builtin := globalExt.Builtins()
+	if builtin == nil {
+		builtin = []core.Extension{}
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"extensions": globalExt.Installed(),
-		"builtin":    globalExt.Builtins(),
+		"extensions": installed,
+		"builtin":    builtin,
 		"dir":        globalExt.Dir(),
 	})
 }
@@ -45,6 +53,9 @@ func (s *server) handleExtRegistry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list, source, err := globalExt.Registry()
+	if list == nil {
+		list = []core.Extension{} // 空清单也回数组, 前端与脚本都不必处理 null
+	}
 	hasToken := false
 	if globalStore != nil {
 		hasToken = globalStore.Token() != ""
