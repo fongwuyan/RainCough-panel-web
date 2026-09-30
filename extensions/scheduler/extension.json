@@ -1,0 +1,10 @@
+{
+  "name": "scheduler",
+  "label": "调度器",
+  "version": "1.0.0",
+  "description": "定时任务编排: cron 计划、手动执行与暂停",
+  "author": "RainCough",
+  "icon": "SC",
+  "entry": "assets/extension.js",
+  "route": "/ext/scheduler"
+}

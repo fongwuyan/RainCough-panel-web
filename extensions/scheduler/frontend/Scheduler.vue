@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { api } from '../../api'
+import { api } from 'rc-api'
 
 const jobs = ref([])
 const actions = ref([])

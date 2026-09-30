@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { api } from '../../api'
+import { api } from 'rc-api'
 
 const tasks = ref([])
 const stats = ref({ total: 0, running: 0, queued: 0, failed: 0, done: 0 })

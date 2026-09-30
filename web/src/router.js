@@ -4,8 +4,6 @@ import PluginView from './components/PluginView.vue'
 import Settings from './components/Settings.vue'
 import PluginDocs from './components/PluginDocs.vue'
 import Terminal from './components/terminal/Terminal.vue'
-import Scheduler from './components/scheduler/Scheduler.vue'
-import TaskQueue from './components/tasks/TaskQueue.vue'
 import SysFuncMain from './components/sysfunc/SysFuncMain.vue'
 import PluginHub from './components/plugins/PluginHub.vue'
 import ExtHub from './components/ext/ExtHub.vue'
@@ -27,11 +25,12 @@ const router = createRouter({
     { path: '/ext/:name', name: 'ext-view', component: ExtView },
     { path: '/plugin/:name', name: 'plugin', component: PluginView },
     // ---- 待迁移为扩展的功能(暂仍在主体内) ----
-    { path: '/media', redirect: '/ext/media' }, // 媒体中心已迁为扩展
-    { path: '/scheduler', name: 'scheduler', component: Scheduler },
-    { path: '/tasks', name: 'tasks', component: TaskQueue },
     { path: '/sysfunc', name: 'sysfunc', component: SysFuncMain },
     { path: '/sysfunc/:sub', name: 'sysfunc-sub', component: SysFuncMain },
+    // ---- 已迁为系统扩展的旧路径(保留书签/收藏夹可用) ----
+    { path: '/media', redirect: '/ext/media' },       // 媒体中心
+    { path: '/tasks', redirect: '/ext/tasks' },       // 任务队列
+    { path: '/scheduler', redirect: '/ext/scheduler' }, // 调度器
     // 旧市场深链 -> 新插件页(保留书签/收藏夹可用)
     { path: '/store', redirect: '/plugins' },
     // 已融合页面的旧深链 -> 系统中心子页(保留书签/收藏夹可用)

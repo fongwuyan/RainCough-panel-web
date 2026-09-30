@@ -9,6 +9,26 @@
       "icon": "MD",
       "entry": "assets/extension.js",
       "route": "/ext/media"
+    },
+    {
+      "name": "tasks",
+      "label": "任务队列",
+      "version": "1.0.0",
+      "description": "汇总下载、安装、备份等后台任务的进度与失败原因",
+      "author": "RainCough",
+      "icon": "TQ",
+      "entry": "assets/extension.js",
+      "route": "/ext/tasks"
+    },
+    {
+      "name": "scheduler",
+      "label": "调度器",
+      "version": "1.0.0",
+      "description": "定时任务编排: cron 计划、手动执行与暂停",
+      "author": "RainCough",
+      "icon": "SC",
+      "entry": "assets/extension.js",
+      "route": "/ext/scheduler"
     }
   ]
 }

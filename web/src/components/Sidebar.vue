@@ -56,7 +56,6 @@ const SYS_GROUPS = [
   { title: '日志 · 进程 · 计划', items: [
     { label: '系统日志', path: '/sysfunc/logs', desc: 'journal/面板日志(融合)', icon: 'LG' },
     { label: '进程管理', path: '/sysfunc/processes', desc: '进程列表(融合)', icon: 'PS' },
-    { label: '定时任务', path: '/scheduler', desc: '调度器编排', icon: 'SC' },
   ]},
 ]
 const searchQ = ref('')
@@ -93,9 +92,6 @@ function isActive(name) {
   if (name === 'filemanager') return route.name === 'plugin' && route.params.name === 'filemanager'
   if (name === 'terminal') return route.name === 'terminal'
   if (name === 'ext') return route.name === 'ext' || route.name === 'ext-view'
-  if (name === 'media') return route.name === 'media'
-  if (name === 'scheduler') return route.name === 'scheduler'
-  if (name === 'tasks') return route.name === 'tasks'
   if (name === 'sysfunc') return route.name === 'sysfunc' || route.name === 'sysfunc-sub'
   if (name === 'plugins') return route.name === 'plugins'
   return route.name === 'plugin' && route.params.name === name
