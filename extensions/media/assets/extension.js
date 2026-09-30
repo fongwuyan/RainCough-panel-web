@@ -4,7 +4,7 @@
   (function() {
     var host = window.__rcHost;
     if (!host) {
-      console.error("[ext:media] \u5BBF\u4E3B\u8FD0\u884C\u65F6\u7F3A\u5931");
+      console.error("[ext:media] 宿主运行时缺失");
       return;
     }
     var Vue = host.Vue;
@@ -52,26 +52,26 @@
   <div class="rc-ext-media">
     <div class="page">
       <div class="page-head">
-        <h1>\u5A92\u4F53\u4E2D\u5FC3</h1>
-        <div class="subtitle">\u805A\u5408\u6D4F\u89C8\u670D\u52A1\u5668\u56FE\u7247\u4E0E\u89C6\u9891 \xB7 \u7CFB\u7EDF\u6269\u5C55</div>
+        <h1>媒体中心</h1>
+        <div class="subtitle">聚合浏览服务器图片与视频 · 系统扩展</div>
         <div class="media-toolbar">
           <div class="root-tabs">
             <button v-for="r in roots" :key="r.name" class="tab" :class="{ active: activeRoot === r.name }" @click="switchRoot(r.name)">
               {{ r.label }}
-              <span v-if="counts[r.name]" class="root-count">{{ counts[r.name].image }}\u56FE/{{ counts[r.name].video }}\u89C6\u9891</span>
+              <span v-if="counts[r.name]" class="root-count">{{ counts[r.name].image }}图/{{ counts[r.name].video }}视频</span>
             </button>
           </div>
           <div class="media-actions">
-            <button class="btn btn-sm" :class="{ 'btn-primary': kind === '' }" @click="switchKind('')">\u5168\u90E8</button>
-            <button class="btn btn-sm" :class="{ 'btn-primary': kind === 'image' }" @click="switchKind('image')">\u56FE\u7247</button>
-            <button class="btn btn-sm" :class="{ 'btn-primary': kind === 'video' }" @click="switchKind('video')">\u89C6\u9891</button>
-            <input v-model="tagFilter" class="input" style="width:140px;" placeholder="\u6807\u7B7E\u7B5B\u9009\uFF08\u9017\u53F7\u5206\u9694\uFF09" @keydown.enter="doTagSearch" />
-            <button class="btn btn-sm" @click="doTagSearch">\u7B5B\u9009</button>
+            <button class="btn btn-sm" :class="{ 'btn-primary': kind === '' }" @click="switchKind('')">全部</button>
+            <button class="btn btn-sm" :class="{ 'btn-primary': kind === 'image' }" @click="switchKind('image')">图片</button>
+            <button class="btn btn-sm" :class="{ 'btn-primary': kind === 'video' }" @click="switchKind('video')">视频</button>
+            <input v-model="tagFilter" class="input" style="width:140px;" placeholder="标签筛选（逗号分隔）" @keydown.enter="doTagSearch" />
+            <button class="btn btn-sm" @click="doTagSearch">筛选</button>
             <button class="btn btn-sm" :disabled="tagging || !imageCount" @click="doTagBatch">
-              {{ tagging ? '\u6253\u6807\u4E2D\u2026' : '\u6253\u6807\u5F53\u524D' }}
+              {{ tagging ? '打标中…' : '打标当前' }}
             </button>
-            <button class="btn btn-sm" :disabled="dedupLoading" @click="doDedup">\u76F8\u4F3C\u68C0\u6D4B</button>
-            <button class="btn btn-sm btn-ghost" style="margin-left:8px;" @click="openRootsEditor">\u7F16\u8F91\u6839\u76EE\u5F55</button>
+            <button class="btn btn-sm" :disabled="dedupLoading" @click="doDedup">相似检测</button>
+            <button class="btn btn-sm btn-ghost" style="margin-left:8px;" @click="openRootsEditor">编辑根目录</button>
           </div>
         </div>
         <div v-if="tagInfo" class="tag-info">{{ tagInfo }}</div>
@@ -79,8 +79,8 @@
 
       <div class="page-body">
         <div v-if="error" class="error" style="margin-bottom:10px;">{{ error }}</div>
-        <div v-if="loading && !items.length" class="status-line" style="padding:20px;">\u52A0\u8F7D\u4E2D...</div>
-        <div v-else-if="!items.length && !loading" class="empty" style="padding:40px;">\u6682\u65E0\u5A92\u4F53</div>
+        <div v-if="loading && !items.length" class="status-line" style="padding:20px;">加载中...</div>
+        <div v-else-if="!items.length && !loading" class="empty" style="padding:40px;">暂无媒体</div>
 
         <div v-if="items.length" class="media-grid">
           <div v-for="item in items" :key="item.path" class="media-card" @click="openView(item)">
@@ -90,7 +90,7 @@
               </template>
               <template v-else>
                 <div class="video-thumb" :style="thumbStyle(item)">
-                  <span class="video-badge">\u25B6</span>
+                  <span class="video-badge">▶</span>
                 </div>
               </template>
             </div>
@@ -101,7 +101,7 @@
                 <span>{{ fmtTime(item.mtime) }}</span>
               </div>
               <div v-if="item.tags && (item.tags.general || []).length" class="tag-chips">
-                <span class="chip">{{ item.tags.general.slice(0, 5).join('\u3001') }}</span>
+                <span class="chip">{{ item.tags.general.slice(0, 5).join('、') }}</span>
               </div>
             </div>
           </div>
@@ -109,26 +109,26 @@
 
         <div v-if="hasMore" style="text-align:center;padding:14px;">
           <button class="btn btn-sm" :disabled="loading" @click="load(false)">
-            {{ loading ? '\u52A0\u8F7D\u4E2D\u2026' : ('\u52A0\u8F7D\u66F4\u591A\uFF08' + items.length + ' / ' + total + '\uFF09') }}
+            {{ loading ? '加载中…' : ('加载更多（' + items.length + ' / ' + total + '）') }}
           </button>
         </div>
       </div>
 
       <div v-if="showRootsEditor" class="modal-mask" @click.self="showRootsEditor = false">
         <div class="modal">
-          <div class="modal-title">\u7F16\u8F91\u5A92\u4F53\u6839\u76EE\u5F55</div>
+          <div class="modal-title">编辑媒体根目录</div>
           <div style="max-height:50vh;overflow:auto;">
             <div v-for="(r, i) in editRoots" :key="i" class="root-row">
-              <input v-model="r.label" class="input" style="width:110px;" placeholder="\u663E\u793A\u540D" />
-              <input v-model="r.path" class="input" style="flex:1;" placeholder="\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u5982 /opt/touchgal/plugins/aigen/output" />
-              <button class="btn btn-sm btn-danger" @click="removeRoot(i)">\u5220\u9664</button>
+              <input v-model="r.label" class="input" style="width:110px;" placeholder="显示名" />
+              <input v-model="r.path" class="input" style="flex:1;" placeholder="绝对路径，如 /opt/touchgal/plugins/aigen/output" />
+              <button class="btn btn-sm btn-danger" @click="removeRoot(i)">删除</button>
             </div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between;">
-            <button class="btn btn-sm" @click="addRoot">+ \u6DFB\u52A0\u6839\u76EE\u5F55</button>
+            <button class="btn btn-sm" @click="addRoot">+ 添加根目录</button>
             <div style="display:flex;gap:8px;">
-              <button class="btn btn-sm btn-ghost" @click="showRootsEditor = false">\u53D6\u6D88</button>
-              <button class="btn btn-sm btn-primary" @click="saveRoots">\u4FDD\u5B58</button>
+              <button class="btn btn-sm btn-ghost" @click="showRootsEditor = false">取消</button>
+              <button class="btn btn-sm btn-primary" @click="saveRoots">保存</button>
             </div>
           </div>
         </div>
@@ -137,18 +137,18 @@
       <div v-if="showDedup" class="modal-mask" @click.self="showDedup = false">
         <div class="modal">
           <div class="modal-title">
-            \u76F8\u4F3C\u56FE\u7247\u68C0\u6D4B
-            <button class="btn btn-sm btn-ghost" style="float:right;" @click="showDedup = false">\u5173\u95ED</button>
+            相似图片检测
+            <button class="btn btn-sm btn-ghost" style="float:right;" @click="showDedup = false">关闭</button>
           </div>
-          <div v-if="dedupLoading" class="status-line" style="padding:16px;">\u626B\u63CF\u4E2D\u2026\uFF08\u9700\u6570\u5206\u949F\uFF09</div>
-          <div v-else-if="!dedupGroups.length" class="empty" style="padding:20px;">\u672A\u53D1\u73B0\u76F8\u4F3C\u7EC4\uFF08\u626B\u63CF {{ dedupScanned }} \u5F20\uFF09</div>
+          <div v-if="dedupLoading" class="status-line" style="padding:16px;">扫描中…（需数分钟）</div>
+          <div v-else-if="!dedupGroups.length" class="empty" style="padding:20px;">未发现相似组（扫描 {{ dedupScanned }} 张）</div>
           <div v-else class="dedup-list">
-            <div class="dedup-note">\u53D1\u73B0 {{ dedupGroups.length }} \u7EC4\u7591\u4F3C\u91CD\u590D\uFF08\u5171\u626B\u63CF {{ dedupScanned }} \u5F20\uFF09</div>
+            <div class="dedup-note">发现 {{ dedupGroups.length }} 组疑似重复（共扫描 {{ dedupScanned }} 张）</div>
             <div v-for="(g, gi) in dedupGroups" :key="gi" class="dedup-group">
-              <div class="dedup-title">\u7EC4 {{ gi + 1 }}\uFF08{{ g.length }} \u5F20\uFF09</div>
+              <div class="dedup-title">组 {{ gi + 1 }}（{{ g.length }} 张）</div>
               <div v-for="p in g" :key="p" class="dedup-row">
                 <span class="dedup-path" :title="p">{{ p }}</span>
-                <button class="btn btn-sm btn-danger" :disabled="deleting[p]" @click="deleteDup(p)">\u5220\u9664</button>
+                <button class="btn btn-sm btn-danger" :disabled="deleting[p]" @click="deleteDup(p)">删除</button>
               </div>
             </div>
           </div>
@@ -259,7 +259,7 @@
               return !r.error;
             }).length;
             var failed = d.results.length - done;
-            tagInfo.value = "\u6253\u6807\u5B8C\u6210\uFF1A\u6210\u529F " + done + "\uFF0C\u5931\u8D25 " + failed + "\uFF08\u5355\u5F20\u7EA6 1-3s\uFF0C\u8BF7\u7A0D\u5019\uFF09";
+            tagInfo.value = "打标完成：成功 " + done + "，失败 " + failed + "（单张约 1-3s，请稍候）";
             await load(true);
           } catch (e) {
             error.value = e.message;
@@ -287,7 +287,7 @@
           }
         }
         async function deleteDup(path) {
-          if (!window.confirm("\u786E\u5B9A\u5220\u9664\uFF1F\n" + path)) return;
+          if (!window.confirm("确定删除？\n" + path)) return;
           deleting.value[path] = true;
           try {
             await api.fmDelete([path]);

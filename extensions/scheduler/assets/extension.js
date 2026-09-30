@@ -30,7 +30,7 @@
   var require_vue = __commonJS({
     "rc-host:vue"(exports, module) {
       var host = window.__rcHost;
-      if (!host || !host.Vue) throw new Error("\u7CFB\u7EDF\u6269\u5C55\u5BBF\u4E3B\u8FD0\u884C\u65F6\u7F3A\u5931: window.__rcHost.Vue");
+      if (!host || !host.Vue) throw new Error("系统扩展宿主运行时缺失: window.__rcHost.Vue");
       module.exports = host.Vue;
     }
   });
@@ -39,7 +39,7 @@
   var require_rc_api = __commonJS({
     "rc-host:rc-api"(exports, module) {
       var host = window.__rcHost;
-      if (!host || !host.api) throw new Error("\u7CFB\u7EDF\u6269\u5C55\u5BBF\u4E3B\u8FD0\u884C\u65F6\u7F3A\u5931: window.__rcHost.api");
+      if (!host || !host.api) throw new Error("系统扩展宿主运行时缺失: window.__rcHost.api");
       module.exports = host.api;
     }
   });
@@ -219,45 +219,45 @@
         return new Date(ts * 1e3).toLocaleString();
       }
       function relTime(ts) {
-        if (!ts) return "\u2014";
+        if (!ts) return "—";
         const diff = Math.floor((now.value - ts * 1e3) / 1e3);
         if (diff < 0) return fmtTime(ts);
-        if (diff < 60) return `${diff} \u79D2\u524D`;
-        if (diff < 3600) return `${Math.floor(diff / 60)} \u5206\u949F\u524D`;
-        if (diff < 86400) return `${Math.floor(diff / 3600)} \u5C0F\u65F6\u524D`;
-        return `${Math.floor(diff / 86400)} \u5929\u524D`;
+        if (diff < 60) return `${diff} 秒前`;
+        if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+        return `${Math.floor(diff / 86400)} 天前`;
       }
       function countdown(ts) {
-        if (!ts) return "\u2014";
+        if (!ts) return "—";
         const diff = Math.floor((ts * 1e3 - now.value) / 1e3);
-        if (diff < 0) return "\u5373\u5C06\u6267\u884C";
-        if (diff < 60) return `${diff} \u79D2\u540E`;
-        if (diff < 3600) return `${Math.floor(diff / 60)} \u5206\u949F ${diff % 60} \u79D2\u540E`;
+        if (diff < 0) return "即将执行";
+        if (diff < 60) return `${diff} 秒后`;
+        if (diff < 3600) return `${Math.floor(diff / 60)} 分钟 ${diff % 60} 秒后`;
         const h = Math.floor(diff / 3600);
         const m = Math.floor(diff % 3600 / 60);
-        return `${h} \u5C0F\u65F6 ${m} \u5206\u540E`;
+        return `${h} 小时 ${m} 分后`;
       }
       function fmtInterval(sec) {
         sec = Number(sec) || 0;
-        if (sec >= 86400 && sec % 86400 === 0) return `\u6BCF ${sec / 86400} \u5929`;
-        if (sec >= 3600 && sec % 3600 === 0) return `\u6BCF ${sec / 3600} \u5C0F\u65F6`;
-        if (sec >= 60 && sec % 60 === 0) return `\u6BCF ${sec / 60} \u5206\u949F`;
-        return `\u6BCF ${sec} \u79D2`;
+        if (sec >= 86400 && sec % 86400 === 0) return `每 ${sec / 86400} 天`;
+        if (sec >= 3600 && sec % 3600 === 0) return `每 ${sec / 3600} 小时`;
+        if (sec >= 60 && sec % 60 === 0) return `每 ${sec / 60} 分钟`;
+        return `每 ${sec} 秒`;
       }
-      const DOW = ["\u65E5", "\u4E00", "\u4E8C", "\u4E09", "\u56DB", "\u4E94", "\u516D"];
+      const DOW = ["日", "一", "二", "三", "四", "五", "六"];
       function fmtCron(job) {
         const { minute, hour, day, month, day_of_week } = job;
         if (day === "*" && month === "*" && day_of_week === "*") {
-          if (minute === "*") return "\u6BCF\u5206\u949F";
-          if (hour === "*") return `\u6BCF\u5C0F\u65F6 ${minute} \u5206`;
-          return `\u6BCF\u5929 ${hour}:${String(minute).padStart(2, "0")}`;
+          if (minute === "*") return "每分钟";
+          if (hour === "*") return `每小时 ${minute} 分`;
+          return `每天 ${hour}:${String(minute).padStart(2, "0")}`;
         }
         if (day === "*" && month === "*" && day_of_week !== "*") {
-          const days = day_of_week.split(",").map((d) => DOW[Number(d) % 7]).join("\u3001");
-          return `\u6BCF\u5468 ${days} ${hour}:${String(minute).padStart(2, "0")}`;
+          const days = day_of_week.split(",").map((d) => DOW[Number(d) % 7]).join("、");
+          return `每周 ${days} ${hour}:${String(minute).padStart(2, "0")}`;
         }
         if (day_of_week === "*" && month === "*" && day !== "*") {
-          return `\u6BCF\u6708 ${day} \u65E5 ${hour}:${String(minute).padStart(2, "0")}`;
+          return `每月 ${day} 日 ${hour}:${String(minute).padStart(2, "0")}`;
         }
         return `Cron: ${minute} ${hour} ${day} ${month} ${day_of_week}`;
       }
@@ -272,15 +272,15 @@
         const p = job.params || {};
         switch (job.action) {
           case "gen_img":
-            return p.prompt ? `\u63D0\u793A\u8BCD: ${p.prompt}` : p.width ? `${p.width}\xD7${p.height} \xD7${p.count || 1} \u5F20` : "\u9ED8\u8BA4\u53C2\u6570";
+            return p.prompt ? `提示词: ${p.prompt}` : p.width ? `${p.width}×${p.height} ×${p.count || 1} 张` : "默认参数";
           case "grab_setu":
-            return p.tag ? `\u6807\u7B7E: ${p.tag}` : "\u968F\u673A\u6293\u53D6";
+            return p.tag ? `标签: ${p.tag}` : "随机抓取";
           case "clean_tmp":
-            return p.dir ? `\u6E05\u7406 ${p.dir}\uFF08\u4FDD\u7559 ${p.days || 3} \u5929\uFF09` : "\u6E05\u7406\u9ED8\u8BA4\u76EE\u5F55";
+            return p.dir ? `清理 ${p.dir}（保留 ${p.days || 3} 天）` : "清理默认目录";
           case "shell":
-            return p.command ? `\u547D\u4EE4: ${p.command}` : "\u672A\u8BBE\u7F6E\u547D\u4EE4";
+            return p.command ? `命令: ${p.command}` : "未设置命令";
           case "rebuild_library":
-            return "\u91CD\u5EFA\u5A92\u4F53\u5E93\u7D22\u5F15";
+            return "重建媒体库索引";
           default:
             return "";
         }
@@ -292,7 +292,7 @@
           jobs.value = d.jobs || [];
           error.value = "";
         } catch (e) {
-          error.value = e.message || "\u52A0\u8F7D\u5931\u8D25";
+          error.value = e.message || "加载失败";
         } finally {
           loading.value = false;
         }
@@ -335,7 +335,7 @@
       async function save() {
         error.value = "";
         if (!form.name.trim()) {
-          error.value = "\u8BF7\u586B\u5199\u4EFB\u52A1\u540D\u79F0";
+          error.value = "请填写任务名称";
           return;
         }
         try {
@@ -362,16 +362,16 @@
           showForm.value = false;
           load();
         } catch (e) {
-          error.value = e.message || "\u4FDD\u5B58\u5931\u8D25";
+          error.value = e.message || "保存失败";
         }
       }
       async function doDelete(job) {
-        if (!window.confirm(`\u786E\u5B9A\u5220\u9664\u4EFB\u52A1\u300C${job.name}\u300D\uFF1F`)) return;
+        if (!window.confirm(`确定删除任务「${job.name}」？`)) return;
         try {
           await import_rc_api.api.schedDelete(job.id);
           load();
         } catch (e) {
-          error.value = e.message || "\u5220\u9664\u5931\u8D25";
+          error.value = e.message || "删除失败";
         }
       }
       async function togglePause(job) {
@@ -380,7 +380,7 @@
           else await import_rc_api.api.schedPause(job.id);
           load();
         } catch (e) {
-          error.value = e.message || "\u64CD\u4F5C\u5931\u8D25";
+          error.value = e.message || "操作失败";
         }
       }
       async function runNow(job) {
@@ -388,7 +388,7 @@
           await import_rc_api.api.schedRun(job.id);
           load();
         } catch (e) {
-          error.value = e.message || "\u89E6\u53D1\u5931\u8D25";
+          error.value = e.message || "触发失败";
         }
       }
       (0, import_vue2.onMounted)(async () => {
@@ -414,14 +414,14 @@
             _cache[38] || (_cache[38] = (0, import_vue.createElementVNode)(
               "h1",
               null,
-              "\u5B9A\u65F6\u4EFB\u52A1",
+              "定时任务",
               -1
               /* CACHED */
             )),
             _cache[39] || (_cache[39] = (0, import_vue.createElementVNode)(
               "div",
               { class: "subtitle" },
-              "APScheduler \u5B9A\u65F6\u6267\u884C \u2014\u2014 \u751F\u56FE / \u6293\u6DA9\u56FE / \u91CD\u5EFA\u7D22\u5F15 / \u6E05\u7406 / \u547D\u4EE4",
+              "APScheduler 定时执行 —— 生图 / 抓涩图 / 重建索引 / 清理 / 命令",
               -1
               /* CACHED */
             )),
@@ -440,7 +440,7 @@
                 _cache[33] || (_cache[33] = (0, import_vue.createElementVNode)(
                   "div",
                   { class: "stat-label" },
-                  "\u5168\u90E8\u4EFB\u52A1",
+                  "全部任务",
                   -1
                   /* CACHED */
                 ))
@@ -459,7 +459,7 @@
                 _cache[34] || (_cache[34] = (0, import_vue.createElementVNode)(
                   "div",
                   { class: "stat-label" },
-                  "\u8FD0\u884C\u4E2D",
+                  "运行中",
                   -1
                   /* CACHED */
                 ))
@@ -478,7 +478,7 @@
                 _cache[35] || (_cache[35] = (0, import_vue.createElementVNode)(
                   "div",
                   { class: "stat-label" },
-                  "\u5DF2\u6682\u505C",
+                  "已暂停",
                   -1
                   /* CACHED */
                 ))
@@ -497,7 +497,7 @@
                 _cache[36] || (_cache[36] = (0, import_vue.createElementVNode)(
                   "div",
                   { class: "stat-label" },
-                  "\u4E0A\u6B21\u5931\u8D25",
+                  "上次失败",
                   -1
                   /* CACHED */
                 ))
@@ -511,7 +511,7 @@
                     class: (0, import_vue.normalizeClass)(["ftab", { active: filter.value === "all" }]),
                     onClick: _cache[4] || (_cache[4] = ($event) => filter.value = "all")
                   },
-                  "\u5168\u90E8",
+                  "全部",
                   2
                   /* CLASS */
                 ),
@@ -521,7 +521,7 @@
                     class: (0, import_vue.normalizeClass)(["ftab", { active: filter.value === "running" }]),
                     onClick: _cache[5] || (_cache[5] = ($event) => filter.value = "running")
                   },
-                  "\u8FD0\u884C\u4E2D",
+                  "运行中",
                   2
                   /* CLASS */
                 ),
@@ -531,7 +531,7 @@
                     class: (0, import_vue.normalizeClass)(["ftab", { active: filter.value === "paused" }]),
                     onClick: _cache[6] || (_cache[6] = ($event) => filter.value = "paused")
                   },
-                  "\u5DF2\u6682\u505C",
+                  "已暂停",
                   2
                   /* CLASS */
                 ),
@@ -541,7 +541,7 @@
                     class: (0, import_vue.normalizeClass)(["ftab", { active: filter.value === "failed" }]),
                     onClick: _cache[7] || (_cache[7] = ($event) => filter.value = "failed")
                   },
-                  "\u4E0A\u6B21\u5931\u8D25",
+                  "上次失败",
                   2
                   /* CLASS */
                 )
@@ -553,7 +553,7 @@
                     "onUpdate:modelValue": _cache[8] || (_cache[8] = ($event) => search.value = $event),
                     class: "input",
                     style: { "width": "180px" },
-                    placeholder: "\u641C\u7D22\u4EFB\u52A1\u540D\u79F0\u2026"
+                    placeholder: "搜索任务名称…"
                   },
                   null,
                   512
@@ -572,7 +572,7 @@
                     _cache[37] || (_cache[37] = (0, import_vue.createElementVNode)(
                       "option",
                       { value: "" },
-                      "\u5168\u90E8\u52A8\u4F5C",
+                      "全部动作",
                       -1
                       /* CACHED */
                     )),
@@ -597,16 +597,16 @@
                 (0, import_vue.createElementVNode)("button", {
                   class: "btn btn-sm",
                   onClick: load
-                }, "\u5237\u65B0"),
+                }, "刷新"),
                 (0, import_vue.createElementVNode)("button", {
                   class: "btn btn-sm btn-primary",
                   onClick: openCreate
-                }, "+ \u65B0\u5EFA\u4EFB\u52A1")
+                }, "+ 新建任务")
               ])
             ])
           ]),
           (0, import_vue.createElementVNode)("div", _hoisted_12, [
-            loading.value && !jobs.value.length ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_13, "\u52A0\u8F7D\u4E2D\u2026")) : !filtered.value.length ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_14, "\u6CA1\u6709\u5339\u914D\u7684\u5B9A\u65F6\u4EFB\u52A1")) : ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_15, [
+            loading.value && !jobs.value.length ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_13, "加载中…")) : !filtered.value.length ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_14, "没有匹配的定时任务")) : ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_15, [
               ((0, import_vue.openBlock)(true), (0, import_vue.createElementBlock)(
                 import_vue.Fragment,
                 null,
@@ -632,7 +632,7 @@
                             {
                               class: (0, import_vue.normalizeClass)(["badge", job.paused ? "badge-off" : "badge-on"])
                             },
-                            (0, import_vue.toDisplayString)(job.paused ? "\u5DF2\u6682\u505C" : "\u8FD0\u884C\u4E2D"),
+                            (0, import_vue.toDisplayString)(job.paused ? "已暂停" : "运行中"),
                             3
                             /* TEXT, CLASS */
                           ),
@@ -654,7 +654,7 @@
                           ),
                           (0, import_vue.createElementVNode)("span", _hoisted_22, [
                             _cache[40] || (_cache[40] = (0, import_vue.createTextVNode)(
-                              "\u4E0B\u6B21\u6267\u884C: ",
+                              "下次执行: ",
                               -1
                               /* CACHED */
                             )),
@@ -668,17 +668,17 @@
                           ]),
                           (0, import_vue.createElementVNode)("span", _hoisted_23, [
                             _cache[41] || (_cache[41] = (0, import_vue.createTextVNode)(
-                              " \u4E0A\u6B21: ",
+                              " 上次: ",
                               -1
                               /* CACHED */
                             )),
-                            !job.last || !job.last.time ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("span", _hoisted_24, "\u4ECE\u672A\u6267\u884C")) : ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
+                            !job.last || !job.last.time ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("span", _hoisted_24, "从未执行")) : ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
                               "span",
                               {
                                 key: 1,
                                 class: (0, import_vue.normalizeClass)(job.last.status === "ok" ? "ok" : job.last.status === "error" ? "err" : "muted")
                               },
-                              (0, import_vue.toDisplayString)(job.last.status === "ok" ? "\u6210\u529F" : job.last.status === "error" ? "\u5931\u8D25" : "\u8FD0\u884C\u4E2D"),
+                              (0, import_vue.toDisplayString)(job.last.status === "ok" ? "成功" : job.last.status === "error" ? "失败" : "运行中"),
                               3
                               /* TEXT, CLASS */
                             )),
@@ -694,7 +694,7 @@
                                 job.last.duration ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
                                   "span",
                                   _hoisted_25,
-                                  "\uFF08" + (0, import_vue.toDisplayString)(job.last.duration) + "s\uFF09",
+                                  "（" + (0, import_vue.toDisplayString)(job.last.duration) + "s）",
                                   1
                                   /* TEXT */
                                 )) : (0, import_vue.createCommentVNode)("v-if", true)
@@ -724,14 +724,14 @@
                             onClick: ($event) => job._showHistory = !job._showHistory
                           }, [
                             (0, import_vue.createTextVNode)(
-                              " \u6700\u8FD1 " + (0, import_vue.toDisplayString)(job.history.length) + " \u6B21\u6267\u884C ",
+                              " 最近 " + (0, import_vue.toDisplayString)(job.history.length) + " 次执行 ",
                               1
                               /* TEXT */
                             ),
                             (0, import_vue.createElementVNode)(
                               "span",
                               _hoisted_30,
-                              (0, import_vue.toDisplayString)(job._showHistory ? "\u25BE" : "\u25B8"),
+                              (0, import_vue.toDisplayString)(job._showHistory ? "▾" : "▸"),
                               1
                               /* TEXT */
                             )
@@ -750,7 +750,7 @@
                                     {
                                       class: (0, import_vue.normalizeClass)(r.status === "ok" ? "ok" : r.status === "error" ? "err" : "muted")
                                     },
-                                    (0, import_vue.toDisplayString)(r.status === "ok" ? "\u6210\u529F" : r.status === "error" ? "\u5931\u8D25" : "\u6267\u884C\u4E2D"),
+                                    (0, import_vue.toDisplayString)(r.status === "ok" ? "成功" : r.status === "error" ? "失败" : "执行中"),
                                     3
                                     /* TEXT, CLASS */
                                   ),
@@ -785,19 +785,19 @@
                           class: "btn btn-sm",
                           disabled: job.paused,
                           onClick: ($event) => runNow(job)
-                        }, "\u7ACB\u5373\u6267\u884C", 8, _hoisted_36),
+                        }, "立即执行", 8, _hoisted_36),
                         (0, import_vue.createElementVNode)("button", {
                           class: "btn btn-sm",
                           onClick: ($event) => togglePause(job)
-                        }, (0, import_vue.toDisplayString)(job.paused ? "\u6062\u590D" : "\u6682\u505C"), 9, _hoisted_37),
+                        }, (0, import_vue.toDisplayString)(job.paused ? "恢复" : "暂停"), 9, _hoisted_37),
                         (0, import_vue.createElementVNode)("button", {
                           class: "btn btn-sm",
                           onClick: ($event) => openEdit(job)
-                        }, "\u7F16\u8F91", 8, _hoisted_38),
+                        }, "编辑", 8, _hoisted_38),
                         (0, import_vue.createElementVNode)("button", {
                           class: "btn btn-sm btn-danger",
                           onClick: ($event) => doDelete(job)
-                        }, "\u5220\u9664", 8, _hoisted_39)
+                        }, "删除", 8, _hoisted_39)
                       ])
                     ],
                     2
@@ -819,29 +819,29 @@
                 (0, import_vue.createElementVNode)(
                   "div",
                   _hoisted_42,
-                  (0, import_vue.toDisplayString)(editingId.value ? "\u7F16\u8F91\u4EFB\u52A1" : "\u65B0\u5EFA\u4EFB\u52A1"),
+                  (0, import_vue.toDisplayString)(editingId.value ? "编辑任务" : "新建任务"),
                   1
                   /* TEXT */
                 ),
                 (0, import_vue.createElementVNode)("button", {
                   class: "sched-modal-close",
                   onClick: _cache[10] || (_cache[10] = ($event) => showForm.value = false),
-                  title: "\u5173\u95ED"
-                }, "\u2715")
+                  title: "关闭"
+                }, "✕")
               ]),
               (0, import_vue.createElementVNode)("div", _hoisted_43, [
                 (0, import_vue.createElementVNode)("div", _hoisted_44, [
                   _cache[44] || (_cache[44] = (0, import_vue.createElementVNode)(
                     "div",
                     { class: "form-section-title" },
-                    "\u57FA\u672C\u4FE1\u606F",
+                    "基本信息",
                     -1
                     /* CACHED */
                   )),
                   (0, import_vue.createElementVNode)("div", _hoisted_45, [
                     (0, import_vue.createElementVNode)("label", _hoisted_46, [
                       _cache[42] || (_cache[42] = (0, import_vue.createTextVNode)(
-                        "\u4EFB\u52A1\u540D\u79F0 ",
+                        "任务名称 ",
                         -1
                         /* CACHED */
                       )),
@@ -850,7 +850,7 @@
                         {
                           "onUpdate:modelValue": _cache[11] || (_cache[11] = ($event) => form.name = $event),
                           class: "input",
-                          placeholder: "\u4F8B\u5982\uFF1A\u6BCF\u65E5\u6E05\u7406\u4E34\u65F6\u6587\u4EF6"
+                          placeholder: "例如：每日清理临时文件"
                         },
                         null,
                         512
@@ -861,7 +861,7 @@
                     ]),
                     (0, import_vue.createElementVNode)("label", _hoisted_47, [
                       _cache[43] || (_cache[43] = (0, import_vue.createTextVNode)(
-                        "\u52A8\u4F5C ",
+                        "动作 ",
                         -1
                         /* CACHED */
                       )),
@@ -897,7 +897,7 @@
                   _cache[51] || (_cache[51] = (0, import_vue.createElementVNode)(
                     "div",
                     { class: "form-section-title" },
-                    "\u89E6\u53D1\u65B9\u5F0F",
+                    "触发方式",
                     -1
                     /* CACHED */
                   )),
@@ -908,7 +908,7 @@
                         class: (0, import_vue.normalizeClass)(["btn btn-sm", { "btn-primary": form.trigger === "interval" }]),
                         onClick: _cache[13] || (_cache[13] = ($event) => form.trigger = "interval")
                       },
-                      "\u95F4\u9694",
+                      "间隔",
                       2
                       /* CLASS */
                     ),
@@ -918,7 +918,7 @@
                         class: (0, import_vue.normalizeClass)(["btn btn-sm", { "btn-primary": form.trigger === "cron" }]),
                         onClick: _cache[14] || (_cache[14] = ($event) => form.trigger = "cron")
                       },
-                      "Cron \u8868\u8FBE\u5F0F",
+                      "Cron 表达式",
                       2
                       /* CLASS */
                     )
@@ -931,7 +931,7 @@
                         ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
                           import_vue.Fragment,
                           null,
-                          (0, import_vue.renderList)([{ s: 60, l: "1\u5206\u949F" }, { s: 300, l: "5\u5206\u949F" }, { s: 900, l: "15\u5206\u949F" }, { s: 1800, l: "30\u5206\u949F" }, { s: 3600, l: "1\u5C0F\u65F6" }, { s: 21600, l: "6\u5C0F\u65F6" }, { s: 86400, l: "1\u5929" }], (preset) => {
+                          (0, import_vue.renderList)([{ s: 60, l: "1分钟" }, { s: 300, l: "5分钟" }, { s: 900, l: "15分钟" }, { s: 1800, l: "30分钟" }, { s: 3600, l: "1小时" }, { s: 21600, l: "6小时" }, { s: 86400, l: "1天" }], (preset) => {
                             return (0, import_vue.createElementVNode)("button", {
                               key: preset.s,
                               class: (0, import_vue.normalizeClass)(["btn btn-sm preset", { "btn-primary": form.interval === preset.s }]),
@@ -944,7 +944,7 @@
                       ]),
                       (0, import_vue.createElementVNode)("label", _hoisted_53, [
                         _cache[45] || (_cache[45] = (0, import_vue.createTextVNode)(
-                          "\u81EA\u5B9A\u4E49\u95F4\u9694\uFF08\u79D2\uFF0C\u226510\uFF09 ",
+                          "自定义间隔（秒，≥10） ",
                           -1
                           /* CACHED */
                         )),
@@ -978,7 +978,7 @@
                       (0, import_vue.createElementVNode)("div", _hoisted_54, [
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[46] || (_cache[46] = (0, import_vue.createTextVNode)(
-                            "\u5206 ",
+                            "分 ",
                             -1
                             /* CACHED */
                           )),
@@ -998,7 +998,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[47] || (_cache[47] = (0, import_vue.createTextVNode)(
-                            "\u65F6 ",
+                            "时 ",
                             -1
                             /* CACHED */
                           )),
@@ -1018,7 +1018,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[48] || (_cache[48] = (0, import_vue.createTextVNode)(
-                            "\u65E5 ",
+                            "日 ",
                             -1
                             /* CACHED */
                           )),
@@ -1038,7 +1038,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[49] || (_cache[49] = (0, import_vue.createTextVNode)(
-                            "\u6708 ",
+                            "月 ",
                             -1
                             /* CACHED */
                           )),
@@ -1058,7 +1058,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[50] || (_cache[50] = (0, import_vue.createTextVNode)(
-                            "\u661F\u671F (0-6) ",
+                            "星期 (0-6) ",
                             -1
                             /* CACHED */
                           )),
@@ -1093,7 +1093,7 @@
                   _cache[62] || (_cache[62] = (0, import_vue.createElementVNode)(
                     "div",
                     { class: "form-section-title" },
-                    "\u52A8\u4F5C\u53C2\u6570",
+                    "动作参数",
                     -1
                     /* CACHED */
                   )),
@@ -1104,7 +1104,7 @@
                       [
                         (0, import_vue.createElementVNode)("label", _hoisted_58, [
                           _cache[52] || (_cache[52] = (0, import_vue.createTextVNode)(
-                            "\u63D0\u793A\u8BCD ",
+                            "提示词 ",
                             -1
                             /* CACHED */
                           )),
@@ -1124,7 +1124,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[53] || (_cache[53] = (0, import_vue.createTextVNode)(
-                            "\u5BBD ",
+                            "宽 ",
                             -1
                             /* CACHED */
                           )),
@@ -1149,7 +1149,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[54] || (_cache[54] = (0, import_vue.createTextVNode)(
-                            "\u9AD8 ",
+                            "高 ",
                             -1
                             /* CACHED */
                           )),
@@ -1174,7 +1174,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[55] || (_cache[55] = (0, import_vue.createTextVNode)(
-                            "\u6B65\u6570 ",
+                            "步数 ",
                             -1
                             /* CACHED */
                           )),
@@ -1199,7 +1199,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[56] || (_cache[56] = (0, import_vue.createTextVNode)(
-                            "\u6570\u91CF ",
+                            "数量 ",
                             -1
                             /* CACHED */
                           )),
@@ -1228,7 +1228,7 @@
                     )) : (0, import_vue.createCommentVNode)("v-if", true),
                     form.action === "grab_setu" ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("label", _hoisted_59, [
                       _cache[57] || (_cache[57] = (0, import_vue.createTextVNode)(
-                        "\u6807\u7B7E\uFF08& \u5206\u9694\uFF09 ",
+                        "标签（& 分隔） ",
                         -1
                         /* CACHED */
                       )),
@@ -1237,7 +1237,7 @@
                         {
                           "onUpdate:modelValue": _cache[26] || (_cache[26] = ($event) => form.params.tag = $event),
                           class: "input",
-                          placeholder: "\u4F8B\u5982\uFF1A\u767D\u4E1D"
+                          placeholder: "例如：白丝"
                         },
                         null,
                         512
@@ -1252,7 +1252,7 @@
                       [
                         (0, import_vue.createElementVNode)("label", _hoisted_60, [
                           _cache[58] || (_cache[58] = (0, import_vue.createTextVNode)(
-                            "\u6E05\u7406\u76EE\u5F55 ",
+                            "清理目录 ",
                             -1
                             /* CACHED */
                           )),
@@ -1272,7 +1272,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[59] || (_cache[59] = (0, import_vue.createTextVNode)(
-                            "\u4FDD\u7559\u5929\u6570 ",
+                            "保留天数 ",
                             -1
                             /* CACHED */
                           )),
@@ -1305,7 +1305,7 @@
                       [
                         (0, import_vue.createElementVNode)("label", _hoisted_61, [
                           _cache[60] || (_cache[60] = (0, import_vue.createTextVNode)(
-                            "Shell \u547D\u4EE4 ",
+                            "Shell 命令 ",
                             -1
                             /* CACHED */
                           )),
@@ -1314,7 +1314,7 @@
                             {
                               "onUpdate:modelValue": _cache[29] || (_cache[29] = ($event) => form.params.command = $event),
                               class: "input",
-                              placeholder: "\u4F8B\u5982\uFF1Aecho hello > /tmp/x"
+                              placeholder: "例如：echo hello > /tmp/x"
                             },
                             null,
                             512
@@ -1325,7 +1325,7 @@
                         ]),
                         (0, import_vue.createElementVNode)("label", null, [
                           _cache[61] || (_cache[61] = (0, import_vue.createTextVNode)(
-                            "\u8D85\u65F6\uFF08\u79D2\uFF09 ",
+                            "超时（秒） ",
                             -1
                             /* CACHED */
                           )),
@@ -1367,11 +1367,11 @@
                   (0, import_vue.createElementVNode)("button", {
                     class: "btn btn-sm btn-ghost",
                     onClick: _cache[31] || (_cache[31] = ($event) => showForm.value = false)
-                  }, "\u53D6\u6D88"),
+                  }, "取消"),
                   (0, import_vue.createElementVNode)("button", {
                     class: "btn btn-sm btn-primary",
                     onClick: save
-                  }, "\u4FDD\u5B58")
+                  }, "保存")
                 ])
               ])
             ])

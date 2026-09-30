@@ -143,6 +143,7 @@ async function buildExt(name) {
       format: 'iife',
       target: 'es2020',
       minify: false,
+      charset: 'utf8', // 中文保持原样(默认 ascii 会转义成 \uXXXX, 产物不可读也不便核对)
       plugins: [hostShim, vueSFC],
       banner: { js: `/* RainCough 系统扩展产物 · ${name} · 由 tools/build-extension.js 生成 */` },
     })

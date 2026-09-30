@@ -30,7 +30,7 @@
   var require_vue = __commonJS({
     "rc-host:vue"(exports, module) {
       var host = window.__rcHost;
-      if (!host || !host.Vue) throw new Error("\u7CFB\u7EDF\u6269\u5C55\u5BBF\u4E3B\u8FD0\u884C\u65F6\u7F3A\u5931: window.__rcHost.Vue");
+      if (!host || !host.Vue) throw new Error("系统扩展宿主运行时缺失: window.__rcHost.Vue");
       module.exports = host.Vue;
     }
   });
@@ -39,7 +39,7 @@
   var require_rc_api = __commonJS({
     "rc-host:rc-api"(exports, module) {
       var host = window.__rcHost;
-      if (!host || !host.api) throw new Error("\u7CFB\u7EDF\u6269\u5C55\u5BBF\u4E3B\u8FD0\u884C\u65F6\u7F3A\u5931: window.__rcHost.api");
+      if (!host || !host.api) throw new Error("系统扩展宿主运行时缺失: window.__rcHost.api");
       module.exports = host.api;
     }
   });
@@ -183,7 +183,7 @@
         busy.value = true;
         try {
           const d = await import_rc_api.api.taskQueuePurge();
-          setNotice(`\u5DF2\u6E05\u7406 ${d.removed || 0} \u6761\u5DF2\u5B8C\u6210\u4E0E\u5931\u8D25\u4EFB\u52A1`);
+          setNotice(`已清理 ${d.removed || 0} 条已完成与失败任务`);
           lastSig = "";
           await load();
         } catch (err) {
@@ -218,53 +218,53 @@
         document.removeEventListener("visibilitychange", onVis);
       });
       const FILTERS = [
-        { key: "all", label: "\u5168\u90E8", desc: "\u6240\u6709\u4EFB\u52A1" },
-        { key: "running", label: "\u8FDB\u884C\u4E2D", desc: "\u8FD0\u884C\u4E2D / \u6392\u961F\u4E2D" },
-        { key: "download", label: "\u4E0B\u8F7D\u5B89\u88C5", desc: "\u4E0B\u8F7D / \u5B89\u88C5 / \u62C9\u53D6" },
-        { key: "generate", label: "\u751F\u6210", desc: "\u751F\u56FE / \u91CD\u7ED8 / \u6587\u751F\u76AE\u80A4" },
-        { key: "batch", label: "\u6279\u91CF / \u8C03\u5EA6", desc: "\u6279\u91CF\u4E0B\u8F7D / \u5B9A\u65F6\u4EFB\u52A1" },
-        { key: "backup", label: "\u5907\u4EFD", desc: "\u5907\u4EFD\u4E0E\u6062\u590D\u4EFB\u52A1" },
-        { key: "failed", label: "\u5931\u8D25", desc: "\u51FA\u9519 / \u4E2D\u65AD" }
+        { key: "all", label: "全部", desc: "所有任务" },
+        { key: "running", label: "进行中", desc: "运行中 / 排队中" },
+        { key: "download", label: "下载安装", desc: "下载 / 安装 / 拉取" },
+        { key: "generate", label: "生成", desc: "生图 / 重绘 / 文生皮肤" },
+        { key: "batch", label: "批量 / 调度", desc: "批量下载 / 定时任务" },
+        { key: "backup", label: "备份", desc: "备份与恢复任务" },
+        { key: "failed", label: "失败", desc: "出错 / 中断" }
       ];
       const SOURCE_LABEL = {
-        store: "\u63D2\u4EF6\u5E02\u573A",
-        backup: "\u5907\u4EFD",
-        envpkg: "\u73AF\u5883\u5305",
-        "mcserver-core": "MC \u670D\u52A1\u5668",
-        aigen: "AI \u751F\u56FE",
-        "mcskin-paint": "\u56FE\u7247\u8F6C\u76AE\u80A4",
-        "mcskin-text2skin": "\u6587\u751F\u76AE\u80A4",
+        store: "插件市场",
+        backup: "备份",
+        envpkg: "环境包",
+        "mcserver-core": "MC 服务器",
+        aigen: "AI 生图",
+        "mcskin-paint": "图片转皮肤",
+        "mcskin-text2skin": "文生皮肤",
         jmcomic: "JMComic",
-        scheduler: "\u5B9A\u65F6\u4EFB\u52A1",
+        scheduler: "定时任务",
         docker: "Docker",
-        yulotool: "\u5DE5\u5177\u7BB1",
-        plugins: "\u63D2\u4EF6\u5B89\u88C5"
+        yulotool: "工具箱",
+        plugins: "插件安装"
       };
       const KIND_LABEL = {
-        download: "\u4E0B\u8F7D",
-        install: "\u5B89\u88C5",
-        generate: "\u751F\u56FE",
-        repaint: "\u91CD\u7ED8",
-        batch: "\u6279\u91CF",
-        schedule: "\u5B9A\u65F6",
-        process: "\u4EFB\u52A1",
-        backup: "\u5907\u4EFD",
-        upload: "\u4E0A\u4F20",
-        shell: "\u547D\u4EE4"
+        download: "下载",
+        install: "安装",
+        generate: "生图",
+        repaint: "重绘",
+        batch: "批量",
+        schedule: "定时",
+        process: "任务",
+        backup: "备份",
+        upload: "上传",
+        shell: "命令"
       };
       const STATUS_LABEL = {
-        queued: "\u6392\u961F\u4E2D",
-        running: "\u8FD0\u884C\u4E2D",
-        downloading: "\u4E0B\u8F7D\u4E2D",
-        collecting: "\u6536\u96C6\u4E2D",
-        loading: "\u52A0\u8F7D\u4E2D",
-        idle: "\u7A7A\u95F2",
-        done: "\u5DF2\u5B8C\u6210",
-        error: "\u5931\u8D25",
-        cancelled: "\u5DF2\u53D6\u6D88",
-        interrupted: "\u4E2D\u65AD",
-        skipped: "\u8DF3\u8FC7",
-        failed: "\u5931\u8D25"
+        queued: "排队中",
+        running: "运行中",
+        downloading: "下载中",
+        collecting: "收集中",
+        loading: "加载中",
+        idle: "空闲",
+        done: "已完成",
+        error: "失败",
+        cancelled: "已取消",
+        interrupted: "中断",
+        skipped: "跳过",
+        failed: "失败"
       };
       function statusClass(s) {
         if (["running", "downloading", "collecting", "loading"].includes(s)) return "ok";
@@ -295,14 +295,14 @@
         return out;
       });
       const emptyText = (0, import_vue2.computed)(() => {
-        return search.value.trim() || filter.value !== "all" ? "\u6CA1\u6709\u5339\u914D\u7684\u4EFB\u52A1" : "\u6682\u65E0\u4EFB\u52A1";
+        return search.value.trim() || filter.value !== "all" ? "没有匹配的任务" : "暂无任务";
       });
       function timeAgo(ts) {
         if (!ts) return "";
         const s = Math.max(0, Math.floor(Date.now() / 1e3 - ts));
-        if (s < 60) return s + " \u79D2\u524D";
-        if (s < 3600) return Math.floor(s / 60) + " \u5206\u949F\u524D";
-        return Math.floor(s / 3600) + " \u5C0F\u65F6\u524D";
+        if (s < 60) return s + " 秒前";
+        if (s < 3600) return Math.floor(s / 60) + " 分钟前";
+        return Math.floor(s / 3600) + " 小时前";
       }
       return (_ctx, _cache) => {
         return (0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_1, [
@@ -311,8 +311,8 @@
               "div",
               null,
               [
-                (0, import_vue.createElementVNode)("h1", null, "\u4EFB\u52A1\u961F\u5217"),
-                (0, import_vue.createElementVNode)("p", { class: "page-sub" }, "\u6C47\u603B\u6240\u6709\u63D2\u4EF6\u4E0E\u7CFB\u7EDF\u7EA7\u529F\u80FD\u7684\u4E0B\u8F7D\u3001\u5B89\u88C5\u3001\u5907\u4EFD\u4E0E\u751F\u6210\u4EFB\u52A1")
+                (0, import_vue.createElementVNode)("h1", null, "任务队列"),
+                (0, import_vue.createElementVNode)("p", { class: "page-sub" }, "汇总所有插件与系统级功能的下载、安装、备份与生成任务")
               ],
               -1
               /* CACHED */
@@ -324,7 +324,7 @@
                   class: "btn",
                   onClick: toggleDone
                 },
-                (0, import_vue.toDisplayString)(includeDone.value ? "\u53EA\u770B\u8FDB\u884C\u4E2D" : "\u663E\u793A\u5168\u90E8"),
+                (0, import_vue.toDisplayString)(includeDone.value ? "只看进行中" : "显示全部"),
                 1
                 /* TEXT */
               ),
@@ -332,12 +332,12 @@
                 class: "btn",
                 disabled: busy.value,
                 onClick: _cache[0] || (_cache[0] = ($event) => purgeDone())
-              }, "\u6E05\u7406\u5DF2\u5B8C\u6210\u4E0E\u5931\u8D25", 8, _hoisted_4),
+              }, "清理已完成与失败", 8, _hoisted_4),
               (0, import_vue.createElementVNode)("button", {
                 class: "btn",
                 disabled: busy.value || loading.value,
                 onClick: _cache[1] || (_cache[1] = ($event) => refresh())
-              }, "\u5237\u65B0", 8, _hoisted_5)
+              }, "刷新", 8, _hoisted_5)
             ])
           ]),
           (0, import_vue.createElementVNode)("div", _hoisted_6, [
@@ -352,7 +352,7 @@
               _cache[5] || (_cache[5] = (0, import_vue.createElementVNode)(
                 "div",
                 { class: "stat-label" },
-                "\u8FDB\u884C\u4E2D",
+                "进行中",
                 -1
                 /* CACHED */
               ))
@@ -368,7 +368,7 @@
               _cache[6] || (_cache[6] = (0, import_vue.createElementVNode)(
                 "div",
                 { class: "stat-label" },
-                "\u6392\u961F\u4E2D",
+                "排队中",
                 -1
                 /* CACHED */
               ))
@@ -384,7 +384,7 @@
               _cache[7] || (_cache[7] = (0, import_vue.createElementVNode)(
                 "div",
                 { class: "stat-label" },
-                "\u5931\u8D25",
+                "失败",
                 -1
                 /* CACHED */
               ))
@@ -400,7 +400,7 @@
               _cache[8] || (_cache[8] = (0, import_vue.createElementVNode)(
                 "div",
                 { class: "stat-label" },
-                "\u5DF2\u5B8C\u6210",
+                "已完成",
                 -1
                 /* CACHED */
               ))
@@ -416,7 +416,7 @@
               _cache[9] || (_cache[9] = (0, import_vue.createElementVNode)(
                 "div",
                 { class: "stat-label" },
-                "\u603B\u8BA1",
+                "总计",
                 -1
                 /* CACHED */
               ))
@@ -442,7 +442,7 @@
               {
                 "onUpdate:modelValue": _cache[2] || (_cache[2] = ($event) => search.value = $event),
                 class: "input search-input",
-                placeholder: "\u641C\u7D22\u4EFB\u52A1\u540D / \u6765\u6E90 / \u8BF4\u660E"
+                placeholder: "搜索任务名 / 来源 / 说明"
               },
               null,
               512
@@ -453,14 +453,14 @@
           ]),
           error.value ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_19, [
             (0, import_vue.createTextVNode)(
-              " \u5237\u65B0\u5931\u8D25\uFF1A" + (0, import_vue.toDisplayString)(error.value) + " ",
+              " 刷新失败：" + (0, import_vue.toDisplayString)(error.value) + " ",
               1
               /* TEXT */
             ),
             (0, import_vue.createElementVNode)("button", {
               class: "alert-x",
               onClick: _cache[3] || (_cache[3] = ($event) => error.value = "")
-            }, "\u5173\u95ED")
+            }, "关闭")
           ])) : (0, import_vue.createCommentVNode)("v-if", true),
           notice.value ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
             "div",
@@ -469,7 +469,7 @@
             1
             /* TEXT */
           )) : (0, import_vue.createCommentVNode)("v-if", true),
-          loading.value && !tasks.value.length ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_21, "\u52A0\u8F7D\u4E2D...")) : !filtered.value.length ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
+          loading.value && !tasks.value.length ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)("div", _hoisted_21, "加载中...")) : !filtered.value.length ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
             "div",
             _hoisted_22,
             (0, import_vue.toDisplayString)(emptyText.value),
@@ -490,7 +490,7 @@
                       {
                         class: (0, import_vue.normalizeClass)(["task-badge", "kind-" + t.kind])
                       },
-                      (0, import_vue.toDisplayString)(KIND_LABEL[t.kind] || t.kind || "\u4EFB\u52A1"),
+                      (0, import_vue.toDisplayString)(KIND_LABEL[t.kind] || t.kind || "任务"),
                       3
                       /* TEXT, CLASS */
                     ),
@@ -514,21 +514,21 @@
                   (0, import_vue.createElementVNode)(
                     "div",
                     _hoisted_26,
-                    (0, import_vue.toDisplayString)(t.name || "\u672A\u547D\u540D\u4EFB\u52A1"),
+                    (0, import_vue.toDisplayString)(t.name || "未命名任务"),
                     1
                     /* TEXT */
                   ),
                   t.phase ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
                     "div",
                     _hoisted_27,
-                    "\u9636\u6BB5\uFF1A" + (0, import_vue.toDisplayString)(t.phase),
+                    "阶段：" + (0, import_vue.toDisplayString)(t.phase),
                     1
                     /* TEXT */
                   )) : (0, import_vue.createCommentVNode)("v-if", true),
                   t.error ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
                     "div",
                     _hoisted_28,
-                    "\u9519\u8BEF\uFF1A" + (0, import_vue.toDisplayString)(t.error),
+                    "错误：" + (0, import_vue.toDisplayString)(t.error),
                     1
                     /* TEXT */
                   )) : (0, import_vue.createCommentVNode)("v-if", true),
@@ -542,7 +542,7 @@
                   t.meta && t.meta.target ? ((0, import_vue.openBlock)(), (0, import_vue.createElementBlock)(
                     "div",
                     _hoisted_30,
-                    "\u76EE\u6807\uFF1A" + (0, import_vue.toDisplayString)(t.meta.target),
+                    "目标：" + (0, import_vue.toDisplayString)(t.meta.target),
                     1
                     /* TEXT */
                   )) : (0, import_vue.createCommentVNode)("v-if", true),
