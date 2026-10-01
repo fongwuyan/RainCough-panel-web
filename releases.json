@@ -1,0 +1,13 @@
+{
+  "panel": [
+    {
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "asset": "raincough-linux-x86_64-1.0.0.tar.gz",
+      "date": "2026-10-01",
+      "install": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/v1.0.0/install.sh | bash",
+      "install_latest": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/main/install.sh | bash"
+    }
+  ],
+  "note": "每个版本一条独立安装命令: 用 tag 取 install.sh, 装对应版本资产; latest 跟随 main"
+}
