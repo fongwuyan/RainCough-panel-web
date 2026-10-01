@@ -53,7 +53,7 @@ async function doApply() {
       if (st.value && st.value.pending_restart) { flash('已应用 v' + st.value.applied + ', 待你确认重启'); break }
     }
     await load()
-    if (!(st.value && st.value.pending_restart)) flash('仍在应用中, 进度见任务队列', false)
+    if (!(st.value && st.value.pending_restart)) flash('仍在应用中, 到「任务队列」查看进度(未安装则在「系统扩展」页装)', false)
   } catch (e) { flash('应用失败: ' + e.message, false) } finally { busy.value = ''; progress.value = '' }
 }
 async function doRestart() {

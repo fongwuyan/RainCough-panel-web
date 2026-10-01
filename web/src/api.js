@@ -247,7 +247,8 @@ export const api = {
   storePluginInstall: (name) => req('POST', '/api/store/plugin/install', { name }),
   storePluginUpdate: (name) => req('POST', '/api/store/plugin/update', { name }),
   storePluginRemove: (name) => req('POST', '/api/store/plugin/remove', { name }),
-  storeProjectStatus: () => req('GET', '/api/store/project/status'),
+  // 插件仓仓级版本 + 更新日志(CHANGELOG.md), 插件页「更新日志」悬浮窗用
+  storeChangelog: () => req('GET', '/api/store/changelog'),
 
   // 系统扩展(内置 7 项之外的功能包, 存于主面板库 extensions/)
   extList: () => req('GET', '/api/ext'),
@@ -256,9 +257,10 @@ export const api = {
   extUpdate: (name) => req('POST', '/api/ext/update', { name }),
   extRemove: (name) => req('POST', '/api/ext/remove', { name }),
   extEntry: (name) => `/api/ext/${encodeURIComponent(name)}/assets/extension.js`,
-  // 已删除 storeProjectUpdateInfo / storeProjectCheck / storeProjectInstall:
-  // 后端这三处只回伪造的 current=latest=v1.0.0 与空 env, 没有真实能力, 前端
-  // 据此谎报"已开始更新…服务将重启""环境不满足"。面板更新走部署脚本(StoreProject.vue)。
+  // 已删除 storeProjectUpdateInfo / storeProjectCheck / storeProjectInstall /
+  // storeProjectStatus: 后端这几处只回伪造的 current=latest=v1.0.0 与空 env, 或早已
+  // 过时的"面板更新只能走部署脚本"说法。面板更新已由 /api/panel/update/* 实现
+  // (侧边栏标题右侧下载按钮 → PanelUpdate.vue), 前端不再有自升级类接口。
   tmOpen: (rows, cols) => req('POST', '/api/terminal/open', { rows: rows || 24, cols: cols || 100 }),
   tmInput: (sid, data) => req('POST', '/api/terminal/input', { sid, data }),
   tmResize: (sid, rows, cols) => req('POST', '/api/terminal/resize', { sid, rows, cols }),

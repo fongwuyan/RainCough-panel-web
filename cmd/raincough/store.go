@@ -82,6 +82,27 @@ func (s *server) handleStoreRegistry(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleStoreChangelog GET /api/store/changelog
+// 插件仓的仓级版本 + 更新日志(CHANGELOG.md)。插件页「更新日志」悬浮窗用。
+// 仓库不可用(未配仓库/token 无效/网络不通)时 502, 前端只提示"仓库不可用"。
+func (s *server) handleStoreChangelog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	if globalStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "环境未就绪"})
+		return
+	}
+	cl, err := globalStore.Changelog()
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	cl.Source = "github"
+	writeJSON(w, http.StatusOK, cl)
+}
+
 // handleStorePluginInstall POST /api/store/plugin/install {name}
 func (s *server) handleStorePluginInstall(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -163,16 +184,16 @@ func (s *server) handleStoreProject(w http.ResponseWriter, r *http.Request) {
 	switch sub {
 	case "status":
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"implemented": false,
-			"current":      config.Version,
-			"repo":         repoStr,
-			"message":      "面板更新通过部署脚本完成(运行中的二进制不可就地替换)",
-			"howto": "部署机: git pull -> go build -> npm run build -> 同步面板与测试机 -> systemctl restart raincough",
+			"implemented": true,
+			"current":     config.Version,
+			"repo":        repoStr,
+			"message":     "面板更新已支持就地更新: 检查 → 下载并应用 → 由你确认是否立即重启",
+			"howto":       "面板内: 侧边栏标题右侧 ↓ → 检查更新 → 下载并应用 → 立即重启; 命令行等价: curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/<面板仓>/v<版本>/install.sh | bash",
 		})
 	case "install":
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status": false, "implemented": false, "deferred": true,
-			"message": "面板更新请通过部署脚本完成(运行中不可自升级)",
+			"message": "请用 /api/panel/update/apply 走手动更新(检查 → 应用 → 确认重启)",
 		})
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unknown"})

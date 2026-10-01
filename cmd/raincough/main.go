@@ -253,6 +253,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/store/settings", s.handleStoreSettings)
 	mux.HandleFunc("/api/store/ping", s.handleStorePing)
 	mux.HandleFunc("/api/store/registry", s.handleStoreRegistry)
+	mux.HandleFunc("/api/store/changelog", s.handleStoreChangelog)
 	mux.HandleFunc("/api/store/plugin/install", s.handleStorePluginInstall)
 	mux.HandleFunc("/api/store/plugin/remove", s.handleStorePluginRemove)
 	// 系统扩展(内置功能之外的扩展包安装/卸载/产物服务)

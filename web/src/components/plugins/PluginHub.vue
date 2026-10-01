@@ -34,6 +34,7 @@ function clearStatus() { status.value = ''; statusOk.value = true }
 // ============ 市场清单(两页签共用: 已装页签拿它做"有更新"对比) ============
 const regPlugins = ref([])
 const regSource = ref('')      // github | local
+const regHasToken = ref(false) // 是否配了插件仓凭据(私有仓取清单/日志都要)
 const regLoading = ref(false)
 const regError = ref('')
 
@@ -44,10 +45,12 @@ async function loadRegistry() {
     const d = await api.storeRegistry()
     regPlugins.value = d.plugins || []
     regSource.value = d.source || ''
+    regHasToken.value = !!d.has_token
   } catch (e) {
     regError.value = e.message
     regPlugins.value = []
     regSource.value = ''
+    regHasToken.value = false
   } finally {
     regLoading.value = false
   }
@@ -236,7 +239,7 @@ async function watchTask(name, verb, before) {
       `${x.name || ''} ${x.message || ''}`.includes(name))
     if (!t) {
       // 后端提交后应立即建任务; 超过 12 秒仍没等到就不空转, 让用户去任务队列看
-      if (++miss >= 8) { progress.value = ''; flash(`${verb}已提交, 进度见任务队列`, false); return false }
+      if (++miss >= 8) { progress.value = ''; flash(`${verb}已提交, 到「系统扩展」装好任务队列后可查看进度`, false); return false }
       continue
     }
     miss = 0
@@ -254,7 +257,7 @@ async function watchTask(name, verb, before) {
     if (line !== last) { last = line; progress.value = line }
   }
   progress.value = ''
-  flash(`${verb}仍在后台进行, 任务队列可查看进度`, false)
+  flash(`${verb}仍在后台进行, 到「任务队列」查看进度(未安装则在「系统扩展」页装任务队列)`, false)
   return false
 }
 
@@ -300,6 +303,33 @@ async function refreshAll() {
   } finally { refreshing.value = false }
 }
 
+// ============ 插件仓更新日志(仓级, 与面板版本解耦) ============
+// 版本口径: 每个插件独立维护 plugin.json:version, 仓级 VERSION/CHANGELOG.md 记录
+// 本仓发布基线。版本号只在明确确认后递增, 前端不做任何"最新版"猜测。
+const showLog = ref(false)
+const logLoading = ref(false)
+const logError = ref('')
+const logVer = ref('')
+const logText = ref('')
+
+async function toggleLog() {
+  showLog.value = !showLog.value
+  if (!showLog.value || logText.value || logLoading.value) return
+  logLoading.value = true
+  logError.value = ''
+  try {
+    const d = await api.storeChangelog()
+    logVer.value = d.version || ''
+    logText.value = d.changelog || ''
+  } catch (e) {
+    logError.value = regHasToken.value
+      ? '仓库不可用'
+      : '仓库不可用(未配置插件仓凭据, 见「设置 → 仓库配置」)'
+  } finally {
+    logLoading.value = false
+  }
+}
+
 // 在线/离线要保持新鲜: 回到前台立即查一次, 页面停留期间每 60s 静默刷新一次(不弹"已刷新")
 let healthTimer = 0
 function onVisChange() {
@@ -339,10 +369,27 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <div class="hub-actions">
+          <button class="btn btn-sm" @click="toggleLog">
+            {{ showLog ? '收起更新日志' : '更新日志' }}
+          </button>
           <button class="btn btn-sm" :disabled="refreshing" @click="refreshAll">
             {{ refreshing ? '刷新中…' : '刷新' }}
           </button>
           <button class="btn btn-sm btn-primary" @click="installOpen = true">安装本地包</button>
+        </div>
+      </div>
+
+      <!-- 插件仓仓级更新日志(来源: 插件仓 CHANGELOG.md) -->
+      <div v-if="showLog" class="log-box">
+        <div class="log-head">
+          <span class="log-title">插件仓更新日志{{ logVer ? ' · 基线 v' + logVer : '' }}</span>
+          <span class="log-note">版本号只在明确确认后递增</span>
+        </div>
+        <div v-if="logLoading" class="hint">读取中…</div>
+        <div v-else-if="logError" class="hint">{{ logError }}</div>
+        <pre v-else class="log-pre">{{ logText || '(无更新日志)' }}</pre>
+        <div class="hint" style="margin-top:6px;">
+          每个插件独立维护 plugin.json:version; 更新在「插件市场」页签逐个插件进行。
         </div>
       </div>
 
@@ -511,6 +558,34 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
 }
 .hub-actions { display: flex; gap: 8px; }
+.log-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+.log-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.log-title { font-weight: 700; font-size: 13px; }
+.log-note { font-size: 11px; color: var(--text-faint); }
+.log-pre {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
 .hub-item { margin-bottom: 10px; }
 .hub-mono {
   font-family: var(--font-mono);

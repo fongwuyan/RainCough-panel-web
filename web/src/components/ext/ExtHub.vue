@@ -90,7 +90,7 @@ async function watchTask(name, verb, before) {
     const t = list.find((x) => x.source === 'ext' && !before.has(x.id) &&
       `${x.name || ''} ${x.message || ''}`.includes(name))
     if (!t) {
-      if (++miss >= 8) { progress.value = ''; flash(`${verb}已提交, 进度见任务队列`, false); return false }
+      if (++miss >= 8) { progress.value = ''; flash(`${verb}已提交, 到本页下方装好「任务队列」扩展后可查看进度`, false); return false }
       continue
     }
     miss = 0
@@ -100,7 +100,7 @@ async function watchTask(name, verb, before) {
     if (line !== last) { last = line; progress.value = line }
   }
   progress.value = ''
-  flash(`${verb}仍在后台进行, 任务队列可查看进度`, false)
+  flash(`${verb}仍在后台进行, 到「任务队列」扩展查看进度(没装就在本页下方安装)`, false)
   return false
 }
 

@@ -314,6 +314,54 @@ func (s *Store) RemovePlugin(name string) error {
 
 // ---- 内部 ----
 
+// StoreChangelog 插件仓的仓级版本与更新日志(CHANGELOG.md)。
+// 私有仓必须带 token; 仓库不可用时返回错误, 前端统一提示"仓库不可用"。
+type StoreChangelog struct {
+	Version   string `json:"version"`
+	Changelog string `json:"changelog"`
+	Source    string `json:"source"`
+}
+
+// Changelog 取插件仓 VERSION 与 CHANGELOG.md(均为仓级, 与面板版本解耦)。
+func (s *Store) Changelog() (StoreChangelog, error) {
+	repo := s.config.PluginRepo
+	if repo.Owner == "" || repo.Repo == "" {
+		return StoreChangelog{}, fmt.Errorf("未配置插件仓库")
+	}
+	get := func(file string) (string, error) {
+		path := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s",
+			repo.Owner, repo.Repo, file, repo.Branch)
+		resp, err := s.ghGet(path)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+		var gh struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&gh); err != nil {
+			return "", err
+		}
+		raw, err := base64.StdEncoding.DecodeString(gh.Content)
+		if err != nil {
+			return "", err
+		}
+		return string(raw), nil
+	}
+	ver, err := get("VERSION")
+	if err != nil {
+		return StoreChangelog{}, err
+	}
+	text, err := get("CHANGELOG.md")
+	if err != nil {
+		return StoreChangelog{}, err
+	}
+	return StoreChangelog{Version: strings.TrimSpace(ver), Changelog: text, Source: "github"}, nil
+}
+
 func (s *Store) ghGet(path string) (*http.Response, error) {
 	req, _ := http.NewRequest("GET", "https://api.github.com"+path, nil)
 	token := s.Token()
