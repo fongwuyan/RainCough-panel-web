@@ -53,6 +53,47 @@ curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/Rain
 - 写完先 `netplan generate` 校验；**校验失败自动回滚**（删掉我们写的文件、恢复原定义，并把报错存进备份目录）
 - 提醒：固定下来的地址若落在路由器 DHCP 池里，将来可能与别的设备冲突 —— 更稳的是在路由器上做 DHCP 保留，或另选池外地址
 
+## 卸载
+
+```bash
+# 先看要做什么(不修改任何东西)
+curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/main/uninstall.sh | sudo bash -s -- --dry-run
+
+# 卸载(保留数据: data/ 与 plugins/)
+curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/main/uninstall.sh | sudo bash -s -- --yes
+```
+
+默认会：停用并删除面板单元 `raincough.service`、停用并删除**系统扩展后端**单元 `rc-ext-*.service`、
+删除程序文件（`raincough`/`public/`/`VERSION`/`install.sh`/`CHANGELOG.md`/`.update/`/`*.bak`/`extensions/`/
+`extension-src/`）、清理 `/run/raincough`。
+
+**默认保留**：`<安装目录>/data`（`rc.db` 面板数据 + 工作台历史）、`<安装目录>/plugins`（插件与其数据）、
+插件单元 `plugin-*.service`、安装时固定的静态 IP 配置。安装程序装的系统包（python 依赖/p7zip/ffmpeg）也不动。
+
+| 参数 | 作用 |
+|---|---|
+| `--purge` | 连 `data/` 与 `plugins/` 一起删（彻底清空安装目录） |
+| `--with-plugins` | 同时停用并删除 `plugin-*.service` 单元（插件目录仍保留） |
+| `--unset-static-ip` | 还原安装程序写的静态 IP（从 `/root/raincough-net-backup-*` 恢复；改动下次重启生效） |
+| `--app-dir=<路径>` | 指定安装目录（默认 `/opt/raincough`，也可用 `RC_APP_DIR`） |
+| `--dry-run` | 只打印将执行的动作 |
+| `--yes` | 不提问直接执行（无交互终端时必须显式给，否则默认取消） |
+
+**卸载驱动扩展**（面板内）：系统扩展 → 已装扩展里的「驱动」→ 卸载（会停 `rc-ext-drivers.service`、删单元、
+删扩展目录、摘掉 8 个接口）。**卸载魔改驱动**：驱动页 → 退路 → 官方卸载 / 回 Debian 包 / 回补丁前。
+
+**手工卸载**（不想用脚本时）：
+
+```bash
+sudo systemctl disable --now raincough
+sudo rm -f /etc/systemd/system/raincough.service
+sudo systemctl disable --now rc-ext-drivers.service && sudo rm -f /etc/systemd/system/rc-ext-drivers.service
+sudo systemctl daemon-reload
+sudo rm -rf /run/raincough
+sudo cp -a /opt/raincough/data /opt/raincough/plugins /tmp/    # 想留数据就先备份
+sudo rm -rf /opt/raincough
+```
+
 ## 面板更新（面板内）
 
 面板**不会自动更新**。设置之外，侧边栏标题旁的下载按钮 →「面板更新」悬浮窗可：

@@ -70,3 +70,18 @@
   - 实测（Ubuntu 22.04 测试机，netplan+DHCP）：写入后重启，`ip route` 变为
     `default via 192.168.122.1 dev ens3 proto static`（不再是 dhcp），SSH/面板正常；
     故意塞入语法错误的 netplan 文件时，`generate` 报错 → 自动回滚 → 我们的文件删除、原定义恢复
+- 安装程序健壮性（用户报告「安装时出现乱码导致无法继续」）：
+  - 无控制终端（网页终端 / `ssh` 不带 `-t` / 自动化）时读 `/dev/tty` 失败 → 第一步被当成 no 而取消；
+    现在探测终端能力，**无交互终端时所有提问取默认值继续**，并把默认值打印出来（`(no tty) … -> default: x`）
+  - 第一步改为回车即开始（不再要求显式 yes）；交互提示以 ASCII 开头（中文随后），非 UTF-8 终端不再满屏乱码；
+    输入加超时（`RC_PROMPT_TIMEOUT` 默认 120s），避免可读但无人输入的终端把安装挂死；
+    `fail()` 追加 ASCII 说明与可直接复制的重跑命令
+  - 重装路径修复：`systemctl enable --now` 对运行中的单元是空操作（新单元不生效、journal 报
+    `Current command vanished`）→ 改 `enable` + `restart`；端口检查不再把"本面板自己占用的端口"当冲突
+    （按 MainPID/exe 识别，注意 `ss -ltnp` 非 root 看不到别人 PID）；非交互模式下端口冲突自动改用空闲端口
+    （或 `RC_PORT=`），不再死循环；步骤 7 验证改为最多 5×2s 重试
+- 新增卸载器 `uninstall.sh`（`…/main/uninstall.sh`）：停用并删除面板单元与 `rc-ext-*.service`、
+  删程序文件、清理 `/run/raincough`；**默认保留** `data/`、`plugins/`、插件单元与静态 IP 配置；
+  可选 `--purge`（连数据一起删）、`--with-plugins`、`--unset-static-ip`（从
+  `/root/raincough-net-backup-*` 还原）、`--dry-run`、`--yes`。已实测：dry-run 不改动 → 卸载清空
+  （单元/目录/端口/运行时全清，数据保留）→ 重装后 data/ 与 plugins/ 仍在、面板 200
