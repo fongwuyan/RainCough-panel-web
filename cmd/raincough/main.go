@@ -371,12 +371,31 @@ func (s *server) routes(mux *http.ServeMux) {
 }
 
 // ---- 插件路由(v4 接口库, 无 v3 网关) ----
+// isSystemExtension: 该名字是否是"已安装的系统扩展"。
+// ★系统扩展的后端也注册在同一个接口库里, 但它属于「系统扩展」而不是「插件」——
+//   插件页/插件接口都不应把它当成插件(否则扩展会被当成插件列出、甚至被"删除插件"误删)。
+func (s *server) isSystemExtension(name string) bool {
+	if name == "" || s.cfg == nil || s.cfg.BaseDir == "" {
+		return false
+	}
+	st, err := os.Stat(filepath.Join(s.cfg.BaseDir, "extensions", name))
+	return err == nil && st.IsDir()
+}
+
 func (s *server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "仅支持 GET"})
 		return
 	}
-	writeJSON(w, http.StatusOK, globalPX.ListPlugins())
+	all := globalPX.ListPlugins()
+	out := make([]map[string]interface{}, 0, len(all))
+	for _, p := range all {
+		if s.isSystemExtension(fmt.Sprintf("%v", p["name"])) {
+			continue // 系统扩展: 由「系统扩展」页管理
+		}
+		out = append(out, p)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
@@ -391,6 +410,11 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	sub := ""
 	if len(parts) > 1 {
 		sub = parts[1]
+	}
+	if s.isSystemExtension(name) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error": "这是系统扩展, 请在「系统扩展」页管理: " + name})
+		return
 	}
 	if !globalPX.HasPlugin(name) {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未注册: " + name})
