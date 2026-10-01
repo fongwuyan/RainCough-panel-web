@@ -3,13 +3,11 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
 import { useExtensions } from '../stores/extensions'
-import { useUi } from '../stores/ui'
 
 const route = useRoute()
 const router = useRouter()
 const { plugins, load } = usePlugins()
 const { extensions, load: loadExts } = useExtensions()
-const { installOpen } = useUi()
 
 onMounted(() => { load(); loadExts() })
 
@@ -156,8 +154,7 @@ function extActive(x) { return route.name === 'ext-view' && String(route.params.
       <div v-else class="hint" style="padding:16px 8px;">加载中...</div>
     </nav>
     <div class="sidebar-footer">
-      <button class="btn btn-primary btn-block" @click="installOpen = true">安装插件</button>
-      <span class="version">v1.0 · 仅局域网</span>
+      <span class="version">v1.0.0 · 仅局域网</span>
     </div>
   </aside>
 </template>
