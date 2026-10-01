@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "note": "RainCough 面板「驱动」扩展的魔改驱动补丁数据（路线 A：扩展从 NVIDIA 官方下载 .run，本地打补丁）。维护方式见 drivers/README.md 与 tools/build-driver-registry.py。",
+  "entries": []
+}
