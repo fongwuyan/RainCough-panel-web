@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "cmp-615.71.09",
+  "target": "kernel/nvidia/nv-kernel.o_binary",
+  "base_sha256": "56a870c6e91ebc787eaeb8dbe074d9e9a51001126273b700e34ab2c5dba919bc",
+  "result_sha256": "5b588fa177c3097c076b202a0849411c16430501b9358dd1eca77ecbe1d56670",
+  "blocks": [
+    {
+      "id": "blk-1",
+      "find_hex": "091e0700491e0700bc1e0700fc1e07000b1f0700812007008220070083200700c2200700892107000d2207004d2207008a2407",
+      "replace_hex": "ffff0700ffff0700ffff0700ffff0700ffff0700ffff0700ffff0700ffff0700ffff0700ffff0700ffff0700ffff0700ffff07",
+      "expect_hits": 1,
+      "note": "CMP（1 处）"
+    }
+  ]
+}

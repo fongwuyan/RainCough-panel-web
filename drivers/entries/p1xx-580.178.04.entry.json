@@ -1,0 +1,19 @@
+{
+  "id": "p1xx-580.178.04",
+  "title": "P1XX 系列 (P102/P104/P106) 魔改补丁 580.178.04",
+  "type": "patch-data",
+  "card_pci_ids": ["10de:1b07", "10de:1b87", "10de:1bc7", "10de:1c07", "10de:1c09"],
+  "card_names": ["P102-100", "P104-100", "P104-101", "P106-100", "P106-090"],
+  "arch": ["Pascal"],
+  "driver_version": "580.178.04",
+  "base": {
+    "version": "580.178.04",
+    "download_url": "https://download.nvidia.com/XFree86/Linux-x86_64/580.178.04/NVIDIA-Linux-x86_64-580.178.04.run",
+    "size_b": 397214534,
+    "sha256_expected": "5975a86ee45bffcb626f51ae33d1169b108186a2ea47ad651e72f13fa4b6d6f9"
+  },
+  "requires": ["dkms", "linux-headers", "build-essential"],
+  "post": ["blacklist-nouveau", "initramfs"],
+  "reboot_required": true,
+  "notes": "上游 NVIDIA-patcher 的 P1xx 行(覆盖 1b07/1b87/1bc7/1c07/1c09); 本机目标 P104-100 / P106-100。只取该行时, 补丁输出与上游 linux.sh 逐字节一致(已实测)。"
+}

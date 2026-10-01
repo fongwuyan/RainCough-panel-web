@@ -1,5 +1,117 @@
 {
   "schema": 1,
-  "note": "RainCough 面板「驱动」扩展的魔改驱动补丁数据（路线 A：扩展从 NVIDIA 官方下载 .run，本地打补丁）。维护方式见 drivers/README.md 与 tools/build-driver-registry.py。",
-  "entries": []
+  "updated_at": null,
+  "note": "RainCough 面板「驱动」扩展的魔改驱动来源（路线 A: 只放补丁数据）",
+  "entries": [
+    {
+      "id": "cmp-615.71.09",
+      "title": "CMP 系列 (30HX/40HX/50HX/70HX/90HX/170HX) 魔改补丁 615.71.09",
+      "type": "patch-data",
+      "card_pci_ids": [
+        "10de:1e09",
+        "10de:1f0b",
+        "10de:2082",
+        "10de:20c2",
+        "10de:2189",
+        "10de:220d",
+        "10de:248a"
+      ],
+      "card_names": [
+        "CMP 50HX",
+        "CMP 40HX",
+        "CMP 170HX",
+        "CMP 170HX",
+        "CMP 30HX",
+        "CMP 90HX",
+        "CMP 70HX"
+      ],
+      "arch": [
+        "Turing",
+        "Ampere"
+      ],
+      "driver_version": "615.71.09",
+      "requires": [
+        "dkms",
+        "linux-headers",
+        "build-essential"
+      ],
+      "post": [
+        "blacklist-nouveau",
+        "gsp-off",
+        "initramfs"
+      ],
+      "reboot_required": true,
+      "notes": "上游 NVIDIA-patcher 的 CMP 行(共 13 个 ID, 本条目列出其中已知型号的 7 个); 本机目标 CMP 30HX(2189)。Turing/Ampere 架构, 建议关闭 GSP 固件。只取该行时补丁输出与上游 linux.sh 逐字节一致(已实测)。",
+      "base": {
+        "version": "615.71.09",
+        "download_url": "https://download.nvidia.com/XFree86/Linux-x86_64/615.71.09/NVIDIA-Linux-x86_64-615.71.09.run",
+        "size_b": 529618784,
+        "sha256_expected": "cdceed22bbeb61248d1a6deabc2596673e3a6501698ee71ac8d2fdc28f3b70fe",
+        "verify": [
+          "sh --check"
+        ]
+      },
+      "patch": {
+        "path": "drivers/patches/cmp-615.71.09.patch.json",
+        "sha256": "2e97b2d2cf740f09c95623f453ddf121141275517f8116936ab1fa889c167528",
+        "target": "kernel/nvidia/nv-kernel.o_binary",
+        "blocks": 1,
+        "base_sha256": "56a870c6e91ebc787eaeb8dbe074d9e9a51001126273b700e34ab2c5dba919bc",
+        "result_sha256": "5b588fa177c3097c076b202a0849411c16430501b9358dd1eca77ecbe1d56670",
+        "dry_run_required": true
+      }
+    },
+    {
+      "id": "p1xx-580.178.04",
+      "title": "P1XX 系列 (P102/P104/P106) 魔改补丁 580.178.04",
+      "type": "patch-data",
+      "card_pci_ids": [
+        "10de:1b07",
+        "10de:1b87",
+        "10de:1bc7",
+        "10de:1c07",
+        "10de:1c09"
+      ],
+      "card_names": [
+        "P102-100",
+        "P104-100",
+        "P104-101",
+        "P106-100",
+        "P106-090"
+      ],
+      "arch": [
+        "Pascal"
+      ],
+      "driver_version": "580.178.04",
+      "requires": [
+        "dkms",
+        "linux-headers",
+        "build-essential"
+      ],
+      "post": [
+        "blacklist-nouveau",
+        "initramfs"
+      ],
+      "reboot_required": true,
+      "notes": "上游 NVIDIA-patcher 的 P1xx 行(覆盖 1b07/1b87/1bc7/1c07/1c09); 本机目标 P104-100 / P106-100。只取该行时, 补丁输出与上游 linux.sh 逐字节一致(已实测)。",
+      "base": {
+        "version": "580.178.04",
+        "download_url": "https://download.nvidia.com/XFree86/Linux-x86_64/580.178.04/NVIDIA-Linux-x86_64-580.178.04.run",
+        "size_b": 397214534,
+        "sha256_expected": "5975a86ee45bffcb626f51ae33d1169b108186a2ea47ad651e72f13fa4b6d6f9",
+        "verify": [
+          "sh --check"
+        ]
+      },
+      "patch": {
+        "path": "drivers/patches/p1xx-580.178.04.patch.json",
+        "sha256": "87daae10ed1053cc87e518732a5c71f5399701ba7e515dc00a9e7cc4fef6a743",
+        "target": "kernel/nvidia/nv-kernel.o_binary",
+        "blocks": 1,
+        "base_sha256": "5269a23ffba19a17fe16f076463e7ad4151254659441d1711bee6c6221ff6f4b",
+        "result_sha256": "715fb477749333c40f1376ff702b7cc39443ae22bbd27df2ddf83ff4feaca647",
+        "dry_run_required": true
+      }
+    }
+  ]
 }

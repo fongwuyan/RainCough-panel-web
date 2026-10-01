@@ -1,0 +1,19 @@
+{
+  "id": "cmp-615.71.09",
+  "title": "CMP 系列 (30HX/40HX/50HX/70HX/90HX/170HX) 魔改补丁 615.71.09",
+  "type": "patch-data",
+  "card_pci_ids": ["10de:1e09", "10de:1f0b", "10de:2082", "10de:20c2", "10de:2189", "10de:220d", "10de:248a"],
+  "card_names": ["CMP 50HX", "CMP 40HX", "CMP 170HX", "CMP 170HX", "CMP 30HX", "CMP 90HX", "CMP 70HX"],
+  "arch": ["Turing", "Ampere"],
+  "driver_version": "615.71.09",
+  "base": {
+    "version": "615.71.09",
+    "download_url": "https://download.nvidia.com/XFree86/Linux-x86_64/615.71.09/NVIDIA-Linux-x86_64-615.71.09.run",
+    "size_b": 529618784,
+    "sha256_expected": "cdceed22bbeb61248d1a6deabc2596673e3a6501698ee71ac8d2fdc28f3b70fe"
+  },
+  "requires": ["dkms", "linux-headers", "build-essential"],
+  "post": ["blacklist-nouveau", "gsp-off", "initramfs"],
+  "reboot_required": true,
+  "notes": "上游 NVIDIA-patcher 的 CMP 行(共 13 个 ID, 本条目列出其中已知型号的 7 个); 本机目标 CMP 30HX(2189)。Turing/Ampere 架构, 建议关闭 GSP 固件。只取该行时补丁输出与上游 linux.sh 逐字节一致(已实测)。"
+}

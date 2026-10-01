@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "p1xx-580.178.04",
+  "target": "kernel/nvidia/nv-kernel.o_binary",
+  "base_sha256": "5269a23ffba19a17fe16f076463e7ad4151254659441d1711bee6c6221ff6f4b",
+  "result_sha256": "715fb477749333c40f1376ff702b7cc39443ae22bbd27df2ddf83ff4feaca647",
+  "blocks": [
+    {
+      "id": "blk-1",
+      "find_hex": "071b0700871b0700c71b0700071c0700091c07",
+      "replace_hex": "ffff0700ffff0700ffff0700ffff0700ffff07",
+      "expect_hits": 1,
+      "note": "P1xx（1 处）"
+    }
+  ]
+}

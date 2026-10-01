@@ -218,6 +218,7 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="输出目录（会写 <out>/drivers/）")
     ap.add_argument("--base-run", help="官方 .run 本地副本，用于填 base 的 size/sha256")
     ap.add_argument("--release-tag", help="（预留）仅路线 B 分卷分发时需要")
+    ap.add_argument("--no-readme", action="store_true", help="不覆盖 <out>/drivers/README.md")
     args = ap.parse_args(argv)
 
     entries_dir = os.path.join(args.src, "entries")
@@ -269,7 +270,8 @@ def main(argv=None):
            "entries": out_entries}
     out_json = os.path.join(args.out, "drivers", "registry.json")
     write_text(out_json, json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
-    write_text(os.path.join(args.out, "drivers", "README.md"), README)
+    if not args.no_readme:
+        write_text(os.path.join(args.out, "drivers", "README.md"), README)
     print("\n清单已写出: %s（%d 个条目，%d 字节）"
           % (out_json, len(out_entries), os.path.getsize(out_json)))
     if base_info:

@@ -264,6 +264,67 @@ def cmd_make(args):
     return 0
 
 
+def cmd_from_patterns(args):
+    """把 `名称|search_hex|replace_hex` 形式的补丁表转成声明式补丁数据。
+
+    上游 NVIDIA-patcher 的 linux.sh 就是一张这样的表（本质是 sed s/search/replace/g），
+    这里把它变成"数据 + 逐块命中数"，并且立刻在真实靶点上做闭环校验。
+    """
+    data = open(args.file, "rb").read()
+    rows = []
+    with open(args.patterns, "r", encoding="utf-8") as f:
+        for ln in f:
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            ln = ln.strip('",')
+            parts = ln.split("|")
+            if len(parts) < 3:
+                continue
+            rows.append((parts[0].strip(), parts[1].strip(), parts[2].strip()))
+
+    only = set(x.strip() for x in (args.only or "").split(",") if x.strip())
+    blocks = []
+    missing = []
+    for name, search, repl in rows:
+        if only and name not in only:
+            continue
+        find = hex2bytes(search, "%s.search" % name)
+        rep = hex2bytes(repl, "%s.replace" % name)
+        if len(find) != len(rep):
+            return die("%s: search/replace 长度不一致（本引擎做等长替换）" % name)
+        hits = find_all(data, find)
+        if not hits:
+            missing.append(name)
+            print("  未命中: %-24s（该驱动版本里没有这个 pattern）" % name)
+            continue
+        # 上游是 sed s///g：替换全部出现处
+        blocks.append({"id": "blk-%d" % (len(blocks) + 1), "find_hex": find.hex(),
+                       "replace_hex": rep.hex(), "expect_hits": len(hits),
+                       "note": "%s（%d 处）" % (name, len(hits))})
+        print("  命中  : %-24s %d 处" % (name, len(hits)))
+
+    if missing and not args.allow_missing:
+        return die("有 pattern 未命中: %s（驱动版本不符或已打过补丁）" % ", ".join(missing))
+    if not blocks:
+        return die("没有任何可用 pattern")
+
+    doc = {"schema": SCHEMA, "id": args.id, "target": args.target,
+           "base_sha256": sha256_bytes(data), "result_sha256": "", "blocks": blocks}
+    norm = validate_patch(dict(doc, result_sha256="0" * 64))
+    out, report = apply_blocks(data, norm, dry_run=True)
+    doc["result_sha256"] = sha256_bytes(out)
+    validate_patch(doc)
+    print("生成补丁: %s（%d 块，%d 字节）" % (args.id, len(blocks), len(json.dumps(doc))))
+    print("  base_sha256  : %s" % doc["base_sha256"])
+    print("  result_sha256: %s" % doc["result_sha256"])
+    print("  总改动       : %d 字节" % sum(r["bytes_changed"] for r in report))
+    if args.out:
+        write_json(args.out, doc)
+        print("已写出: %s (%d 字节)" % (args.out, os.path.getsize(args.out)))
+    return 0
+
+
 def cmd_apply(args):
     doc = read_json(args.patch)
     norm = validate_patch(doc)
@@ -328,6 +389,16 @@ def main(argv=None):
     m.add_argument("--target", default="kernel/nvidia/nv-kernel.o_binary",
                    help="靶点在解包驱动目录内的相对路径（默认闭源内核模块）")
     m.set_defaults(func=cmd_make)
+
+    f = sub.add_parser("from-patterns", help="由 名称|search_hex|replace_hex 补丁表生成补丁数据")
+    f.add_argument("--file", required=True, help="靶点文件（原始未打补丁）")
+    f.add_argument("--patterns", required=True, help="补丁表文本（每行 名称|search|replace）")
+    f.add_argument("--only", help="只取这些名称（逗号分隔）")
+    f.add_argument("--allow-missing", action="store_true", help="未命中的 pattern 不报错")
+    f.add_argument("--id", required=True)
+    f.add_argument("--target", default="kernel/nvidia/nv-kernel.o_binary")
+    f.add_argument("--out", help="输出补丁 JSON")
+    f.set_defaults(func=cmd_from_patterns)
 
     a = sub.add_parser("apply", help="应用补丁（默认 dry-run）")
     a.add_argument("--file", required=True)
