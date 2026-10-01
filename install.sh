@@ -20,8 +20,18 @@
 set -euo pipefail
 
 REPO="fongwuyan/RainCough-panel-web"
-RELEASE_TAG="env-offline-0.1.0"   # 三资产同挂此 Release
-BODY_ASSET="raincough-linux-x86_64-0.1.0.tar.gz"
+# 版本: RC_VERSION 覆盖 > 本脚本所在 tag(发布时写入 PANEL_VERSION) > latest
+PANEL_VERSION="${RC_VERSION:-__PANEL_VERSION__}"
+if [ "$PANEL_VERSION" = "latest" ] || [ -z "$PANEL_VERSION" ]; then
+    TAG=$(curl -fsSL -m 15 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+          | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+    [ -n "$TAG" ] || fail "无法获取最新版本(检查网络或改用 RC_VERSION=<版本>)"
+    PANEL_VERSION="${TAG#v}"
+else
+    TAG="v$PANEL_VERSION"
+fi
+BODY_ASSET="raincough-linux-x86_64-${PANEL_VERSION}.tar.gz"
+RELEASE_TAG="env-offline-0.1.0"   # 环境包资产另挂此 Release
 ENV_ASSET="env-offline-linux-x86_64-0.1.0.tar.gz"
 MIRROR="${RC_MIRROR:-https://gh-proxy.com/https://github.com}"
 UNIT_NAME="${RC_UNIT_NAME:-raincough.service}"   # 单元名可覆盖(测试/多实例隔离)
@@ -153,7 +163,7 @@ fi
 echo
 info "步骤 4/7: 下载面板主体"
 TMPD=$(mktemp -d)
-fetch "$REPO/releases/download/$RELEASE_TAG/$BODY_ASSET" "$TMPD/$BODY_ASSET" || fail "面板主体下载失败"
+fetch "$REPO/releases/download/$TAG/$BODY_ASSET" "$TMPD/$BODY_ASSET" || fail "面板主体下载失败"
 tar tzf "$TMPD/$BODY_ASSET" >/dev/null 2>&1 || fail "面板主体包损坏"
 ok "面板主体就绪: $BODY_ASSET ($(du -h "$TMPD/$BODY_ASSET" | cut -f1))"
 
@@ -196,7 +206,8 @@ $SUDO mkdir -p "$APP_DIR"
 $SUDO tar xzf "$TMPD/$BODY_ASSET" -C "$APP_DIR" --strip-components=1
 $SUDO chmod +x "$APP_DIR/raincough"   # Windows 侧打包可能丢执行位, 防御性补回
 $SUDO chown -R "$RUN_USER:$RUN_USER" "$APP_DIR" 2>/dev/null || true
-ok "面板文件解压至 $APP_DIR"
+[ -f "$APP_DIR/VERSION" ] || printf '%s\n' "$PANEL_VERSION" | $SUDO tee "$APP_DIR/VERSION" >/dev/null
+ok "面板文件解压至 $APP_DIR (版本 $(cat "$APP_DIR/VERSION" 2>/dev/null || echo $PANEL_VERSION))"
 if [ "$INSTALL_TOOLS" = "yes" ]; then
     $SUDO apt-get install -y p7zip-full ffmpeg && ok "功能工具已安装"
 fi
