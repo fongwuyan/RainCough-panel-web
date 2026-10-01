@@ -61,3 +61,12 @@
   - 补丁数据放主面板库 `drivers/`（`registry.json` + `patches/*.patch.json` + `pubkey.asc` + `.asc` 签名），
     KB 级、不占仓库容量；已支持 P104-100 / P106-100（580.178.04）与 CMP 30HX（615.71.09），
     补丁输出与上游 patcher 脚本**逐字节一致（4/4 比对通过）**
+- 安装程序新增「固定静态 IP」：安装时读默认路由网卡的当前地址/网关/上游 DNS，原样写成静态配置
+  （自动识别 NetworkManager / netplan / ifupdown，只动这块网卡；netplan 下会停用旧定义并禁止 cloud-init
+  重建网卡配置；ifupdown 下会注释主文件里原有的 `inet dhcp` 段）
+  - 改前备份到 `/root/raincough-net-backup-<时间戳>/` 并打印回滚命令；**只写配置不立即重启网络**
+    （下次重启生效，安装会话不会被踢掉）；写完先 `netplan generate` 校验，**失败自动回滚**（含把报错存进备份）
+  - 已是静态的自动跳过（`RC_NET_FORCE=1` 可强写）；开关 `RC_NET_STATIC=yes|no|dry`、`RC_NET_DRYRUN=1`、`RC_ONLY_NET=1`
+  - 实测（Ubuntu 22.04 测试机，netplan+DHCP）：写入后重启，`ip route` 变为
+    `default via 192.168.122.1 dev ens3 proto static`（不再是 dhcp），SSH/面板正常；
+    故意塞入语法错误的 netplan 文件时，`generate` 报错 → 自动回滚 → 我们的文件删除、原定义恢复

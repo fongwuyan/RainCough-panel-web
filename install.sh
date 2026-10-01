@@ -10,7 +10,14 @@
 #  资产下载默认走 gh-proxy 镜像, 可用 RC_MIRROR=https://github.com 覆盖)
 #
 # 流程: 1 yes/no 确认 -> 2 环境检查 -> 3 下载缺失环境包并安装 -> 4 下载面板主体
-#       -> 5 输入信息 -> 6 安装 -> 7 完成
+#       -> 5 输入信息(含可选的"把当前 DHCP 地址固定为静态") -> 6 安装 + 固定静态 IP -> 7 完成
+#
+# 固定静态 IP(一步到位, 避免面板地址漂移): 安装时读默认路由网卡的当前地址/网关/上游 DNS,
+#   原样写成静态配置(NetworkManager / netplan / ifupdown 自动识别, 只动这块网卡),
+#   改前备份到 /root/raincough-net-backup-<时间戳>, 并打印回滚命令;
+#   ★只写配置、默认不立即重启网络 —— 静态配置在下次重启后生效, 安装会话不会被踢掉。
+#   相关开关: RC_NET_STATIC=yes|no|dry(默认问一次, 回车=yes) RC_NET_FORCE=1(已是静态也强写)
+#             RC_NET_DRYRUN=1(只看将写什么) RC_ONLY_NET=1(只跑这一步)
 #
 # 范围: 只装面板主体 = 主程序 + 内置功能(工作台/文件管理/终端/系统扩展/插件/设置/开发文档)。
 #       不含插件, 也不含系统扩展: 插件在面板内【插件】页安装;
@@ -52,6 +59,13 @@ confirm_yes() {   # 必须输入 yes 才返回 0
     a="$(read_tty)"
     case "$a" in yes|YES|Yes|y|Y) return 0 ;; *) return 1 ;; esac
 }
+confirm_default() {   # $1 提示 $2 默认值(yes/no); 回车取默认
+    local a
+    printf '%s [%s]: ' "$1" "$2"
+    a="$(read_tty)"
+    a="${a:-$2}"
+    case "$a" in yes|YES|Yes|y|Y) return 0 ;; *) return 1 ;; esac
+}
 ask_default() {   # $1 提示 $2 默认值 -> 输出答案; 提示走 stderr(避免被 $( ) 捕获吞掉)
     local a
     printf '%s [%s]: ' "$1" "$2" >&2
@@ -75,6 +89,220 @@ pip_install() {   # $@ = 参数; 以特权系统级安装(服务以 RUN_USER 运
         || $SUDO python3 -m pip install --no-input --disable-pip-version-check "$@"
 }
 
+# ---------- 静态 IP 固定(可选): 把 DHCP 拿到的地址原样写成静态配置 ----------
+# 设计要点:
+#   · 只动"默认路由所在的那块网卡", 其它网卡一律不碰
+#   · 只写配置, 默认【不】立即重启网络 —— 装到一半把自己的 SSH 踢掉是最蠢的故障;
+#     静态配置在下次重启/重新激活时生效, 当前连接不受影响
+#   · 改前备份到 $NET_BAK, 并打印回滚命令
+#   · 已经是静态的直接跳过
+NET_BAK=""
+NET_IFACE=""; NET_CIDR=""; NET_GW=""; NET_DNS=""; NET_STACK=""; NET_DHCP=""
+
+net_mask() {   # 24 -> 255.255.255.0
+    local p="$1" i m=0
+    for i in 1 2 3 4; do
+        if [ "$p" -ge 8 ]; then m=$((m + 255)); p=$((p - 8))
+        elif [ "$p" -gt 0 ]; then m=$((m + 256 - (1 << (8 - p)))); p=0; fi
+        if [ "$i" -lt 4 ]; then printf '%s.' "$m"; else printf '%s' "$m"; fi
+    done
+}
+
+net_upstream_dns() {   # 只取真实上游 DNS, 跳过 systemd-resolved 的 127.0.0.53 桩
+    local f
+    for f in /run/systemd/resolve/resolv.conf /etc/resolv.conf; do
+        [ -f "$f" ] || continue
+        awk '/^nameserver/{print $2}' "$f" 2>/dev/null | grep -Ev '^127\.|^::1$' | head -2 | tr '\n' ' '
+    done
+}
+
+net_detect() {
+    NET_IFACE=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
+    [ -n "$NET_IFACE" ] || return 1
+    NET_CIDR=$(ip -4 -o addr show dev "$NET_IFACE" scope global 2>/dev/null | awk '{print $4; exit}')
+    NET_GW=$(ip -4 route show default 2>/dev/null | awk '{print $3; exit}')
+    NET_DNS=$(net_upstream_dns)
+    [ -n "$NET_CIDR" ] && [ -n "$NET_GW" ] || return 1
+
+    if command -v nmcli >/dev/null 2>&1 \
+       && nmcli -t -f DEVICE,STATE device 2>/dev/null | grep -q "^${NET_IFACE}:connected"; then
+        NET_STACK=nm
+    elif ls /etc/netplan/*.yaml >/dev/null 2>&1; then
+        NET_STACK=netplan
+    elif [ -f /etc/network/interfaces ]; then
+        NET_STACK=ifupdown
+    else
+        NET_STACK=unknown
+    fi
+
+    case "$NET_STACK" in
+      nm)
+        local con meth
+        con=$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | awk -F: -v d="$NET_IFACE" '$2==d{print $1; exit}')
+        meth=$(nmcli -g ipv4.method con show "$con" 2>/dev/null || echo "")
+        NET_DHCP=$([ "$meth" = "auto" ] && echo yes || echo no) ;;
+      netplan)
+        # 注意: /etc/netplan/*.yaml 常是 600 root —— 必须用 $SUDO 读, 否则普通用户读不到会误判成"非 DHCP"
+        if $SUDO grep -hE "^[[:space:]]+dhcp4:[[:space:]]*(true|yes)" /etc/netplan/*.yaml >/dev/null 2>&1; then
+            NET_DHCP=yes
+        else
+            NET_DHCP=no
+        fi ;;
+      ifupdown)
+        if $SUDO grep -rhE "^[[:space:]]*iface[[:space:]]+$NET_IFACE[[:space:]]+inet[[:space:]]+dhcp" \
+             /etc/network/interfaces /etc/network/interfaces.d/ >/dev/null 2>&1; then
+            NET_DHCP=yes
+        else
+            NET_DHCP=no
+        fi ;;
+      *) NET_DHCP=unknown ;;
+    esac
+    return 0
+}
+
+net_rollback_hint() {
+    echo "  回滚: 恢复 $NET_BAK/ 下的备份并删掉 raincough 写的配置, 然后:"
+    case "$NET_STACK" in
+      nm)       echo "        nmcli con mod <连接名> ipv4.method auto && nmcli con up <连接名>" ;;
+      netplan)  echo "        rm -f /etc/netplan/99-raincough-static.yaml && mv /etc/netplan/<备份>.raincough-disabled /etc/netplan/<备份> && netplan generate" ;;
+      ifupdown) echo "        rm -f /etc/network/interfaces.d/raincough-$NET_IFACE.cfg && 还原 /etc/network/interfaces" ;;
+    esac
+}
+
+net_write_static() {
+    if [ "$NET_DHCP" != "yes" ] && [ "${RC_NET_FORCE:-0}" != "1" ]; then
+        info "当前不是 DHCP(状态=$NET_DHCP), 无需固定为静态 —— 跳过(要强制写可设 RC_NET_FORCE=1)"
+        return 0
+    fi
+    if [ "${RC_NET_DRYRUN:-0}" = "1" ]; then
+        echo "  [dry-run] 栈=$NET_STACK 网卡=$NET_IFACE 地址=$NET_CIDR 网关=$NET_GW DNS=${NET_DNS:-无}"
+        case "$NET_STACK" in
+          netplan)  echo "  [dry-run] 将写 /etc/netplan/99-raincough-static.yaml, 并把现有网卡定义改名为 *.raincough-disabled" ;;
+          ifupdown) echo "  [dry-run] 将写 /etc/network/interfaces.d/raincough-$NET_IFACE.cfg, 并注释 /etc/network/interfaces 里的原 dhcp 段" ;;
+          nm)       echo "  [dry-run] 将 nmcli con mod <连接> ipv4.method manual ipv4.addresses $NET_CIDR ipv4.gateway $NET_GW" ;;
+        esac
+        echo "  [dry-run] 备份目录将是 /root/raincough-net-backup-<时间戳>"
+        return 0
+    fi
+    local ts; ts=$(date +%Y%m%d-%H%M%S)
+    NET_BAK="/root/raincough-net-backup-$ts"
+    $SUDO mkdir -p "$NET_BAK"
+    local ip="${NET_CIDR%%/*}" pfx="${NET_CIDR##*/}" mask
+    mask=$(net_mask "$pfx")
+
+    case "$NET_STACK" in
+      nm)
+        local con
+        con=$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | awk -F: -v d="$NET_IFACE" '$2==d{print $1; exit}')
+        [ -n "$con" ] || { warn "找不到 $NET_IFACE 的 NM 连接, 跳过"; return 1; }
+        nmcli con show "$con" > /tmp/rc-nm-$$.txt 2>/dev/null || true
+        $SUDO cp -a /tmp/rc-nm-$$.txt "$NET_BAK/nm-$con.txt" 2>/dev/null || true
+        rm -f /tmp/rc-nm-$$.txt
+        $SUDO nmcli con mod "$con" ipv4.method manual ipv4.addresses "$NET_CIDR" ipv4.gateway "$NET_GW" || return 1
+        if [ -n "$NET_DNS" ]; then
+            $SUDO nmcli con mod "$con" ipv4.dns "$(echo $NET_DNS | tr ' ' ',')" ipv4.ignore-auto-dns yes || true
+        fi
+        ok "已把 NetworkManager 连接 '$con' 改为静态(下次激活生效)"
+        ;;
+      netplan)
+        # 全程用 $SUDO 读写: /etc/netplan/*.yaml 常是 600 root, 普通用户 grep 读不到会漏掉旧定义,
+        # 而旧定义与我们要写的新文件同时存在时 netplan 会判冲突。
+        local f base disabled=() errf
+        for f in /etc/netplan/*.yaml; do
+            case "$f" in *99-raincough-static.yaml) continue ;; esac
+            if $SUDO grep -qE "^[[:space:]]+${NET_IFACE}:" "$f" 2>/dev/null; then
+                base=$(basename "$f")
+                $SUDO cp -a "$f" "$NET_BAK/$base"
+                if $SUDO mv "$f" "$f.raincough-disabled"; then
+                    disabled+=("$f|$base")
+                    echo "  已停用旧定义: $f -> $f.raincough-disabled"
+                fi
+            fi
+        done
+        $SUDO tee /etc/netplan/99-raincough-static.yaml >/dev/null <<EOF
+# 由 RainCough 安装程序写入: 把安装时的地址固定为静态(备份见 $NET_BAK)
+network:
+  version: 2
+  ethernets:
+    $NET_IFACE:
+      dhcp4: false
+      dhcp6: false
+      addresses: [$NET_CIDR]
+      routes:
+        - to: default
+          via: $NET_GW
+EOF
+        if [ -n "$NET_DNS" ]; then
+            $SUDO tee -a /etc/netplan/99-raincough-static.yaml >/dev/null <<EOF
+      nameservers:
+        addresses: [$(echo $NET_DNS | tr ' ' ',' | sed 's/,$//')]
+EOF
+        fi
+        $SUDO chmod 600 /etc/netplan/99-raincough-static.yaml
+        # 让 cloud-init 别再重建网卡配置(否则它可能把我们停用的那份写回来)
+        if [ -d /etc/cloud ]; then
+            $SUDO mkdir -p /etc/cloud/cloud.cfg.d
+            printf 'network: {config: disabled}\n' | $SUDO tee /etc/cloud/cloud.cfg.d/99-raincough-disable-network-config.cfg >/dev/null
+            echo "  已写入 cloud-init 禁管网络: /etc/cloud/cloud.cfg.d/99-raincough-disable-network-config.cfg"
+        fi
+        errf=$(mktemp)     # 不能直接重定向进 /root 下的备份目录(普通用户无权创建)
+        if $SUDO netplan generate 2>"$errf"; then
+            ok "netplan 校验通过(只生成, 未应用到当前连接)"
+            rm -f "$errf"
+        else
+            warn "netplan generate 报错, 正在回滚:"
+            cat "$errf" >&2 || true
+            $SUDO cp -a "$errf" "$NET_BAK/netplan-generate.err" 2>/dev/null || true
+            rm -f "$errf"
+            $SUDO rm -f /etc/netplan/99-raincough-static.yaml
+            local pair orig b
+            for pair in ${disabled[@]+"${disabled[@]}"}; do
+                orig="${pair%%|*}"; b="${pair##*|}"
+                if $SUDO mv "$orig.raincough-disabled" "$orig" 2>/dev/null; then
+                    echo "  已恢复: $orig"
+                else
+                    $SUDO cp -a "$NET_BAK/$b" "$orig" && echo "  已从备份恢复: $orig"
+                fi
+            done
+            return 1
+        fi
+        ;;
+      ifupdown)
+        local f base
+        for f in /etc/network/interfaces /etc/network/interfaces.d/*; do
+            [ -f "$f" ] || continue
+            grep -qE "^[[:space:]]*iface[[:space:]]+${NET_IFACE}[[:space:]]" "$f" 2>/dev/null || continue
+            base=$(echo "$f" | tr '/' '_')
+            $SUDO cp -a "$f" "$NET_BAK/$base"
+            if grep -qE "^[[:space:]]*iface[[:space:]]+${NET_IFACE}[[:space:]]+inet[[:space:]]+dhcp" "$f"; then
+                $SUDO awk -v dev="$NET_IFACE" '
+                    $1=="iface" && $2==dev { skip=1; print "# [raincough] 已改为静态, 原 dhcp 段被注释"; print "# "$0; next }
+                    $1=="iface" { skip=0 }
+                    skip { print "# "$0; next }
+                    { print }' "$f" > /tmp/rc-ifaces.$$ && $SUDO cp /tmp/rc-ifaces.$$ "$f" && rm -f /tmp/rc-ifaces.$$
+                echo "  已在 $f 中注释 $NET_IFACE 的原 dhcp 段(备份 $NET_BAK/$base)"
+            fi
+        done
+        $SUDO tee /etc/network/interfaces.d/raincough-$NET_IFACE.cfg >/dev/null <<EOF
+# 由 RainCough 安装程序写入: 把安装时的地址固定为静态(备份见 $NET_BAK)
+auto $NET_IFACE
+iface $NET_IFACE inet static
+    address $ip
+    netmask $mask
+    gateway $NET_GW
+EOF
+        [ -n "$NET_DNS" ] && $SUDO tee -a /etc/network/interfaces.d/raincough-$NET_IFACE.cfg >/dev/null <<EOF
+    dns-nameservers $(echo $NET_DNS | sed 's/ *$//')
+EOF
+        ok "已写入 /etc/network/interfaces.d/raincough-$NET_IFACE.cfg(下次启动生效)"
+        ;;
+      *)
+        warn "无法识别网络栈(既不是 NetworkManager/netplan/ifupdown), 跳过固定 IP"
+        return 1 ;;
+    esac
+    return 0
+}
+
 # ---------- 版本解析(必须在 fail/info 定义之后) ----------
 # 只认 x.y.z 形态的内嵌版本; 占位符未替换/为空/latest 一律解析最新 Release。
 if printf '%s' "$RC_PANEL_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -87,6 +315,17 @@ else
     PANEL_VERSION="${TAG#v}"
 fi
 BODY_ASSET="raincough-linux-x86_64-${PANEL_VERSION}.tar.gz"
+
+# 只跑"固定静态 IP"这一步(便于脚本化/自测): RC_ONLY_NET=1 [RC_NET_DRYRUN=1]
+if [ "${RC_ONLY_NET:-0}" = "1" ]; then
+    SUDO=""
+    if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+    net_detect || fail "无法识别默认路由网卡"
+    info "网卡=$NET_IFACE 地址=$NET_CIDR 网关=$NET_GW DNS=${NET_DNS:-无} 栈=$NET_STACK 当前=$([ "$NET_DHCP" = yes ] && echo DHCP || echo 非DHCP)"
+    net_write_static || fail "静态 IP 写入失败"
+    echo "${C_G}[OK]${C_0} 完成"
+    exit 0
+fi
 
 echo
 echo "${C_C}=======================================================${C_0}"
@@ -199,6 +438,28 @@ else
 fi
 echo "  摘要: 目录=$APP_DIR 用户=$RUN_USER 端口=$PORT 功能工具=$INSTALL_TOOLS"
 
+# 静态 IP 固定(可选): 把当前 DHCP 分配到的地址原样写成静态配置, 免得以后地址漂移
+DO_STATIC=no
+if net_detect; then
+    echo
+    echo "  网络: 网卡=$NET_IFACE 地址=$NET_CIDR 网关=$NET_GW DNS=${NET_DNS:-未取到} 栈=$NET_STACK 当前=$([ "$NET_DHCP" = yes ] && echo DHCP || echo 静态/未知)"
+    case "${RC_NET_STATIC:-ask}" in
+      yes) DO_STATIC=yes ;;
+      no)  DO_STATIC=no ;;
+      dry) DO_STATIC=dry ;;
+      *)
+        if [ "$NET_DHCP" = yes ]; then
+            if confirm_default "是否把上面这个地址固定为静态配置?(改前备份, 默认不立即重启网络)" "yes"; then
+                DO_STATIC=yes
+            fi
+        else
+            info "当前不是 DHCP(已是静态或未知), 无需固定"
+        fi ;;
+    esac
+else
+    warn "未能识别默认路由网卡, 跳过固定 IP"
+fi
+
 # ---------- 步骤 6: 安装 ----------
 echo
 info "步骤 6/7: 安装"
@@ -240,6 +501,21 @@ EOF
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now "$UNIT_NAME"
 ok "systemd 服务已注册并启动 ($UNIT_NAME)"
+
+# ---------- 步骤 6b: 固定静态 IP(可选) ----------
+if [ "$DO_STATIC" = "yes" ] || [ "$DO_STATIC" = "dry" ]; then
+    echo
+    info "步骤 6b/7: 固定静态 IP($DO_STATIC)"
+    if net_write_static; then
+        if [ "$DO_STATIC" = "yes" ]; then
+            ok "静态配置已写入(下次重启/重新激活网络后生效, 当前连接不动)"
+            LAN_IP="$(echo "$NET_CIDR" | cut -d/ -f1)"
+            net_rollback_hint
+        fi
+    else
+        warn "固定静态 IP 未完成(已保持原状, 不影响面板使用)"
+    fi
+fi
 
 # ---------- 步骤 7: 完成 ----------
 echo
