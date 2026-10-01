@@ -2,7 +2,7 @@
   "name": "drivers",
   "label": "驱动",
   "version": "1.0.0",
-  "description": "硬件识别、内核模块与 NVIDIA 矿卡魔改驱动（P104-100 / P106-100 / CMP 30HX）",
+  "description": "硬件识别、内核模块与 NVIDIA 矿卡魔改驱动（P104-100 / P106-100 / CMP 30HX），含容器直通",
   "author": "RainCough",
   "icon": "DV",
   "entry": "assets/extension.js",
@@ -10,55 +10,93 @@
   "backend": {
     "lang": "python",
     "exec": ["python3", "server.py"],
-    "capabilities": ["linux", "apt", "kmod", "nvidia", "systemd"]
+    "capabilities": ["linux", "apt", "kmod", "nvidia", "systemd", "gpg", "docker"]
   },
   "interfaces": [
     {
       "id": "drivers.gpu",
       "visibility": "all",
       "version": "1",
-      "description": "NVIDIA 卡专项体检: 型号/架构/算力/驱动来源/输出接口/链路/GSP/是否矿卡/匹配到的补丁条目/版本偏好",
+      "description": "NVIDIA 卡专项体检: 型号/架构/算力/驱动来源/输出接口/链路/GSP/是否矿卡/匹配补丁条目/版本偏好/容器直通状态",
       "input": { "type": "object", "properties": { "refresh": { "type": "boolean" } } },
       "output": { "type": "object", "properties": {
-        "cards": { "type": "array" }, "display_provider": { "type": "object" },
-        "conflicts": { "type": "object" }, "secure_boot": { "type": "boolean" },
-        "requirements": { "type": "object" }, "collected_ms": { "type": "integer" } } }
+        "cards": { "type": "array" }, "container": { "type": "object" }, "conflicts": { "type": "object" },
+        "secure_boot": { "type": "boolean" }, "requirements": { "type": "object" },
+        "collected_ms": { "type": "integer" } } }
     },
     {
       "id": "drivers.repo",
       "visibility": "all",
       "version": "1",
-      "description": "补丁清单来源状态与条目（主面板库 drivers/registry.json，阶梯: 直连 raw → gh-proxy 镜像 → 本地目录）",
+      "description": "补丁清单来源状态与条目（主面板库 drivers/registry.json；直连 → gh-proxy 镜像 → 本地目录；GPG 验签）",
       "input": { "type": "object", "properties": { "refresh": { "type": "boolean" } } },
       "output": { "type": "object", "properties": {
-        "used": { "type": "string" }, "branch": { "type": "string" }, "fetched_at": { "type": "integer" },
-        "entries": { "type": "array" }, "sources": { "type": "array" }, "error": { "type": "string" } } }
+        "used": { "type": "string" }, "gpg": { "type": "object" }, "entries": { "type": "array" },
+        "sources": { "type": "array" }, "error": { "type": "string" } } }
     },
     {
       "id": "drivers.repo.config",
       "visibility": "main",
       "version": "1",
-      "description": "配置补丁清单来源（分支/镜像/本地目录/令牌）；令牌只写不读",
+      "description": "配置补丁清单来源（分支/镜像/本地目录/令牌/签名校验与 pin 指纹）；令牌只写不读",
       "input": { "type": "object", "properties": {
-        "branch": { "type": "string" }, "mirror": { "type": "boolean" },
-        "local_dir": { "type": "string" }, "token": { "type": "string" },
-        "clear_token": { "type": "boolean" } } },
+        "branch": { "type": "string" }, "mirror": { "type": "boolean" }, "local_dir": { "type": "string" },
+        "token": { "type": "string" }, "clear_token": { "type": "boolean" },
+        "gpg": { "type": "boolean" }, "gpg_fpr": { "type": "string" } } },
       "output": { "type": "object", "properties": {
-        "branch": { "type": "string" }, "mirror": { "type": "boolean" },
-        "local_dir": { "type": "string" }, "token_set": { "type": "boolean" } } }
+        "branch": { "type": "string" }, "mirror": { "type": "boolean" }, "local_dir": { "type": "string" },
+        "token_set": { "type": "boolean" }, "gpg": { "type": "boolean" }, "gpg_fpr": { "type": "string" } } }
     },
     {
       "id": "drivers.install",
       "visibility": "main",
       "version": "1",
-      "description": "两阶段: precheck 出计划(不发命令) → apply 起任务(本构建 P5-1 只提供 precheck)",
+      "description": "两阶段安装: precheck 出计划(不发命令) → apply 起异步任务；kind=mod(魔改驱动) / container-toolkit(容器直通)",
       "input": { "type": "object", "properties": {
-        "mode": { "type": "string" }, "entry_id": { "type": "string" }, "kind": { "type": "string" },
+        "mode": { "type": "string" }, "kind": { "type": "string" }, "entry_id": { "type": "string" },
         "plan_id": { "type": "string" }, "confirm": { "type": "object" } } },
       "output": { "type": "object", "properties": {
-        "plan_id": { "type": "string" }, "entry_id": { "type": "string" },
-        "base": { "type": "object" }, "patch": { "type": "object" }, "prereq": { "type": "array" },
-        "requires_confirm": { "type": "array" } } }
+        "plan_id": { "type": "string" }, "task_id": { "type": "string" }, "base": { "type": "object" },
+        "patch": { "type": "object" }, "prereq": { "type": "array" }, "commands": { "type": "array" },
+        "requires_confirm": { "type": "array" }, "typed_expect": { "type": "string" } } }
+    },
+    {
+      "id": "drivers.task",
+      "visibility": "all",
+      "version": "1",
+      "description": "任务状态轮询: 进度/命令流(rc/耗时/输出尾)/补丁报告/结果；不带 id 返回 active + 最近任务",
+      "input": { "type": "object", "properties": { "id": { "type": "string" } } },
+      "output": { "type": "object", "properties": {
+        "state": { "type": "string" }, "commands": { "type": "array" }, "active": { "type": "object" },
+        "recent": { "type": "array" } } }
+    },
+    {
+      "id": "drivers.cancel",
+      "visibility": "main",
+      "version": "1",
+      "description": "取消未进入安装阶段的任务（进入安装后返回 10009）",
+      "input": { "type": "object", "properties": { "id": { "type": "string" } } },
+      "output": { "type": "object", "properties": { "cancelled": { "type": "boolean" }, "state": { "type": "string" } } }
+    },
+    {
+      "id": "drivers.revert",
+      "visibility": "main",
+      "version": "1",
+      "description": "三条退路: uninstall(官方卸载) / deb(回 Debian 包) / repatch(回补丁前，用 .orig-* 备份)",
+      "input": { "type": "object", "properties": {
+        "mode": { "type": "string" }, "action": { "type": "string" },
+        "plan_id": { "type": "string" }, "confirm": { "type": "object" } } },
+      "output": { "type": "object", "properties": {
+        "plan_id": { "type": "string" }, "task_id": { "type": "string" }, "commands": { "type": "array" } } }
+    },
+    {
+      "id": "drivers.log",
+      "visibility": "all",
+      "version": "1",
+      "description": "审计日志（时间/接口/动作/结果/命令与退出码/备份 id）",
+      "input": { "type": "object", "properties": { "limit": { "type": "integer" }, "q": { "type": "string" } } },
+      "output": { "type": "object", "properties": {
+        "total": { "type": "integer" }, "items": { "type": "array" }, "file": { "type": "string" } } }
     }
   ]
 }

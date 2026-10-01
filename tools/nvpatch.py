@@ -214,9 +214,8 @@ def make_blocks(orig, patched):
                 find, hits, span = cand, cnt, (lo, hi)
                 break
         if find is None:
-            lo = max(0, s - CONTEXT_STEPS[-1])
-            hi = min(len(orig), e + CONTEXT_STEPS[-1])
-            find, hits, span = orig[lo:hi], len(find_all(orig, orig[lo:hi])), (lo, hi)
+            # 周期性数据里任何窗口都可能多次出现 → 退化到整文件（必然唯一；命中数=1）
+            find, hits, span = orig, 1, (0, len(orig))
         lo, hi = span
         repl = patched[lo:hi]
         blocks.append({

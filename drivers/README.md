@@ -16,6 +16,27 @@ drivers/
 扩展取清单的来源阶梯：主面板库 raw（`raw.githubusercontent.com`）→ gh-proxy 镜像 →
 本地目录 `<面板安装目录>/driver-src/drivers`（离线/手放）→（仅私有化时）令牌。
 
+## 签名（GPG，扩展默认强制校验）
+
+`registry.json` 用 detached armored 签名保护；扩展取清单时会**同时取签名与公钥**，用临时 keyring 验签，
+并强制签名指纹等于 pin 住的指纹（指纹不符或签名损坏 → 拒绝使用该来源，不给任何条目）。
+
+| 项 | 值 |
+|---|---|
+| 签名指纹（pin） | `0A2352AEAD9DC527DB9339635F36C10321023648` |
+| 签名文件 | `drivers/registry.json.asc` |
+| 公钥（随仓库分发） | `drivers/pubkey.asc` |
+| 私钥位置 | **不入库**；生成/签名机上的 `GNUPGHOME`（默认 `/home/f/nvdl/gpghome`） |
+
+改了 `registry.json` 之后**必须重新签名**，否则扩展会拒绝加载：
+
+```
+GNUPGHOME=/home/f/nvdl/gpghome bash tools/sign-driver-registry.sh
+```
+
+扩展侧可在界面「配置」里关掉签名校验或改 pin 指纹（`drivers.repo.config` 的 `gpg` / `gpg_fpr`）；
+目标机器需要 `gnupg`（Debian/Ubuntu 默认都有 gpg）。
+
 ## 当前条目
 
 | 条目 | 适用卡（PCI ID） | 驱动版本 | 靶点 | 官方 `.run` | 补丁结果 sha256 |
