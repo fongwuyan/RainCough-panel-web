@@ -180,6 +180,13 @@ func TestExtParseRegistry(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].Name != "tasks" {
 		t.Fatalf("数组式清单解析失败: %v %+v", err, list)
 	}
+	// 空清单是合法结果(仓库里暂时没有扩展包): 要显示"没有可安装的扩展", 不能报格式错误
+	for _, raw := range []string{`{"extensions":[]}`, `[]`} {
+		list, err = parseExtRegistry([]byte(raw))
+		if err != nil || list == nil || len(list) != 0 {
+			t.Fatalf("空清单解析失败(%s): %v %+v", raw, err, list)
+		}
+	}
 	if _, err := parseExtRegistry([]byte(`not json`)); err == nil {
 		t.Fatal("非法内容应报错")
 	}

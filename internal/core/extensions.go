@@ -223,13 +223,15 @@ func (e *ExtStore) ghRegistry() ([]Extension, error) {
 }
 
 // parseExtRegistry 兼容 {"extensions":[...]} 与裸数组两种写法。
+// 空清单({"extensions":[]})是合法结果 —— 仓库里暂时没有扩展包时要显示"没有可安装的扩展",
+// 不能报"注册表格式无法识别"(那会让页面显示成"仓库不可用")。
 func parseExtRegistry(raw []byte) ([]Extension, error) {
 	var f extRegistryFile
-	if err := json.Unmarshal(raw, &f); err == nil && len(f.Extensions) > 0 {
+	if err := json.Unmarshal(raw, &f); err == nil && f.Extensions != nil {
 		return f.Extensions, nil
 	}
 	var arr []Extension
-	if err := json.Unmarshal(raw, &arr); err == nil {
+	if err := json.Unmarshal(raw, &arr); err == nil && arr != nil {
 		return arr, nil
 	}
 	return nil, fmt.Errorf("注册表格式无法识别")
