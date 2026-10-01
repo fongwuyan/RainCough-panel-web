@@ -2,7 +2,6 @@
 import { ref } from 'vue'
 import { useUi } from '../stores/ui'
 import StoreRepoSettings from './store/StoreRepoSettings.vue'
-import StoreProject from './store/StoreProject.vue'
 
 // 插件设置(已并入插件页)之外的全局配置都在这里:
 // 外观 / 仓库配置(插件市场与面板仓库) / 面板更新
@@ -13,7 +12,6 @@ const activeCat = ref('appearance')
 const navItems = [
   { key: 'appearance', label: '外观' },
   { key: 'repo', label: '仓库配置' },
-  { key: 'project', label: '面板更新' },
 ]
 </script>
 
@@ -49,7 +47,6 @@ const navItems = [
           </div>
 
           <StoreRepoSettings v-else-if="activeCat === 'repo'" />
-          <StoreProject v-else-if="activeCat === 'project'" />
         </div>
       </div>
     </div>

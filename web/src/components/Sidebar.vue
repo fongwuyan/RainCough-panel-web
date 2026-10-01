@@ -221,4 +221,20 @@ function extActive(x) { return route.name === 'ext-view' && String(route.params.
 .sys-sub .label { font-size: 13px; }
 .sys-sub .desc { font-size: 10px; }
 .sys-sub.active { border-left: 2px solid var(--accent); }
+.upd-btn {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.upd-btn:hover { color: var(--accent); border-color: var(--accent); }
 </style>
