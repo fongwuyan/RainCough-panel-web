@@ -271,6 +271,9 @@ export const api = {
   extUpdate: (name) => req('POST', '/api/ext/update', { name }),
   extRemove: (name) => req('POST', '/api/ext/remove', { name }),
   extEntry: (name) => `/api/ext/${encodeURIComponent(name)}/assets/extension.js`,
+  // 扩展自带后端(清单里声明 backend 的扩展): 状态查询与重启
+  extBackend: () => req('GET', '/api/ext/backend'),
+  extBackendRestart: (name) => req('POST', '/api/ext/backend/restart', { name }),
   // 已删除 storeProjectUpdateInfo / storeProjectCheck / storeProjectInstall /
   // storeProjectStatus: 后端这几处只回伪造的 current=latest=v1.0.0 与空 env, 或早已
   // 过时的"面板更新只能走部署脚本"说法。面板更新已由 /api/panel/update/* 实现

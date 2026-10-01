@@ -19,6 +19,7 @@ const registry = ref([])
 const regSource = ref('')     // github | local | ''
 const regLoading = ref(false)
 const regError = ref('')
+const backends = ref({})      // 扩展名 -> 后端状态(仅声明了 backend 的扩展有)
 const notice = ref('')
 const noticeOk = ref(true)
 const busy = ref('')
@@ -70,10 +71,36 @@ async function loadRegistry() {
 async function refresh() {
   refreshing.value = true
   try {
-    await Promise.all([loadInstalled(), loadRegistry()])
+    await Promise.all([loadInstalled(), loadRegistry(), loadBackends()])
   } finally {
     refreshing.value = false
   }
+}
+
+// 扩展自带后端: 状态只对声明了 backend 的扩展查(纯前端扩展不查)
+async function loadBackends() {
+  const any = extensions.value.some((x) => x.backend)
+  if (!any) { backends.value = {}; return }
+  try {
+    const d = await api.extBackend()
+    backends.value = d.backends || {}
+  } catch (e) { backends.value = {} }
+}
+function bstate(name) { return backends.value[name] || {} }
+function backendText(x) {
+  const st = bstate(x.name)
+  const run = st.active ? '运行中' : (st.unit_file ? '已停止' : '未启动')
+  return ((x.backend && x.backend.exec) || []).join(' ') + ' · ' + run
+}
+async function restartBackend(x) {
+  busy.value = x.name
+  try {
+    await api.extBackendRestart(x.name)
+    flash(`已重启 ${x.label || x.name} 的后端`)
+    await loadBackends()
+  } catch (e) {
+    flash('重启后端失败: ' + e.message, false)
+  } finally { busy.value = '' }
 }
 
 async function storeTaskIds() {
@@ -123,7 +150,7 @@ async function doInstall(ext, verb) {
     else await api.extInstall(name)
     const ok = await watchTask(name, verb, before)
     if (ok) {
-      await Promise.all([loadInstalled(), loadRegistry()])
+      await Promise.all([loadInstalled(), loadRegistry(), loadBackends()])
       if (verb !== '更新') flash(`已安装 ${ext.label || name}, 可在侧边栏或本页打开`)
     }
   } catch (e) {
@@ -138,7 +165,7 @@ async function doRemove(ext) {
   try {
     await api.extRemove(name)
     flash(`已卸载 ${ext.label || name}`)
-    await Promise.all([loadInstalled(), loadRegistry()])
+    await Promise.all([loadInstalled(), loadRegistry(), loadBackends()])
     // 正在看这个扩展的页面时, 卸载后退回本页
     if (route.name === 'ext-view' && String(route.params.name) === name) router.push('/ext')
   } catch (e) {
@@ -184,6 +211,10 @@ onMounted(refresh)
               <span v-if="!x.has_assets" class="ext-bad">产物缺失</span>
             </div>
             <div v-if="x.description" class="ext-desc">{{ x.description }}</div>
+            <div v-if="x.backend" class="ext-desc">后端: {{ backendText(x) }}</div>
+            <div v-if="x.interfaces && x.interfaces.length" class="ext-desc">
+              提供的接口: {{ x.interfaces.map((i) => i.id).join(' / ') }}
+            </div>
           </div>
           <span v-if="updOf(x)" class="tag-chip tag-chip-sm"
                 style="border-color:var(--accent);color:var(--accent);">有更新 → {{ regVerOf(x.name) }}</span>
@@ -192,6 +223,7 @@ onMounted(refresh)
             <button v-if="updOf(x)" class="btn btn-sm" :disabled="!!busy" @click="doInstall(x, '更新')">
               {{ busy === x.name ? '更新中…' : '更新' }}
             </button>
+            <button v-if="x.backend" class="btn btn-sm" :disabled="!!busy" @click="restartBackend(x)">重启后端</button>
             <button class="btn btn-sm btn-danger" :disabled="!!busy" @click="doRemove(x)">卸载</button>
           </div>
         </div>

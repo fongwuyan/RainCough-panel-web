@@ -329,14 +329,52 @@ func (x *PluginX) recordCall(it *Iface, ms int64, err error) {
 // ---- 工具 ----
 
 func (x *PluginX) loadManifestFor(name string) (*ManifestV4, error) {
-	if x.opts.PluginsDir == "" {
-		return nil, nil
+	if x.opts.PluginsDir != "" {
+		dir := filepath.Join(x.opts.PluginsDir, name)
+		if _, err := os.Stat(dir); err == nil {
+			return LoadManifestV4(dir)
+		}
 	}
-	dir := filepath.Join(x.opts.PluginsDir, name)
-	if _, err := os.Stat(dir); err != nil {
-		return nil, err
+	// 系统扩展: extension.json 里声明了 backend 的也走同一套注册/富化
+	if x.opts.ExtDir != "" {
+		dir := filepath.Join(x.opts.ExtDir, name)
+		if _, err := os.Stat(dir); err == nil {
+			return LoadExtBackend(dir)
+		}
 	}
-	return LoadManifestV4(dir)
+	return nil, os.ErrNotExist
+}
+
+// Drop 摘掉某个插件/扩展的注册、接口与端点(卸载时调用): 进程已停, 记录一并清掉,
+// 否则接口总览里会留 offline 幽灵接口、重启后从持久化里复活; 端点不关掉的话,
+// 卸载后的扩展 socket 还会一直 listen(谁都能连上去注册成幽灵插件)。
+func (x *PluginX) Drop(name string) {
+	if name == "" {
+		return
+	}
+	x.mu.Lock()
+	delete(x.plugins, name)
+	for id, it := range x.ifaces {
+		if it.Plugin == name {
+			delete(x.ifaces, id)
+		}
+	}
+	if l := x.listeners[name]; l != nil {
+		_ = l.Close()
+		delete(x.listeners, name)
+	}
+	delete(x.endpoints, name)
+	x.mu.Unlock()
+	if x.ns != nil {
+		_ = x.ns.Delete("plugin:" + name)
+		items, _ := x.ns.List("iface:", 2000)
+		for k, v := range items {
+			var it Iface
+			if json.Unmarshal([]byte(fmt.Sprint(v)), &it) == nil && it.Plugin == name {
+				_ = x.ns.Delete(k)
+			}
+		}
+	}
 }
 
 func findInterfaceDef(m *ManifestV4, id string) InterfaceDef {

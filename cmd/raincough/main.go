@@ -60,6 +60,7 @@ func main() {
 	}
 	globalPX = pluginx.New(pluginx.Options{
 		PluginsDir: cfg.PluginsDir,
+		ExtDir:     filepath.Join(cfg.BaseDir, "extensions"), // 声明了 backend 的扩展也接入接口库
 		UDSDir:     os.Getenv("RC_UDS_DIR"),
 		Token:      os.Getenv("RC_REG_TOKEN"),
 		ProbeEvery: probeEvery,
@@ -168,6 +169,29 @@ func main() {
 	globalWSH.Start(sysMon)
 
 	s := &server{cfg: cfg, sd: sd}
+	// 扩展安装/卸载后: 起停它自带的后端进程, 并让接口库重扫端点。
+	// (回调里做特权操作, 所以挂在 server 上; 纯前端扩展这两个函数直接返回)
+	globalExt.SetHooks(
+		func(name string) {
+			if err := s.extBackendUp(name); err != nil {
+				log.Printf("[ext] %s 后端启动失败: %v", name, err)
+			}
+			if globalPX != nil {
+				globalPX.Reload()
+			}
+		},
+		func(name string) { // 删文件之前: 先停后端
+			if err := s.extBackendDown(name); err != nil {
+				log.Printf("[ext] %s 后端停止失败: %v", name, err)
+			}
+		},
+		func(name string) { // 删文件之后: 摘接口注册 + 重扫端点
+			if globalPX != nil {
+				globalPX.Drop(name)
+				globalPX.Reload()
+			}
+		},
+	)
 	mux := http.NewServeMux()
 	s.routes(mux)
 
@@ -262,6 +286,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/ext/install", s.handleExtInstall)
 	mux.HandleFunc("/api/ext/update", s.handleExtUpdate)
 	mux.HandleFunc("/api/ext/remove", s.handleExtRemove)
+	mux.HandleFunc("/api/ext/backend", s.handleExtBackend)
+	mux.HandleFunc("/api/ext/backend/restart", s.handleExtBackendRestart)
 	mux.HandleFunc("/api/ext/", s.handleExtAsset)
 	// 面板版本与安装命令(只读; 面板更新为手动三步, 见 core/panel 设计)
 	mux.HandleFunc("/api/panel/version", s.handlePanelVersion)

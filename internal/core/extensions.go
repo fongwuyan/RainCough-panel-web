@@ -36,21 +36,44 @@ var BuiltinPages = []Extension{
 	{Name: "docs", Label: "开发文档", Icon: "DC", Description: "插件与扩展开发指南", Route: "/docs", Builtin: true},
 }
 
+// ExtBackend 扩展后端声明(extension.json 的 backend 段, 与 plugin.json v4 同义)。
+// 声明了 exec 的扩展在安装后会拉起自己的后端进程, 并像插件一样接入接口库。
+type ExtBackend struct {
+	Lang         string   `json:"lang,omitempty"`
+	Exec         []string `json:"exec"`
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+
+// ExtIface 扩展声明的接口(与 plugin.json v4 的 interfaces[] 同形)。
+type ExtIface struct {
+	ID          string                 `json:"id"`
+	Visibility  string                 `json:"visibility,omitempty"`
+	Version     string                 `json:"version,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Input       map[string]interface{} `json:"input,omitempty"`
+	Output      map[string]interface{} `json:"output,omitempty"`
+}
+
 // Extension 扩展条目(清单 + 安装态)。
 type Extension struct {
-	Name        string `json:"name"`
-	Label       string `json:"label"`
-	Version     string `json:"version"`
-	Description string `json:"description,omitempty"`
-	Author      string `json:"author,omitempty"`
-	Icon        string `json:"icon,omitempty"`
-	Entry       string `json:"entry,omitempty"`
-	Route       string `json:"route,omitempty"`
-	Builtin     bool   `json:"builtin"`
-	Installed   bool   `json:"installed"`
-	InstalledV  string `json:"installed_version,omitempty"`
-	HasAssets   bool   `json:"has_assets"`
+	Name        string      `json:"name"`
+	Label       string      `json:"label"`
+	Version     string      `json:"version"`
+	Description string      `json:"description,omitempty"`
+	Author      string      `json:"author,omitempty"`
+	Icon        string      `json:"icon,omitempty"`
+	Entry       string      `json:"entry,omitempty"`
+	Route       string      `json:"route,omitempty"`
+	Backend     *ExtBackend `json:"backend,omitempty"`
+	Interfaces  []ExtIface  `json:"interfaces,omitempty"`
+	Builtin     bool        `json:"builtin"`
+	Installed   bool        `json:"installed"`
+	InstalledV  string      `json:"installed_version,omitempty"`
+	HasAssets   bool        `json:"has_assets"`
 }
+
+// HasBackend 是否声明了后端进程。
+func (x Extension) HasBackend() bool { return x.Backend != nil && len(x.Backend.Exec) > 0 }
 
 // ExtStore 系统扩展仓储: 从主面板库拉取/安装/卸载, 本地目录存已装扩展。
 type ExtStore struct {
@@ -59,6 +82,16 @@ type ExtStore struct {
 	store  *Store // 复用主面板库配置与 token
 	client *http.Client
 	mu     chan struct{} // 安装并发控制(1)
+
+	// 安装/卸载后的回调(宿主注入): 起停扩展后端进程 + 接口库重扫。
+	onInstalled func(name string)
+	onStop      func(name string) // 删文件之前: 停后端进程(否则进程占着目录)
+	onRemoved   func(name string) // 删文件成功之后: 摘接口注册
+}
+
+// SetHooks 注入安装/停止/卸载回调(必须在第一次安装前调用)。
+func (e *ExtStore) SetHooks(onInstalled, onStop, onRemoved func(string)) {
+	e.onInstalled, e.onStop, e.onRemoved = onInstalled, onStop, onRemoved
 }
 
 // NewExtStore 创建扩展仓储。
@@ -409,6 +442,10 @@ func (e *ExtStore) Install(name string, task *TaskStore) (string, error) {
 			label = m.Label
 		}
 		done = true
+		// 起扩展自带的后端(声明了 backend 才会拉起) + 让接口库重扫端点
+		if e.onInstalled != nil {
+			e.onInstalled(name)
+		}
 		task.Finish(tid, true, "扩展安装成功: "+label+" ("+name+")", "", 100)
 	}()
 	return "queued", nil
@@ -520,10 +557,20 @@ func (e *ExtStore) Remove(name string) error {
 	if !ok {
 		return fmt.Errorf("扩展未安装: %s", name)
 	}
+	// 卸载三步, 顺序不能乱:
+	//   ① 先停后端进程 —— 进程还活着时目录可能删不掉(Windows 实测), 也会带着已删的 cwd 继续跑
+	//   ② 删目录(失败就报错, 此时接口仍在册, 状态与磁盘一致, 可以重试)
+	//   ③ 删干净了再摘接口注册 —— 否则删失败会留下"列表说没装、文件还在"的错位状态
+	if e.onStop != nil {
+		e.onStop(name)
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
 	_ = os.RemoveAll(filepath.Join(e.dir, name+tmpSuffix))
+	if e.onRemoved != nil {
+		e.onRemoved(name)
+	}
 	return nil
 }
 

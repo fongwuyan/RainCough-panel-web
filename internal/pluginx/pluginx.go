@@ -104,6 +104,7 @@ type Iface struct {
 // Options PluginX 选项。
 type Options struct {
 	PluginsDir string // 插件目录(用于预建端点与读取 plugin.json v4)
+	ExtDir     string // 系统扩展目录(读 extension.json: 声明了 backend 的扩展也接入接口库)
 	UDSDir     string // 生产 socket 根目录(默认 /run/raincough)
 	Token      string // 注册口令(空=不校验)
 	ProbeEvery time.Duration
@@ -171,43 +172,102 @@ func LoadManifestV4(dir string) (*ManifestV4, error) {
 	return &m, nil
 }
 
-// Start 预建所有 v4 插件端点并启动 accept/探针循环。
+// LoadExtBackend 读系统扩展清单(extension.json)里声明的后端与接口。
+// 扩展清单与插件清单同义: backend{lang,exec,capabilities} + interfaces[]。
+// 没声明 backend.exec 的扩展是纯前端扩展, 不接入接口库(返回 nil, nil)。
+func LoadExtBackend(dir string) (*ManifestV4, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "extension.json"))
+	if err != nil {
+		return nil, err
+	}
+	raw = []byte(strings.TrimPrefix(string(raw), "\xef\xbb\xbf"))
+	var m struct {
+		Name        string `json:"name"`
+		Label       string `json:"label"`
+		Version     string `json:"version"`
+		Description string `json:"description,omitempty"`
+		Author      string `json:"author,omitempty"`
+		Icon        string `json:"icon,omitempty"`
+		Route       string `json:"route,omitempty"`
+		Backend     struct {
+			Lang         string   `json:"lang,omitempty"`
+			Exec         []string `json:"exec"`
+			Capabilities []string `json:"capabilities,omitempty"`
+		} `json:"backend"`
+		Interfaces []InterfaceDef `json:"interfaces"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("extension.json 解析失败: %w", err)
+	}
+	if m.Name == "" || len(m.Backend.Exec) == 0 {
+		return nil, nil // 纯前端扩展: 不接入接口库
+	}
+	if m.Interfaces == nil {
+		m.Interfaces = []InterfaceDef{}
+	}
+	out := &ManifestV4{
+		Name: m.Name, Label: m.Label, Version: m.Version,
+		Description: m.Description, Author: m.Author, Icon: m.Icon,
+		Interfaces: m.Interfaces,
+	}
+	out.Backend.Lang = m.Backend.Lang
+	out.Backend.Exec = m.Backend.Exec
+	out.Backend.Capabilities = m.Backend.Capabilities
+	// 扩展是单页(route), 用空 pages 表示: 前端入口仍由 /api/ext/<name>/assets/ 托管
+	out.Frontend.Entry = "assets/extension.js"
+	out.Frontend.Pages = []PageDef{}
+	_ = m.Route
+	return out, nil
+}
+
+// Start 预建所有 v4 插件与扩展后端端点并启动探针循环。
+// (accept 循环由 listenFor 在建立端点时各自起, 这样运行期新装的也能立刻被接受)
 func (x *PluginX) Start() error {
 	x.loadPersisted()
 	x.scanAndListen()
-	for name, l := range x.listeners {
-		go x.acceptLoop(name, l)
-	}
 	go x.probeLoop()
 	log.Printf("[pluginx] 接口库已启动: transport=%s uds=%s plugins=%d",
 		map[bool]string{true: "tcp(dev)", false: "unix"}[x.opts.UseTCP], x.opts.UDSDir, len(x.listeners))
 	return nil
 }
 
-// scanAndListen 扫描插件目录, 为 v4 清单预建端点并写 .rc.endpoint。
+// scanAndListen 扫描插件目录与系统扩展目录, 为声明的后端预建端点并写 .rc.endpoint。
 func (x *PluginX) scanAndListen() {
-	if x.opts.PluginsDir == "" {
+	x.scanDir(x.opts.PluginsDir, false)
+	x.scanDir(x.opts.ExtDir, true)
+}
+
+// scanDir 扫一个目录: isExt=true 时读 extension.json(只接声明了 backend 的扩展)。
+func (x *PluginX) scanDir(dir string, isExt bool) {
+	if dir == "" {
 		return
 	}
-	entries, err := os.ReadDir(x.opts.PluginsDir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		log.Printf("[pluginx] 扫描插件目录失败: %v", err)
 		return
 	}
 	for _, e := range entries {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		dir := filepath.Join(x.opts.PluginsDir, e.Name())
-		if _, err := LoadManifestV4(dir); err != nil {
-			continue // 非 v4 清单(旧插件)跳过
+		sub := filepath.Join(dir, e.Name())
+		var ok bool
+		if isExt {
+			m, err := LoadExtBackend(sub)
+			ok = err == nil && m != nil
+		} else {
+			_, err := LoadManifestV4(sub)
+			ok = err == nil
+		}
+		if !ok {
+			continue // 纯前端扩展/非 v4 清单(旧插件)跳过
 		}
 		ep, err := x.listenFor(e.Name())
 		if err != nil {
 			log.Printf("[pluginx] %s 端点建立失败: %v", e.Name(), err)
 			continue
 		}
-		_ = os.WriteFile(filepath.Join(dir, ".rc.endpoint"), []byte(ep), 0o600)
+		_ = os.WriteFile(filepath.Join(sub, ".rc.endpoint"), []byte(ep), 0o600)
 		log.Printf("[pluginx] %s 端点: %s", e.Name(), ep)
 	}
 }
@@ -245,6 +305,9 @@ func (x *PluginX) listenFor(name string) (string, error) {
 	}
 	x.listeners[name] = l
 	x.endpoints[name] = ep
+	// 端点一建好就起 accept 循环 —— 不能只在 Start() 里统一起:
+	// 运行期新装的插件/扩展是 Reload() 之后才有端点的(2026-10-01 审计)。
+	go x.acceptLoop(name, l)
 	return ep, nil
 }
 
@@ -293,26 +356,11 @@ func (x *PluginX) Stop() {
 	}
 }
 
-// Reload 重新扫描(安装新插件后调用)。
+// Reload 重新扫描(安装新插件/扩展后调用): 新端点由 listenFor 自己起 accept 循环。
+// 旧实现这里再判一遍 listenerAlive 才起循环, 而那些名字本来就是从 listeners 里取的,
+// 判断恒为真 → 运行期新装的插件/扩展的 accept 循环永远起不来, 注册连不上(2026-10-01 审计)。
 func (x *PluginX) Reload() {
 	x.scanAndListen()
-	x.mu.Lock()
-	names := make([]string, 0, len(x.listeners))
-	for n := range x.listeners {
-		names = append(names, n)
-	}
-	x.mu.Unlock()
-	for _, n := range names {
-		if x.listenerAlive(n) {
-			continue
-		}
-		x.mu.Lock()
-		l := x.listeners[n]
-		x.mu.Unlock()
-		if l != nil {
-			go x.acceptLoop(n, l)
-		}
-	}
 }
 
 func (x *PluginX) listenerAlive(name string) bool {
