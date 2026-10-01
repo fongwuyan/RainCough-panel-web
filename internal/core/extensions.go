@@ -303,12 +303,15 @@ func (e *ExtStore) Install(name string, task *TaskStore) (string, error) {
 			}
 		}()
 
-		task.Update(tid, "取件", 20, "获取扩展包...")
-		// 本地源优先(离线/开发环境): 命中就直接装, 不去拉远端的整仓包
-		if err := e.installFromLocal(name); err != nil {
-			task.Update(tid, "主面板库", 45, "从主面板库取件...")
-			if err2 := e.installFromGitHub(name); err2 != nil {
-				task.Update(tid, "", 0, "安装失败: 主面板库与本地源均不可用 ("+err2.Error()+")")
+		task.Update(tid, "取件", 20, "从主面板库取件...")
+		// 与清单同源: 清单(Route)来自主面板库, 安装也先走主面板库 ——
+		// 否则会出现"列表写的是仓库里的 1.0.0、装进来的却是本地源那份"的错位
+		// (旧实现本地源优先, 部署机上恰好有 extension-src, 于是永远不拉主面板库)。
+		// 主面板库不可用(离线/未配仓库/dev)时才回退本地源。
+		if err := e.installFromGitHub(name); err != nil {
+			task.Update(tid, "本地源", 45, "主面板库不可用, 改用本地源...")
+			if err2 := e.installFromLocal(name); err2 != nil {
+				task.Update(tid, "", 0, "安装失败: 主面板库与本地源均不可用 ("+err.Error()+"; "+err2.Error()+")")
 				return
 			}
 		}

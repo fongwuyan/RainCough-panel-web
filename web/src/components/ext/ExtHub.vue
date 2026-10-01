@@ -1,14 +1,19 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../api'
 import { verNewer } from '../../version'
 import { useExtensions } from '../../stores/extensions'
 
-// 「系统扩展」: 面板内置 7 项功能之外的功能, 以扩展包存于主面板库 extensions/,
-// 面板主体安装时不含扩展, 在此页按需安装/更新/卸载。
+// 「系统扩展」: 面板内置 7 项之外的功能, 以扩展包存于**主面板库** extensions/ 目录,
+// 面板主体安装时不含扩展 —— 这一页只做两件事:
+//   ① 从主面板库拉取可用扩展并安装(后端 ExtStore.Install: 先本地源, 再走主面板库 contents API)
+//   ② 已装扩展可打开/更新/卸载(卸载即删除扩展目录)
+// 内置 7 项(工作台/文件管理/终端/系统扩展/插件/设置/开发文档)编译在面板主体里, 不可卸载,
+// 因此不在这里列出(侧边栏就是它们的入口)。
+const route = useRoute()
 const router = useRouter()
-const { extensions, builtins, load: loadInstalled } = useExtensions()
+const { extensions, load: loadInstalled } = useExtensions()
 
 const registry = ref([])
 const regSource = ref('')     // github | local | ''
@@ -24,7 +29,21 @@ const progressPct = computed(() => {
   const m = /(\d+)%/.exec(progress.value || '')
   return m ? Math.max(0, Math.min(100, parseInt(m[1], 10))) : 0
 })
+const regMap = computed(() => {
+  const m = {}
+  for (const x of registry.value) m[x.name] = x
+  return m
+})
+// 可安装 = 主面板库里还没装的(已装的在本页「已装扩展」区, 不重复列)
+const installable = computed(() => registry.value.filter((x) => !x.installed))
 
+function regVerOf(name) {
+  const r = regMap.value[name]
+  return r ? (r.version || '') : ''
+}
+function updOf(ext) {
+  return verNewer(regVerOf(ext.name), ext.version)
+}
 function flash(msg, ok = true) {
   notice.value = msg
   noticeOk.value = ok
@@ -57,11 +76,6 @@ async function refresh() {
   }
 }
 
-function newer(ext) {
-  return !!(ext.installed && ext.version && ext.installed_version &&
-    verNewer(ext.version, ext.installed_version))
-}
-
 async function storeTaskIds() {
   try {
     const d = await api.taskQueue(true, 40)
@@ -86,7 +100,7 @@ async function watchTask(name, verb, before) {
     const t = list.find((x) => x.source === 'ext' && !before.has(x.id) &&
       `${x.name || ''} ${x.message || ''}`.includes(name))
     if (!t) {
-      if (++miss >= 8) { progress.value = ''; flash(`${verb}已提交, 到本页下方装好「任务队列」扩展后可查看进度`, false); return false }
+      if (++miss >= 8) { progress.value = ''; flash(`${verb}已提交, 到本页安装「任务队列」扩展后可查看进度`, false); return false }
       continue
     }
     miss = 0
@@ -96,7 +110,7 @@ async function watchTask(name, verb, before) {
     if (line !== last) { last = line; progress.value = line }
   }
   progress.value = ''
-  flash(`${verb}仍在后台进行, 到「任务队列」扩展查看进度(没装就在本页下方安装)`, false)
+  flash(`${verb}仍在后台进行, 到「任务队列」扩展查看进度(没装就在本页安装)`, false)
   return false
 }
 
@@ -125,7 +139,8 @@ async function doRemove(ext) {
     await api.extRemove(name)
     flash(`已卸载 ${ext.label || name}`)
     await Promise.all([loadInstalled(), loadRegistry()])
-    if (name === 'media') router.push('/ext')
+    // 正在看这个扩展的页面时, 卸载后退回本页
+    if (route.name === 'ext-view' && String(route.params.name) === name) router.push('/ext')
   } catch (e) {
     flash(`卸载失败: ${e.message}`, false)
   } finally { busy.value = '' }
@@ -141,7 +156,7 @@ onMounted(refresh)
 <template>
   <div class="page">
     <div class="page-body">
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px;">
+      <div class="ext-bar">
         <button class="btn btn-sm" :disabled="refreshing" @click="refresh">
           {{ refreshing ? '刷新中…' : '刷新' }}
         </button>
@@ -153,22 +168,10 @@ onMounted(refresh)
       </div>
       <div v-if="progress" class="hint" style="margin:-2px 0 10px;">{{ progress }}</div>
 
-      <div class="section">
-        <div class="section-title">内置功能 ({{ builtins.length }})</div>
-        <div class="ext-grid">
-          <div v-for="b in builtins" :key="b.name" class="ext-card builtin" @click="router.push(b.route || '/')">
-            <div class="ext-name">{{ b.label }}</div>
-            <div class="ext-desc">{{ b.description }}</div>
-            <div class="ext-foot"><span class="tag-chip tag-chip-sm">内置</span></div>
-          </div>
-        </div>
-      </div>
-
+      <!-- 已装扩展: 打开 / 更新 / 卸载 -->
       <div class="section">
         <div class="section-title">已装扩展 ({{ extensions.length }})</div>
-        <div v-if="!extensions.length" class="hint" style="padding:14px 2px;">
-          还没有安装扩展, 到下方「可用扩展」安装(如媒体中心、任务队列)。
-        </div>
+        <div v-if="!extensions.length" class="hint ext-empty">还没有安装扩展</div>
         <div v-for="x in extensions" :key="x.name" class="ext-row">
           <div class="ext-row-main">
             <div class="ext-name">
@@ -177,26 +180,30 @@ onMounted(refresh)
             </div>
             <div class="ext-desc">
               版本 {{ x.version || '-' }}
-              <span v-if="x.author" style="margin-left:10px;">作者: {{ x.author }}</span>
-              <span v-if="!x.has_assets" style="margin-left:10px;color:var(--danger);">产物缺失</span>
+              <span v-if="x.author" class="ext-author">作者: {{ x.author }}</span>
+              <span v-if="!x.has_assets" class="ext-bad">产物缺失</span>
             </div>
             <div v-if="x.description" class="ext-desc">{{ x.description }}</div>
           </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <span v-if="updOf(x)" class="tag-chip tag-chip-sm"
+                style="border-color:var(--accent);color:var(--accent);">有更新 → {{ regVerOf(x.name) }}</span>
+          <div class="ext-acts">
             <button class="btn btn-sm" @click="open(x)">打开</button>
+            <button v-if="updOf(x)" class="btn btn-sm" :disabled="!!busy" @click="doInstall(x, '更新')">
+              {{ busy === x.name ? '更新中…' : '更新' }}
+            </button>
             <button class="btn btn-sm btn-danger" :disabled="!!busy" @click="doRemove(x)">卸载</button>
           </div>
         </div>
       </div>
 
+      <!-- 可安装的扩展: 来自主面板库 extensions/ -->
       <div class="section">
-        <div class="section-title">可用扩展 ({{ registry.length }})</div>
+        <div class="section-title">可安装的扩展 ({{ installable.length }})</div>
         <div v-if="regError || regSource === 'local'" class="ext-err">仓库不可用</div>
-        <div v-if="regLoading && !registry.length" class="hint" style="padding:14px 2px;">加载中...</div>
-        <div v-else-if="!registry.length && !regError" class="hint" style="padding:14px 2px;">
-          {{ regSource === 'local' ? '本地源中没有可安装的扩展' : '没有可安装的扩展' }}
-        </div>
-        <div v-for="x in registry" :key="x.name" class="ext-row">
+        <div v-else-if="regLoading && !registry.length" class="hint ext-empty">加载中...</div>
+        <div v-else-if="!installable.length" class="hint ext-empty">没有可安装的扩展</div>
+        <div v-for="x in installable" :key="x.name" class="ext-row">
           <div class="ext-row-main">
             <div class="ext-name">
               {{ x.label || x.name }}
@@ -204,30 +211,14 @@ onMounted(refresh)
             </div>
             <div class="ext-desc">
               版本 {{ x.version || '-' }}
-              <span v-if="x.author" style="margin-left:10px;">作者: {{ x.author }}</span>
+              <span v-if="x.author" class="ext-author">作者: {{ x.author }}</span>
             </div>
             <div v-if="x.description" class="ext-desc">{{ x.description }}</div>
           </div>
-          <span v-if="x.installed" class="tag-chip">
-            {{ x.installed_version ? `已装 ${x.installed_version}` : '已装' }}
-          </span>
-          <span v-if="newer(x)" class="tag-chip tag-chip-sm" style="border-color:var(--accent);color:var(--accent);">
-            有更新 → {{ x.version }}
-          </span>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <template v-if="!x.installed">
-              <button class="btn btn-primary btn-sm" :disabled="!!busy" @click="doInstall(x, '安装')">
-                {{ busy === x.name ? '安装中…' : '安装' }}
-              </button>
-            </template>
-            <template v-else>
-              <button v-if="newer(x)" class="btn btn-sm" :disabled="!!busy" @click="doInstall(x, '更新')">
-                {{ busy === x.name ? '更新中…' : '更新' }}
-              </button>
-              <button v-else class="btn btn-sm" disabled style="opacity:.6;cursor:default;"
-                      title="版本已是最新, 如需修复可先卸载再安装">已是最新</button>
-              <button class="btn btn-sm" @click="open(x)">打开</button>
-            </template>
+          <div class="ext-acts">
+            <button class="btn btn-primary btn-sm" :disabled="!!busy" @click="doInstall(x, '安装')">
+              {{ busy === x.name ? '安装中…' : '安装' }}
+            </button>
           </div>
         </div>
       </div>
@@ -236,6 +227,7 @@ onMounted(refresh)
 </template>
 
 <style scoped>
+.ext-bar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .ext-line { font-size: 13px; padding: 6px 0 10px; }
 .ext-line.ok { color: var(--success); }
 .ext-line.fail { color: var(--danger); }
@@ -243,13 +235,7 @@ onMounted(refresh)
   padding: 10px 12px; text-align: center; color: var(--danger);
   border: 1px solid var(--danger); border-radius: var(--radius-sm); margin-bottom: 10px;
 }
-.ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-.ext-card {
-  border: 1px solid var(--border); border-radius: var(--radius-md);
-  padding: 12px 14px; background: var(--surface); cursor: pointer;
-}
-.ext-card:hover { border-color: var(--accent); }
-.ext-card.builtin { cursor: pointer; }
+.ext-empty { padding: 14px 2px; }
 .ext-row {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   border: 1px solid var(--border); border-radius: var(--radius-md);
@@ -257,10 +243,9 @@ onMounted(refresh)
 }
 .ext-row-main { flex: 1; min-width: 220px; }
 .ext-name { font-size: 15px; font-weight: 600; }
-.ext-mono { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); margin-left: 6px; }
+.ext-mono { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-left: 6px; }
 .ext-desc { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
-.ext-foot { margin-top: 8px; }
-@media (max-width: 960px) {
-  .ext-grid { grid-template-columns: 1fr 1fr; }
-}
+.ext-author { margin-left: 10px; }
+.ext-bad { margin-left: 10px; color: var(--danger); }
+.ext-acts { display: flex; gap: 6px; flex-wrap: wrap; }
 </style>
