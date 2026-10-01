@@ -269,6 +269,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/panel/update/state", s.handlePanelUpdateState)
 	mux.HandleFunc("/api/panel/update/apply", s.handlePanelUpdateApply)
 	mux.HandleFunc("/api/panel/update/restart", s.handlePanelUpdateRestart)
+	mux.HandleFunc("/api/panel/update/log", s.handlePanelUpdateLog)
+	mux.HandleFunc("/api/panel/update/rollback", s.handlePanelUpdateRollback)
 
 	// ---- 系统中心(服务/进程/日志/防火墙) ----
 	mux.HandleFunc("/api/sysfunc/", s.handleSysCenter)

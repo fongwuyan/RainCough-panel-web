@@ -428,6 +428,7 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		s.writeUpdateState(updateState{Applied: target, Pending: true, Backup: bk, At: time.Now().Unix()})
+		s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: cur, To: target, Action: "apply", Result: "ok", Message: "已应用, 待确认重启", Backup: bk})
 		done = true
 		globalTasks.Finish(tid, true, "已应用 v"+target+", 待确认重启", "", 100)
 	}()
@@ -461,4 +462,111 @@ func (s *server) handlePanelUpdateRestart(w http.ResponseWriter, r *http.Request
 	st.Pending = false
 	s.writeUpdateState(st)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "unit": unit})
+}
+
+// ---- 更新历史 / 回滚 ----
+
+// panelHistoryEntry 一条更新记录(apply / rollback)。
+type panelHistoryEntry struct {
+	At      int64  `json:"at"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Action  string `json:"action"`
+	Result  string `json:"result"`
+	Message string `json:"message"`
+	Backup  string `json:"backup"`
+}
+
+func (s *server) appendHistory(e panelHistoryEntry) {
+	d := s.updateDir()
+	if d == "" {
+		return
+	}
+	_ = os.MkdirAll(d, 0o755)
+	b, err := json.Marshal(e)
+	if err != nil {
+		return
+	}
+	fh, err := os.OpenFile(filepath.Join(d, "history.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer fh.Close()
+	_, _ = fh.Write(append(b, '\n'))
+}
+
+// handlePanelUpdateLog GET /api/panel/update/log -> 最近 50 条(倒序)
+func (s *server) handlePanelUpdateLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	entries := []panelHistoryEntry{}
+	if d := s.updateDir(); d != "" {
+		if b, err := os.ReadFile(filepath.Join(d, "history.jsonl")); err == nil {
+			for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				var e panelHistoryEntry
+				if json.Unmarshal([]byte(line), &e) == nil {
+					entries = append(entries, e)
+				}
+			}
+		}
+	}
+	// 倒序: 最新在前
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+	if len(entries) > 50 {
+		entries = entries[:50]
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"entries": entries})
+}
+
+// handlePanelUpdateRollback POST /api/panel/update/rollback {backup?}
+// 手动回滚: 从备份目录恢复二进制/VERSION/public, 恢复后需重启生效。
+func (s *server) handlePanelUpdateRollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	if s.cfg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "环境未就绪"})
+		return
+	}
+	var b struct {
+		Backup string `json:"backup"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&b)
+	ud := filepath.Clean(s.updateDir())
+	st := s.readUpdateState()
+	bk := strings.TrimSpace(b.Backup)
+	if bk == "" {
+		bk = st.Backup
+	}
+	if bk == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "没有可用的备份"})
+		return
+	}
+	bk = filepath.Clean(bk)
+	if !strings.HasPrefix(bk, ud+string(os.PathSeparator)) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "备份路径非法"})
+		return
+	}
+	if fi, err := os.Stat(filepath.Join(bk, "raincough")); err != nil || fi.IsDir() {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "备份不完整(缺二进制)"})
+		return
+	}
+	from := s.panelVersion()
+	if out, err := exec.Command("sh", "-c", fmt.Sprintf("cp -a %s/. %s/", bk, s.cfg.BaseDir)).CombinedOutput(); err != nil {
+		s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: from, Action: "rollback", Result: "fail", Message: string(out), Backup: bk})
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "回滚失败: " + string(out)})
+		return
+	}
+	to := s.panelVersion()
+	s.writeUpdateState(updateState{Applied: "", Pending: true, Backup: bk, At: time.Now().Unix()})
+	s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: from, To: to, Action: "rollback", Result: "ok", Message: "已回滚, 待确认重启", Backup: bk})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "from": from, "to": to, "backup": bk})
 }
