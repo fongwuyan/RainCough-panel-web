@@ -262,6 +262,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/ext/update", s.handleExtUpdate)
 	mux.HandleFunc("/api/ext/remove", s.handleExtRemove)
 	mux.HandleFunc("/api/ext/", s.handleExtAsset)
+	// 面板版本与安装命令(只读; 面板更新为手动三步, 见 core/panel 设计)
+	mux.HandleFunc("/api/panel/version", s.handlePanelVersion)
+	mux.HandleFunc("/api/panel/install-command", s.handlePanelInstallCommand)
 
 	// ---- 系统中心(服务/进程/日志/防火墙) ----
 	mux.HandleFunc("/api/sysfunc/", s.handleSysCenter)
