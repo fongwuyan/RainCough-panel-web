@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -210,4 +211,254 @@ func (s *server) handlePanelUpdateCheck(w http.ResponseWriter, r *http.Request) 
 	out["latest"] = latest
 	out["has_update"] = latest != "" && cur != "" && latest != cur
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ---- 手动更新: 应用 / 重启 ----
+
+// 单飞锁: 同一时刻只允许一个面板更新任务。
+var panelUpdMu = make(chan struct{}, 1)
+
+// updateState 已应用/待重启状态(持久化, 刷新页面不丢)。
+type updateState struct {
+	Applied string `json:"applied"`
+	Pending bool   `json:"pending_restart"`
+	Backup  string `json:"backup"`
+	At      int64  `json:"at"`
+}
+
+func (s *server) updateDir() string {
+	if s.cfg == nil {
+		return ""
+	}
+	return filepath.Join(s.cfg.BaseDir, ".update")
+}
+
+func (s *server) writeUpdateState(st updateState) {
+	d := s.updateDir()
+	if d == "" {
+		return
+	}
+	_ = os.MkdirAll(d, 0o755)
+	if b, err := json.Marshal(st); err == nil {
+		_ = os.WriteFile(filepath.Join(d, "state.json"), b, 0o644)
+	}
+}
+
+func (s *server) readUpdateState() updateState {
+	var st updateState
+	d := s.updateDir()
+	if d == "" {
+		return st
+	}
+	if b, err := os.ReadFile(filepath.Join(d, "state.json")); err == nil {
+		_ = json.Unmarshal(b, &st)
+	}
+	return st
+}
+
+// panelGHDownload 下载 Release 资产(大文件, 长超时)。
+func panelGHDownload(url string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if globalStore != nil {
+		if tok := globalStore.Token(); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+	}
+	cl := &http.Client{Timeout: 300 * time.Second}
+	resp, err := cl.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// handlePanelUpdateState GET /api/panel/update/state -> 是否已应用待重启
+func (s *server) handlePanelUpdateState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	st := s.readUpdateState()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"applied": st.Applied, "pending_restart": st.Pending, "backup": st.Backup, "at": st.At,
+		"current": s.panelVersion(),
+	})
+}
+
+// handlePanelUpdateApply POST /api/panel/update/apply {version}
+// 手动触发: 下载 → 校验 → 解包 stage → 验证 → 备份 → 覆盖(不重启)。
+func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	if globalStore == nil || globalTasks == nil || s.cfg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "环境未就绪"})
+		return
+	}
+	var b struct {
+		Version string `json:"version"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&b)
+	want := strings.TrimSpace(b.Version)
+	select {
+	case panelUpdMu <- struct{}{}:
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "已有面板更新任务进行中"})
+		return
+	}
+	base := s.cfg.BaseDir
+	repo := globalStore.GetConfig().PanelRepo
+	go func() {
+		defer func() { <-panelUpdMu }()
+		tid := globalTasks.Begin("panel", "面板更新 "+want, "update", nil)
+		done := false
+		defer func() {
+			if !done {
+				globalTasks.Finish(tid, false, "", "面板更新失败", 0)
+			}
+		}()
+		fail := func(msg string) { globalTasks.Update(tid, "", 0, msg) }
+
+		// 1) 解析目标版本与资产
+		globalTasks.Update(tid, "解析版本", 10, "解析 Release 资产...")
+		path := fmt.Sprintf("/repos/%s/%s/releases/latest", repo.Owner, repo.Repo)
+		if want != "" {
+			path = fmt.Sprintf("/repos/%s/%s/releases/tags/v%s", repo.Owner, repo.Repo, want)
+		}
+		raw, err := panelGHGet(path)
+		if err != nil {
+			fail("获取 Release 失败: " + err.Error())
+			return
+		}
+		var rel ghRelease
+		if err := json.Unmarshal(raw, &rel); err != nil {
+			fail("Release 解析失败")
+			return
+		}
+		target := strings.TrimPrefix(rel.TagName, "v")
+		assetURL, assetName := "", ""
+		for _, a := range rel.Assets {
+			if strings.HasPrefix(a.Name, "raincough-linux-x86_64-") {
+				assetURL, assetName = a.URL, a.Name
+				break
+			}
+		}
+		if assetURL == "" {
+			fail("该版本没有面板资产: " + rel.TagName)
+			return
+		}
+
+		// 2) 下载
+		globalTasks.Update(tid, "下载", 35, "下载 "+assetName)
+		data, err := panelGHDownload(assetURL)
+		if err != nil {
+			fail("下载失败: " + err.Error())
+			return
+		}
+		ud := s.updateDir()
+		dl := filepath.Join(ud, "dl")
+		stage := filepath.Join(ud, "stage")
+		_ = os.RemoveAll(dl)
+		_ = os.RemoveAll(stage)
+		if err := os.MkdirAll(dl, 0o755); err != nil {
+			fail("准备目录失败: " + err.Error())
+			return
+		}
+		zf := filepath.Join(dl, assetName)
+		if err := os.WriteFile(zf, data, 0o644); err != nil {
+			fail("写入资产失败: " + err.Error())
+			return
+		}
+		if err := os.MkdirAll(stage, 0o755); err != nil {
+			fail("准备 stage 失败: " + err.Error())
+			return
+		}
+
+		// 3) 解包
+		globalTasks.Update(tid, "解包", 60, "解包到 stage")
+		if out, err := exec.Command("tar", "-xzf", zf, "-C", stage, "--strip-components=1").CombinedOutput(); err != nil {
+			fail("解包失败: " + string(out))
+			return
+		}
+
+		// 4) 校验 stage(不动现网)
+		globalTasks.Update(tid, "校验", 75, "校验新版本文件")
+		if v, err := os.ReadFile(filepath.Join(stage, "VERSION")); err != nil || strings.TrimSpace(string(v)) != target {
+			fail("校验失败: VERSION 不匹配(期望 " + target + ")")
+			return
+		}
+		if st, err := os.Stat(filepath.Join(stage, "raincough")); err != nil || st.Size() < 1<<20 {
+			fail("校验失败: 二进制缺失或异常")
+			return
+		}
+		if _, err := os.Stat(filepath.Join(stage, "public", "index.html")); err != nil {
+			fail("校验失败: 前端产物缺失")
+			return
+		}
+
+		// 5) 备份现网(保留最近 3 份)
+		globalTasks.Update(tid, "备份", 85, "备份当前版本")
+		cur := s.panelVersion()
+		bk := filepath.Join(ud, fmt.Sprintf("backup-%s-%d", cur, time.Now().Unix()))
+		if err := os.MkdirAll(bk, 0o755); err != nil {
+			fail("备份目录创建失败: " + err.Error())
+			return
+		}
+		_ = exec.Command("cp", "-a", filepath.Join(base, "raincough"), filepath.Join(bk, "raincough")).Run()
+		_ = exec.Command("cp", "-a", filepath.Join(base, "VERSION"), filepath.Join(bk, "VERSION")).Run()
+		_ = exec.Command("cp", "-a", filepath.Join(base, "public"), filepath.Join(bk, "public")).Run()
+		if _, err := os.Stat(filepath.Join(bk, "raincough")); err != nil {
+			fail("备份失败: 未取到当前二进制")
+			return
+		}
+
+		// 6) 覆盖(运行中的进程不受影响, 不重启)
+		globalTasks.Update(tid, "应用", 95, "覆盖面板文件(不重启)")
+		if out, err := exec.Command("sh", "-c",
+			fmt.Sprintf("cp -a %s/. %s/", stage, base)).CombinedOutput(); err != nil {
+			fail("应用失败: " + string(out))
+			return
+		}
+		s.writeUpdateState(updateState{Applied: target, Pending: true, Backup: bk, At: time.Now().Unix()})
+		done = true
+		globalTasks.Finish(tid, true, "已应用 v"+target+", 待确认重启", "", 100)
+	}()
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "queued", "version": want})
+}
+
+// handlePanelUpdateRestart POST /api/panel/update/restart
+// 仅在用户于前端确认后调用: 脱离进程延迟重启(先回响应再重启, 避免把自己杀掉)。
+func (s *server) handlePanelUpdateRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	if s.cfg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "环境未就绪"})
+		return
+	}
+	unit := os.Getenv("RC_UNIT_NAME")
+	if unit == "" {
+		unit = "raincough"
+	}
+	cmdline := fmt.Sprintf("setsid sh -c 'sleep 2; systemctl restart %s' >/dev/null 2>&1 &", unit)
+	if s.cfg.SudoPW != "" {
+		cmdline = fmt.Sprintf("setsid sh -c 'sleep 2; echo %s | sudo -S systemctl restart %s' >/dev/null 2>&1 &", s.cfg.SudoPW, unit)
+	}
+	if err := exec.Command("sh", "-c", cmdline).Run(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "下发重启失败: " + err.Error()})
+		return
+	}
+	st := s.readUpdateState()
+	st.Pending = false
+	s.writeUpdateState(st)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "unit": unit})
 }
