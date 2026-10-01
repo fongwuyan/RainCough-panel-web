@@ -181,7 +181,13 @@ func (s *Store) RegistryWithSource() ([]StorePlugin, string, error) {
 func (s *Store) localRegistry() ([]StorePlugin, error) {
 	entries, err := os.ReadDir(s.pluginsDir)
 	if err != nil {
-		return nil, err
+		// ★全新安装还没有 plugins 目录: 这不是错误, 视为"已装 0 个", 并顺手建出来
+		// (否则 /api/store/registry 会 502, 整个插件市场打不开, 也装不了插件)
+		if os.IsNotExist(err) {
+			_ = os.MkdirAll(s.pluginsDir, 0o755)
+			return []StorePlugin{}, nil
+		}
+		return []StorePlugin{}, err
 	}
 	out := []StorePlugin{}
 	for _, e := range entries {

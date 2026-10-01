@@ -66,6 +66,11 @@ func (s *server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 		page = core.AtoiSafe(p)
 	}
 	items, total := mediaSvc.List(root, kind, tag, page)
+	// ★空列表必须是 [], 不能是 null: 前端会读 items.length, null 会抛
+	// "Cannot read properties of null (reading 'length')" 并中断整棵组件树渲染
+	if items == nil {
+		items = []map[string]interface{}{}
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"items": items, "total": total, "page": page, "page_size": 48,
 	})

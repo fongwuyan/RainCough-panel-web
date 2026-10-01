@@ -551,6 +551,10 @@ $SUDO mkdir -p "$APP_DIR"
 $SUDO tar xzf "$TMPD/$BODY_ASSET" -C "$APP_DIR" --strip-components=1
 $SUDO chmod +x "$APP_DIR/raincough"   # Windows 侧打包可能丢执行位, 防御性补回
 $SUDO chown -R "$RUN_USER:$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")" "$APP_DIR" 2>/dev/null || true
+# 插件目录与扩展本地源目录: 全新机器上不存在会导致"插件市场"接口报错(打开 plugins 失败 -> 502),
+# 且插件装不进去 —— 安装时就建好并交给运行用户。
+$SUDO mkdir -p "$APP_DIR/plugins" "$APP_DIR/extension-src/extensions"
+$SUDO chown -R "$RUN_USER:$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")" "$APP_DIR/plugins" "$APP_DIR/extension-src" 2>/dev/null || true
 [ -f "$APP_DIR/VERSION" ] || printf '%s\n' "$PANEL_VERSION" | $SUDO tee "$APP_DIR/VERSION" >/dev/null
 ok "面板文件解压至 $APP_DIR (版本 $(cat "$APP_DIR/VERSION" 2>/dev/null || echo $PANEL_VERSION))"
 if [ "$INSTALL_TOOLS" = "yes" ]; then
