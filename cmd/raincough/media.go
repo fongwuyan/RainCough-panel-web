@@ -28,7 +28,12 @@ func initMediaNS(sd *shared.Shared) {
 func (s *server) handleMediaRoots(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]interface{}{"roots": mediaSvc.Roots()})
+		// ★同理: 没有配置根目录时 Roots() 返回 nil, 会被序列化成 null, 前端 roots.length 会抛错
+		roots := mediaSvc.Roots()
+		if roots == nil {
+			roots = []core.MediaRoot{}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"roots": roots})
 	case http.MethodPost:
 		var b struct {
 			Roots []interface{} `json:"roots"`
@@ -38,6 +43,9 @@ func (s *server) handleMediaRoots(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		mediaSvc.SaveRoots(b.Roots)
+		if b.Roots == nil {
+			b.Roots = []interface{}{}
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "roots": b.Roots})
 	}
 }

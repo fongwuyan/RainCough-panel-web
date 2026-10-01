@@ -47,6 +47,12 @@ func termSave(key string, list []map[string]interface{}) {
 // termFilter 剔除缺主键的畸形项 —— 旧面板迁移残留(实测存过 {"list":{}}),
 // GET 原样返回会被前端渲染成一条"无名主机行"。
 func termFilter(list []map[string]interface{}, key string) []map[string]interface{} {
+	// ★必须返回非 nil 切片: nil 会被 encoding/json 序列化成 null, 前端拿它当数组(如 hosts.length)
+	// 会抛 "Cannot read properties of null (reading 'length')", 在 Vue 响应式里抛出会中断整棵组件树
+	// 渲染 —— 表现成"布局错乱 + 某些页面空白"。全新机器(还没有任何主机/命令)最容易触发。
+	if list == nil {
+		return []map[string]interface{}{}
+	}
 	out := list[:0]
 	for _, item := range list {
 		if str(item, key) != "" {
