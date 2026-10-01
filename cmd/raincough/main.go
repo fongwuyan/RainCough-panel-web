@@ -173,11 +173,13 @@ func main() {
 	// (回调里做特权操作, 所以挂在 server 上; 纯前端扩展这两个函数直接返回)
 	globalExt.SetHooks(
 		func(name string) {
-			if err := s.extBackendUp(name); err != nil {
-				log.Printf("[ext] %s 后端启动失败: %v", name, err)
-			}
+			// 先让接口库把端点建好, 再拉后端进程 —— 反过来后端会先连一次空地址
+			// (虽然 Restart=always 会兜住, 但没必要让它先失败一次)
 			if globalPX != nil {
 				globalPX.Reload()
+			}
+			if err := s.extBackendUp(name); err != nil {
+				log.Printf("[ext] %s 后端启动失败: %v", name, err)
 			}
 		},
 		func(name string) { // 删文件之前: 先停后端
