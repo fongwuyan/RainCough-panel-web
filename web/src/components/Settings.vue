@@ -19,7 +19,6 @@ const navItems = [
   <div class="page">
     <div class="page-head">
       <h1>设置</h1>
-      <div class="subtitle">界面主题、仓库配置与面板更新</div>
     </div>
 
     <div class="page-body">

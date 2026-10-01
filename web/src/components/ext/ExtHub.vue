@@ -56,12 +56,6 @@ async function refresh() {
   }
 }
 
-const repoLabel = computed(() => {
-  if (regSource.value === 'github') return '主面板库'
-  if (regSource.value === 'local') return '本地源'
-  return '不可用'
-})
-
 function newer(ext) {
   return !!(ext.installed && ext.version && ext.installed_version && ext.version !== ext.installed_version)
 }
@@ -146,9 +140,6 @@ onMounted(refresh)
   <div class="page">
     <div class="page-head">
       <h1>系统扩展</h1>
-      <div class="subtitle">
-        内置 {{ builtins.length }} 项 · 已装扩展 {{ extensions.length }} · 仓库 {{ repoLabel }}
-      </div>
     </div>
 
     <div class="page-body">

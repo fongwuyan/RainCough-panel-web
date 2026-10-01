@@ -105,15 +105,11 @@ const installedStats = computed(() => {
   }
   return r
 })
-const installedCount = computed(() => installedStats.value.all)
 
 function regVersionOf(name) {
   const r = regPlugins.value.find((x) => x.name === name)
   return r ? r.version || '' : ''
 }
-
-// 与筛选下拉的"可更新"计数保持同一个口径(全部已装插件, 含内置)
-const updateCount = computed(() => installedStats.value.update)
 
 const installedView = computed(() => {
   const q = installedQ.value.trim().toLowerCase()
@@ -289,12 +285,6 @@ async function doUpdate(name) {
   } finally { busy.value = '' }
 }
 
-const repoLabel = computed(() => {
-  if (regSource.value === 'github') return 'GitHub 清单'
-  if (regSource.value === 'local') return '本机回退'
-  return '…'
-})
-
 async function refreshAll() {
   refreshing.value = true
   try {
@@ -353,9 +343,6 @@ onBeforeUnmount(() => {
   <div class="page">
     <div class="page-head">
       <h1>插件</h1>
-      <div class="subtitle">
-        已装 {{ installedCount }} · 可更新 {{ updateCount }} · 仓库 {{ repoLabel }}
-      </div>
     </div>
 
     <div class="page-body">

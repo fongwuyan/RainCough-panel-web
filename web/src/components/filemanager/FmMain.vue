@@ -719,7 +719,6 @@ watch(paged, () => setupObserver())
 <template>
   <div class="fm-page">
     <h1>文件管理</h1>
-    <div class="subtitle">浏览服务器文件系统 · 上传下载、在线编辑、压缩解压与异步任务</div>
 
     <div class="fm-shell" :class="{ drop: dragOver }"
          @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="onDrop">
