@@ -3,11 +3,20 @@
     {
       "version": "1.0.0",
       "tag": "v1.0.0",
+      "commit": "b004fa2",
       "asset": "raincough-linux-x86_64-1.0.0.tar.gz",
+      "size_bytes": 10414100,
+      "md5": "0d2fce6e2984530138a3cf5223e9ebf3",
+      "release_id": 400689319,
       "date": "2026-10-01",
+      "changelog": "CHANGELOG.md",
       "install": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/v1.0.0/install.sh | bash",
       "install_latest": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/main/install.sh | bash"
     }
   ],
-  "note": "每个版本一条独立安装命令: 用 tag 取 install.sh, 装对应版本资产; latest 跟随 main"
+  "rules": {
+    "version_freeze": "版本号只在明确确认后递增; 代码不做自动 bump",
+    "manual_update": "面板更新为手动三步: 检查 -> 下载并应用 -> 由用户确认是否立即重启",
+    "per_version_install": "每个版本一个 tag + 一条 …/v<版本>/install.sh 安装命令"
+  }
 }
