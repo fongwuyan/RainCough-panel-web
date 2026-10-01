@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 )
@@ -127,28 +129,120 @@ type ghRelease struct {
 	Assets    []ghAsset `json:"assets"`
 }
 
-// panelGHGet 以面板配置的 token 访问 GitHub API(与插件市场同一套凭据)。
-func panelGHGet(path string) ([]byte, error) {
-	req, err := http.NewRequest("GET", "https://api.github.com"+path, nil)
+// 版本号与 tag 形状: 只认 v<数字>.<数字>.<数字>(大小写不敏感的前缀 v 可省),
+// 用于挡住 Release 列表里的非面板资产(如 env-offline-0.1.0)与非法请求参数。
+var (
+	panelVerRe = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$`)
+	panelTagRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
+)
+
+// pruneBackups 只保留最近 keep 份备份目录(backup-*), 其余删掉。
+func pruneBackups(dir string, keep int) {
+	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return
 	}
-	if globalStore != nil {
-		if tok := globalStore.Token(); tok != "" {
-			req.Header.Set("Authorization", "Bearer "+tok)
+	type bkEnt struct {
+		name string
+		mod  time.Time
+	}
+	list := []bkEnt{}
+	for _, e := range ents {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "backup-") {
+			continue
 		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		list = append(list, bkEnt{e.Name(), info.ModTime()})
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	cl := &http.Client{Timeout: 20 * time.Second}
-	resp, err := cl.Do(req)
-	if err != nil {
-		return nil, err
+	if len(list) <= keep {
+		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	sort.Slice(list, func(i, j int) bool { return list[i].mod.Before(list[j].mod) })
+	for _, e := range list[:len(list)-keep] {
+		_ = os.RemoveAll(filepath.Join(dir, e.name))
 	}
-	return io.ReadAll(resp.Body)
+}
+
+// panelGHGet 以面板配置的 token 访问 GitHub API(与插件市场同一套凭据);
+// 直连失败自动回退只读镜像(国内主机直连 github.com 常不通)。
+func panelGHGet(path string) ([]byte, error) {
+	b, _, err := ghFetchBytes("https://api.github.com"+path, true, 20*time.Second)
+	return b, err
+}
+
+// ghMirror 只读镜像前缀; RC_GH_MIRROR 可覆盖, 设为 off/none/- 关闭回退。
+func ghMirror() string {
+	m := strings.TrimSpace(os.Getenv("RC_GH_MIRROR"))
+	if m == "" {
+		m = "https://gh-proxy.com/"
+	}
+	switch m {
+	case "off", "none", "-":
+		return ""
+	}
+	if !strings.HasSuffix(m, "/") {
+		m += "/"
+	}
+	return m
+}
+
+// ghFetchBytes 先直连, 传输层失败或 5xx 时回退镜像; 返回数据与来源(直连/镜像)。
+// 带 token 的请求只发给 github.com 本身, 不发给镜像。
+func ghFetchBytes(raw string, withToken bool, timeout time.Duration) ([]byte, string, error) {
+	urls := []string{raw}
+	if m := ghMirror(); m != "" {
+		urls = append(urls, m+raw)
+	}
+	var lastErr error
+	for i, u := range urls {
+		req, err := http.NewRequest("GET", u, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+		if withToken && i == 0 && globalStore != nil {
+			if tok := globalStore.Token(); tok != "" {
+				req.Header.Set("Authorization", "Bearer "+tok)
+			}
+		}
+		cl := &http.Client{Timeout: timeout}
+		resp, err := cl.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, rerr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if rerr != nil {
+			lastErr = rerr
+			continue
+		}
+		if resp.StatusCode != 200 {
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			// 4xx 是确定的答案(如 404 无此版本), 换镜像也不会变, 直接返回
+			if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+				return nil, "", lastErr
+			}
+			continue
+		}
+		if i == 0 {
+			return body, "直连", nil
+		}
+		return body, "镜像", nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("无可用下载源")
+	}
+	return nil, "", lastErr
+}
+
+// panelGHDownload 下载 Release 资产(大文件, 长超时; 直连不通走镜像)。
+func panelGHDownload(url string) ([]byte, string, error) {
+	return ghFetchBytes(url, true, 300*time.Second)
 }
 
 // handlePanelUpdateCheck GET /api/panel/update/check
@@ -186,8 +280,8 @@ func (s *server) handlePanelUpdateCheck(w http.ResponseWriter, r *http.Request) 
 	list := []map[string]interface{}{}
 	latest := ""
 	for _, rel := range rels {
-		if rel.Draft {
-			continue
+		if rel.Draft || !panelTagRe.MatchString(rel.TagName) {
+			continue // 草稿与非面板版本(如 env-offline-0.1.0 环境包)不进版本列表
 		}
 		ver := strings.TrimPrefix(rel.TagName, "v")
 		if latest == "" {
@@ -256,29 +350,6 @@ func (s *server) readUpdateState() updateState {
 	return st
 }
 
-// panelGHDownload 下载 Release 资产(大文件, 长超时)。
-func panelGHDownload(url string) ([]byte, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if globalStore != nil {
-		if tok := globalStore.Token(); tok != "" {
-			req.Header.Set("Authorization", "Bearer "+tok)
-		}
-	}
-	cl := &http.Client{Timeout: 300 * time.Second}
-	resp, err := cl.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return io.ReadAll(resp.Body)
-}
-
 // handlePanelUpdateState GET /api/panel/update/state -> 是否已应用待重启
 func (s *server) handlePanelUpdateState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -308,6 +379,10 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
 	want := strings.TrimSpace(b.Version)
+	if want != "" && !panelVerRe.MatchString(want) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "版本号非法"})
+		return
+	}
 	select {
 	case panelUpdMu <- struct{}{}:
 	default:
@@ -358,11 +433,12 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 
 		// 2) 下载
 		globalTasks.Update(tid, "下载", 35, "下载 "+assetName)
-		data, err := panelGHDownload(assetURL)
+		data, via, err := panelGHDownload(assetURL)
 		if err != nil {
-			fail("下载失败: " + err.Error())
+			fail("下载失败(直连与镜像均不通): " + err.Error())
 			return
 		}
+		globalTasks.Update(tid, "下载", 45, "已下载 "+assetName+" ("+via+")")
 		ud := s.updateDir()
 		dl := filepath.Join(ud, "dl")
 		stage := filepath.Join(ud, "stage")
@@ -403,6 +479,8 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 			fail("校验失败: 前端产物缺失")
 			return
 		}
+		// 打包可能丢执行位(Windows 侧打 tar), 补回; 否则覆盖后重启起不来
+		_ = os.Chmod(filepath.Join(stage, "raincough"), 0o755)
 
 		// 5) 备份现网(保留最近 3 份)
 		globalTasks.Update(tid, "备份", 85, "备份当前版本")
@@ -427,8 +505,10 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 			fail("应用失败: " + string(out))
 			return
 		}
+		_ = os.Chmod(filepath.Join(base, "raincough"), 0o755)
 		s.writeUpdateState(updateState{Applied: target, Pending: true, Backup: bk, At: time.Now().Unix()})
 		s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: cur, To: target, Action: "apply", Result: "ok", Message: "已应用, 待确认重启", Backup: bk})
+		pruneBackups(ud, 3)
 		done = true
 		globalTasks.Finish(tid, true, "已应用 v"+target+", 待确认重启", "", 100)
 	}()

@@ -20,17 +20,9 @@
 set -euo pipefail
 
 REPO="fongwuyan/RainCough-panel-web"
-# 版本: RC_VERSION 覆盖 > 本脚本所在 tag(发布时写入 PANEL_VERSION) > latest
-PANEL_VERSION="${RC_VERSION:-__PANEL_VERSION__}"
-if [ "$PANEL_VERSION" = "latest" ] || [ -z "$PANEL_VERSION" ]; then
-    TAG=$(curl -fsSL -m 15 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-          | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-    [ -n "$TAG" ] || fail "无法获取最新版本(检查网络或改用 RC_VERSION=<版本>)"
-    PANEL_VERSION="${TAG#v}"
-else
-    TAG="v$PANEL_VERSION"
-fi
-BODY_ASSET="raincough-linux-x86_64-${PANEL_VERSION}.tar.gz"
+# 版本: RC_VERSION 覆盖 > 本脚本内嵌版本(发布时写入, = 所在 tag 的版本) > latest
+# 未替换的占位符(开发树)与空值都按 latest 解析, 见下方「版本解析」。
+RC_PANEL_VERSION="${RC_VERSION:-1.0.0}"
 RELEASE_TAG="env-offline-0.1.0"   # 环境包资产另挂此 Release
 ENV_ASSET="env-offline-linux-x86_64-0.1.0.tar.gz"
 MIRROR="${RC_MIRROR:-https://gh-proxy.com/https://github.com}"
@@ -83,12 +75,26 @@ pip_install() {   # $@ = 参数; 以特权系统级安装(服务以 RUN_USER 运
         || $SUDO python3 -m pip install --no-input --disable-pip-version-check "$@"
 }
 
+# ---------- 版本解析(必须在 fail/info 定义之后) ----------
+# 只认 x.y.z 形态的内嵌版本; 占位符未替换/为空/latest 一律解析最新 Release。
+if printf '%s' "$RC_PANEL_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    PANEL_VERSION="$RC_PANEL_VERSION"
+    TAG="v$PANEL_VERSION"
+else
+    TAG=$(curl -fsSL -m 15 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+          | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+    [ -n "$TAG" ] || fail "无法获取最新版本(检查网络或改用 RC_VERSION=<版本>)"
+    PANEL_VERSION="${TAG#v}"
+fi
+BODY_ASSET="raincough-linux-x86_64-${PANEL_VERSION}.tar.gz"
+
 echo
 echo "${C_C}=======================================================${C_0}"
-echo "${C_C}   RainCough 主面板 (Go) 安装向导  v0.1.0${C_0}"
+echo "${C_C}   RainCough 主面板 (Go) 安装向导  v${PANEL_VERSION}${C_0}"
 echo "${C_C}=======================================================${C_0}"
 echo "  将安装: 面板主体 + 内置功能 + 核心 Python 环境 (不含插件与系统扩展)"
 echo "  插件在面板内【插件】页安装; 系统扩展(媒体中心/任务队列等)在【系统扩展】页安装"
+echo "  下载源: $MIRROR (失败回退 https://github.com; RC_MIRROR 可覆盖)"
 
 # ---------- 步骤 1: yes/no 确认 ----------
 if ! confirm_yes "步骤 1/7: 是否开始安装?"; then
