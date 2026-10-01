@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api'
+import { verNewer } from '../../version'
 import { useExtensions } from '../../stores/extensions'
 
 // 「系统扩展」: 面板内置 7 项功能之外的功能, 以扩展包存于主面板库 extensions/,
@@ -57,7 +58,8 @@ async function refresh() {
 }
 
 function newer(ext) {
-  return !!(ext.installed && ext.version && ext.installed_version && ext.version !== ext.installed_version)
+  return !!(ext.installed && ext.version && ext.installed_version &&
+    verNewer(ext.version, ext.installed_version))
 }
 
 async function storeTaskIds() {

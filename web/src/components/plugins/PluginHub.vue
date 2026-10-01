@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api'
+import { verNewer, verOlderInRepo } from '../../version'
 import { usePlugins } from '../../stores/plugins'
 import { useUi } from '../../stores/ui'
 
@@ -101,7 +102,7 @@ const installedStats = computed(() => {
     const on = typeof h.online === 'boolean' ? h.online : !!p.alive
     if (on) r.online++; else r.offline++
     const latest = regVersionOf(p.name)
-    if (latest && p.version && latest !== p.version) r.update++
+    if (verNewer(latest, p.version)) r.update++
   }
   return r
 })
@@ -118,7 +119,7 @@ const installedView = computed(() => {
       const h = health.value[p.name] || {}
       const online = typeof h.online === 'boolean' ? h.online : !!p.alive
       const latest = regVersionOf(p.name)
-      const upd = !!(latest && p.version && latest !== p.version)
+      const upd = verNewer(latest, p.version)
       return { ...p, online, latency: h.latency_ms, st: h.status || '', latest, upd, builtIn: p.name === 'filemanager' }
     })
     .filter((p) => {
@@ -183,11 +184,17 @@ async function uninstall(p) {
 // (如 AI 生图的设置页签、走 <name>.config.get/save 接口), 故本页只给[打开]。
 
 // ============ 安装 / 更新(市场页签) ============
-// 该插件是否有可用更新: 版本都拿得到且不同才亮徽标。
+// 该插件是否有可用更新: 只有仓库版本**严格更高**才算(见 version.js —— 用 !== 会把降级
+// 也点亮成"有更新", 版本基线归一后机器上的旧号插件就会集体误报)。
 // 本机回退清单里 version 就来自本地 plugin.json, 与已装版本恒相等, 不会误报。
 function canUpdate(p) {
   return !!(p.installed && p.installed_version && p.version &&
-    p.installed_version !== p.version)
+    verNewer(p.version, p.installed_version))
+}
+// 本机版本比仓库高(基线归一后的过渡态): 如实说明, 不谎称"已是最新"
+function localNewer(p) {
+  return !!(p.installed && p.installed_version && p.version &&
+    verOlderInRepo(p.version, p.installed_version))
 }
 
 const marketView = computed(() => {
@@ -500,10 +507,12 @@ onBeforeUnmount(() => {
                   </button>
                 </template>
                 <template v-else>
-                  <!-- 版本相同时不冒充升级: 只有真有新版才给可点的[更新] -->
+                  <!-- 只有仓库版本严格更高才给可点的[更新]; 本机更高时如实说明 -->
                   <button v-if="canUpdate(p)" class="btn btn-sm" :disabled="!!busy" @click="doUpdate(p.name)">
                     {{ busy === p.name ? '更新中…' : '更新' }}
                   </button>
+                  <button v-else-if="localNewer(p)" class="btn btn-sm" disabled style="opacity:.6;cursor:default;"
+                          title="本机版本比仓库基线更高, 仓库不做降级">本机版本较新</button>
                   <button v-else class="btn btn-sm" disabled style="opacity:.6;cursor:default;"
                           title="版本已是最新, 如需修复可先卸载再安装">已是最新</button>
                   <button class="btn btn-sm" @click="tab = 'installed'; installedQ = p.name">管理</button>
