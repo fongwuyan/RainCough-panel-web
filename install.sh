@@ -484,43 +484,37 @@ fetch "$REPO/releases/download/$TAG/$BODY_ASSET" "$TMPD/$BODY_ASSET" || fail "�
 tar tzf "$TMPD/$BODY_ASSET" >/dev/null 2>&1 || fail "面板主体包损坏"
 ok "面板主体就绪: $BODY_ASSET ($(du -h "$TMPD/$BODY_ASSET" | cut -f1))"
 
-# ---------- 步骤 5: 输入信息 ----------
+# ---------- 步骤 5: 固定项(不再提问) ----------
+# 安装目录: 锁死; 运行用户: 取当前调用用户; 端口: 自动挑一个空闲的(默认 3900 起)
 echo
-info "步骤 5/7: 输入安装信息"
-APP_DIR=$(ask_default "Install dir / 安装目录" "/opt/raincough")
-RUN_USER=$(ask_default "Run user / 运行用户" "root")
-PORT="${RC_PORT:-$(ask_default "Panel port / 面板端口" "3900")}"
-case "$PORT" in
-    ''|*[!0-9]) fail "端口必须是数字 / port must be a number: $PORT" ;;
-esac
+info "步骤 5/7: 安装参数(固定)"
+APP_DIR="${RC_APP_DIR:-/opt/raincough}"                 # 目录锁死, 仅留给测试用 RC_APP_DIR 覆盖
+# 谁在调用就以谁的身份跑服务: sudo 调用取 SUDO_USER, 否则取当前登录用户
+RUN_USER="${RC_RUN_USER:-${SUDO_USER:-$(id -un)}}"
+if [ -z "$RUN_USER" ] || ! id "$RUN_USER" >/dev/null 2>&1; then
+    warn "无法确定调用用户, 回退 root"
+    RUN_USER=root
+fi
+# 端口自填: 从 3900 起找第一个空闲端口(被本面板自己占用时沿用原端口)
+if [ -n "${RC_PORT:-}" ]; then
+    PORT="$RC_PORT"
+else
+    PORT=""
+    for cand in $(seq 3900 3999); do
+        if ! port_in_use "$cand" || port_holder_is_us "$cand"; then PORT="$cand"; break; fi
+    done
+    [ -n "$PORT" ] || fail "3900-3999 都不可用 / no free port in 3900-3999"
+fi
+case "$PORT" in ''|*[!0-9]) fail "端口必须是数字 / port must be a number: $PORT" ;; esac
 if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
     fail "端口范围 1-65535 / port out of range: $PORT"
-fi
-if port_in_use "$PORT" && port_holder_is_us "$PORT"; then
-    info "端口 $PORT 由本面板自己占用(重装), 继续使用"
-elif port_in_use "$PORT"; then
-    if [ "$HAVE_TTY" = 0 ]; then
-        # 非交互: 不能反复提问(会死循环) -> 自动往后找一个空闲端口
-        FREE=""
-        for cand in $(seq $((PORT + 1)) $((PORT + 20))); do
-            if ! port_in_use "$cand"; then PORT="$cand"; FREE=yes; break; fi
-        done
-        [ -n "$FREE" ] || fail "端口被占用且非交互模式无法询问 / no free port (use RC_PORT=<port>)"
-        warn "非交互模式: 默认端口被占用, 自动改用 $PORT"
-    else
-        while port_in_use "$PORT"; do
-            warn "端口 $PORT 已被占用, 请换一个"
-            PORT=$(ask_default "Panel port / 面板端口" "3900")
-            case "$PORT" in ''|*[!0-9]) PORT=3900 ;; esac
-        done
-    fi
 fi
 if confirm_yes "Install p7zip-full/ffmpeg? / 是否安装常用功能工具(p7zip/ffmpeg)?"; then
     INSTALL_TOOLS=yes
 else
     INSTALL_TOOLS=no
 fi
-echo "  摘要: 目录=$APP_DIR 用户=$RUN_USER 端口=$PORT 功能工具=$INSTALL_TOOLS"
+ok "目录 $APP_DIR · 用户 $RUN_USER · 端口 $PORT · 功能工具 $INSTALL_TOOLS"
 
 # 静态 IP 固定(可选): 把当前 DHCP 分配到的地址原样写成静态配置, 免得以后地址漂移
 DO_STATIC=no
@@ -556,7 +550,7 @@ fi
 $SUDO mkdir -p "$APP_DIR"
 $SUDO tar xzf "$TMPD/$BODY_ASSET" -C "$APP_DIR" --strip-components=1
 $SUDO chmod +x "$APP_DIR/raincough"   # Windows 侧打包可能丢执行位, 防御性补回
-$SUDO chown -R "$RUN_USER:$RUN_USER" "$APP_DIR" 2>/dev/null || true
+$SUDO chown -R "$RUN_USER:$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")" "$APP_DIR" 2>/dev/null || true
 [ -f "$APP_DIR/VERSION" ] || printf '%s\n' "$PANEL_VERSION" | $SUDO tee "$APP_DIR/VERSION" >/dev/null
 ok "面板文件解压至 $APP_DIR (版本 $(cat "$APP_DIR/VERSION" 2>/dev/null || echo $PANEL_VERSION))"
 if [ "$INSTALL_TOOLS" = "yes" ]; then
@@ -572,6 +566,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$RUN_USER
+Group=$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")
 WorkingDirectory=$APP_DIR
 ExecStart=$APP_DIR/raincough -port $PORT
 Restart=always

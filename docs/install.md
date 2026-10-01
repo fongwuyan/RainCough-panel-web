@@ -18,6 +18,20 @@ curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/Rain
 
 > 以后每发一个版本，就多一条 `…/v<版本>/install.sh` 命令；清单见仓库根 `releases.json`。
 
+## 安装参数（固定，不再提问）
+
+| 项 | 值 |
+|---|---|
+| 安装目录 | **锁死 `/opt/raincough`**（不提问；仅测试可用 `RC_APP_DIR` 覆盖） |
+| 运行用户 | **当前调用安装脚本的用户**（`sudo` 调用取 `SUDO_USER`，否则取登录用户；不提问） |
+| 端口 | **自动挑选**：从 `3900` 起取第一个空闲端口；被本面板自己占用（重装）则沿用原端口；可用 `RC_PORT` 指定 |
+
+向导只剩三个问题：是否开始、是否装 `p7zip-full`/`ffmpeg`、是否把当前地址固定为静态。
+
+> ⚠️ 服务以普通用户运行时，需要 root 的操作（安装/更新系统扩展、面板自更新重启）走的是**面板设置里
+> 配置的 sudo 密码**（内部执行 `echo <密码> | sudo -S ...`）。装完请在面板设置里填上该用户的 sudo 密码，
+> 否则扩展安装/更新、自更新重启这类功能会失败。想让这些功能免配置，就保持以 root 运行（`sudo bash install.sh`）。
+
 ## 覆盖项（脚本化/离线用）
 
 | 变量 | 作用 |
@@ -25,6 +39,9 @@ curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/Rain
 | `RC_VERSION=1.0.0` | 强制安装指定版本（等价于用该版本 tag 的脚本） |
 | `RC_MIRROR=https://github.com` | 换下载镜像（默认 gh-proxy） |
 | `RC_UNIT_NAME=` | 覆盖 systemd 单元名（多实例/测试隔离） |
+| `RC_APP_DIR=` | 覆盖安装目录（默认锁死 `/opt/raincough`） |
+| `RC_RUN_USER=` | 覆盖服务运行用户（默认取调用安装脚本的用户） |
+| `RC_PORT=` | 覆盖面板端口（默认从 3900 起自动挑空闲端口） |
 | `RC_NET_STATIC=yes\|no\|dry` | 是否把当前 DHCP 地址固定为静态（默认在向导里问一次，回车=yes） |
 | `RC_NET_FORCE=1` | 已经是静态也强写一遍（默认跳过） |
 | `RC_NET_DRYRUN=1` | 只看"将要写入什么"，不落盘 |
