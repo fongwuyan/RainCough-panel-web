@@ -72,7 +72,8 @@ function extActive(x) { return route.name === 'ext-view' && String(route.params.
 
 <template>
   <aside class="sidebar">
-    <PanelUpdate v-if="showUpdate" :anchor="updBtn" @close="showUpdate = false" />
+    <!-- 常驻挂载: 它除了悬浮窗还要负责"检测到新版本自动弹确认窗" -->
+    <PanelUpdate :open="showUpdate" :anchor="updBtn" @close="showUpdate = false" />
     <div class="sidebar-header">
       <span class="brand-dot"></span>
       <h2>RainCough</h2>
