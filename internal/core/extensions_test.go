@@ -206,3 +206,95 @@ func TestExtRemoveExisting(t *testing.T) {
 		t.Fatal("卸载后已装列表应为空")
 	}
 }
+
+// 安装中断留下的 <name>.tmp 带清单, 旧实现会把它当"已装扩展"列出来(还会和真扩展重名)。
+func TestExtInstalledSkipsTemps(t *testing.T) {
+	instDir := t.TempDir()
+	writeExt(t, instDir, "media", map[string]interface{}{"name": "media", "version": "1.0.0"}, true)
+	writeExt(t, instDir, "media"+tmpSuffix, map[string]interface{}{"name": "media", "version": "9.9.9"}, true)
+	writeExt(t, instDir, ".hidden", map[string]interface{}{"name": "hidden", "version": "1.0.0"}, true)
+	es := NewExtStore(instDir, "", nil)
+	list := es.Installed()
+	if len(list) != 1 || list[0].Name != "media" || list[0].Version != "1.0.0" {
+		t.Fatalf("应只列出真扩展 media/1.0.0, 实际: %+v", list)
+	}
+}
+
+// 启动时清理 .tmp 残留(启动时不可能有正在进行的安装)。
+func TestExtSweepTemps(t *testing.T) {
+	instDir := t.TempDir()
+	writeExt(t, instDir, "media", map[string]interface{}{"name": "media", "version": "1.0.0"}, true)
+	tmp := writeExt(t, instDir, "tasks"+tmpSuffix, map[string]interface{}{"name": "tasks", "version": "1.0.0"}, true)
+	es := NewExtStore(instDir, "", nil) // 构造即清扫
+	if n, _ := es.SweepTemps(); n != 0 {
+		t.Fatalf("构造时已清扫, 再清扫应为 0, 实际 %d", n)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Fatal(".tmp 残留应被删除")
+	}
+	if len(es.Installed()) != 1 {
+		t.Fatal("真扩展不能被误删")
+	}
+}
+
+// 目录名与清单 name 错位的历史安装: 必须仍能打开(AssetPath)与卸载(Remove)。
+// 旧实现 Remove 删 <dir>/<name> 落空却回 success, 扩展永远卸不掉。
+func TestExtManifestDirMismatch(t *testing.T) {
+	instDir := t.TempDir()
+	dir := writeExt(t, instDir, "wrongdir", map[string]interface{}{"name": "media", "version": "1.0.0"}, true)
+	es := NewExtStore(instDir, "", nil)
+
+	if full, ok := es.AssetPath("media", "assets/extension.js"); !ok || !strings.HasPrefix(full, dir) {
+		t.Fatalf("错位安装应仍能定位产物, got ok=%v path=%s", ok, full)
+	}
+	if err := es.Remove("media"); err != nil {
+		t.Fatalf("错位安装应能卸载: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("卸载应删掉实际目录 wrongdir")
+	}
+	if len(es.Installed()) != 0 {
+		t.Fatal("卸载后已装列表应为空")
+	}
+}
+
+// 清单 name 与包名不一致必须在安装校验阶段拦下(否则装完既打不开也卸不掉)。
+func TestExtVerifyInstalledNameMismatch(t *testing.T) {
+	instDir := t.TempDir()
+	es := NewExtStore(instDir, "", nil)
+	dir := writeExt(t, instDir, "media", map[string]interface{}{"name": "other", "version": "1.0.0"}, true)
+	if err := es.verifyInstalled("media", dir); err == nil {
+		t.Fatal("name 不一致应报错")
+	}
+	dir2 := writeExt(t, instDir, "tasks", map[string]interface{}{"name": "tasks", "version": "1.0.0"}, false)
+	if err := es.verifyInstalled("tasks", dir2); err == nil {
+		t.Fatal("产物缺失应报错")
+	}
+	dir3 := writeExt(t, instDir, "scheduler", map[string]interface{}{"name": "scheduler", "version": "1.0.0"}, true)
+	if err := es.verifyInstalled("scheduler", dir3); err != nil {
+		t.Fatalf("正常扩展不应报错: %v", err)
+	}
+}
+
+// 路径穿越回归: 改过 AssetPath 的目录解析后, 解析结果必须始终落在该扩展目录内。
+// (实现是 filepath.Clean("/"+rel) 先锚定根 —— ".." 会被折到扩展目录根, 不会逃出去)
+func TestExtAssetPathStaysInsideExtDir(t *testing.T) {
+	instDir := t.TempDir()
+	dir := writeExt(t, instDir, "media", map[string]interface{}{"name": "media", "version": "1.0.0"}, true)
+	es := NewExtStore(instDir, "", nil)
+	for _, rel := range []string{"../extension.json", "../../etc/passwd", "assets/../../etc/passwd", "../media/assets/extension.js", "", "/"} {
+		full, ok := es.AssetPath("media", rel)
+		if !ok {
+			continue
+		}
+		if full != dir && !strings.HasPrefix(full, dir+string(os.PathSeparator)) {
+			t.Fatalf("路径 %q 逃出了扩展目录: %s", rel, full)
+		}
+	}
+	if _, ok := es.AssetPath("media", "../../etc/passwd"); ok {
+		t.Fatal("扩展目录外的文件不应可读")
+	}
+	if full, ok := es.AssetPath("media", "assets/extension.js"); !ok || filepath.Dir(filepath.Dir(full)) != dir {
+		t.Fatalf("正常产物应可读: ok=%v %s", ok, full)
+	}
+}

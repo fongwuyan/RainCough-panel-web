@@ -63,11 +63,90 @@ type ExtStore struct {
 
 // NewExtStore 创建扩展仓储。
 func NewExtStore(dir, srcDir string, store *Store) *ExtStore {
-	return &ExtStore{
+	e := &ExtStore{
 		dir: dir, srcDir: srcDir, store: store,
 		client: &http.Client{Timeout: 60 * time.Second},
 		mu:     make(chan struct{}, 1),
 	}
+	// 清掉上次安装中断留下的 <name>.tmp: 它们带清单, 会被当成"已装扩展"列出来,
+	// 而且名字与真实扩展重名, 卸载时会指错目录(2026-10-01 审计)。
+	if n, err := e.SweepTemps(); err == nil && n > 0 {
+		fmt.Fprintf(os.Stderr, "[ext] 清理残留临时扩展目录 %d 个\n", n)
+	}
+	return e
+}
+
+// SweepTemps 删除扩展目录下的 *.tmp 残留(安装中断产物), 返回清理个数。
+// 启动时调用是安全的: 此时没有正在进行的安装。
+func (e *ExtStore) SweepTemps() (int, error) {
+	entries, err := os.ReadDir(e.dir)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, ent := range entries {
+		if !ent.IsDir() || !strings.HasSuffix(ent.Name(), tmpSuffix) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(e.dir, ent.Name())); err == nil {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// tmpSuffix 安装中转目录后缀(fetchGitHubDir 落到 <name>.tmp 再改名)。
+const tmpSuffix = ".tmp"
+
+// isExtDirName 是否是合法的"已装扩展目录名"(跳过隐藏目录与安装中转目录)。
+func isExtDirName(n string) bool {
+	return n != "" && !strings.HasPrefix(n, ".") && !strings.HasSuffix(n, tmpSuffix)
+}
+
+// resolveExtDir 按扩展名定位它的目录。
+// 先看同名目录(正常情况); 再按清单里的 name 匹配 —— 历史上有过"目录名 ≠ 清单 name"的
+// 错位安装, 那种扩展会打不开也卸不掉(AssetPath 找 <dir>/<name> 落空, Remove 删不掉,
+// 却回 success), 这里统一按清单定位, 让它们也能被打开与卸载。
+func (e *ExtStore) resolveExtDir(name string) (string, bool) {
+	if !validExtName(name) {
+		return "", false
+	}
+	same := filepath.Join(e.dir, name)
+	if m, err := readExtManifest(same); err == nil {
+		if m.Name == "" || strings.EqualFold(m.Name, name) {
+			return same, true
+		}
+	}
+	entries, err := os.ReadDir(e.dir)
+	if err != nil {
+		return "", false
+	}
+	for _, ent := range entries {
+		if !ent.IsDir() || !isExtDirName(ent.Name()) {
+			continue
+		}
+		sub := filepath.Join(e.dir, ent.Name())
+		if m, err := readExtManifest(sub); err == nil && strings.EqualFold(m.Name, name) {
+			return sub, true
+		}
+	}
+	return "", false
+}
+
+// verifyInstalled 安装后校验: 清单可读、清单 name 与包名一致、产物存在。
+// name 不一致必须拦下来 —— 否则目录名与清单名各说各话, 该扩展既打不开也卸不掉。
+func (e *ExtStore) verifyInstalled(name, dir string) error {
+	m, err := readExtManifest(dir)
+	if err != nil {
+		return fmt.Errorf("扩展清单缺失或损坏: extension.json")
+	}
+	if m.Name != "" && !strings.EqualFold(m.Name, name) {
+		return fmt.Errorf("扩展清单 name(%s) 与包名(%s) 不一致, 拒绝安装", m.Name, name)
+	}
+	if _, err := os.Stat(filepath.Join(dir, m.Entry)); err != nil {
+		return fmt.Errorf("扩展前端产物缺失: %s (需先构建)", m.Entry)
+	}
+	return nil
 }
 
 // Dir 已装扩展目录。
@@ -119,8 +198,8 @@ func (e *ExtStore) Installed() []Extension {
 		return out
 	}
 	for _, ent := range entries {
-		if !ent.IsDir() || ent.Name() == "" {
-			continue
+		if !ent.IsDir() || !isExtDirName(ent.Name()) {
+			continue // 隐藏目录与 <name>.tmp 安装残留不算已装扩展
 		}
 		sub := filepath.Join(e.dir, ent.Name())
 		m, err := readExtManifest(sub)
@@ -320,19 +399,17 @@ func (e *ExtStore) Install(name string, task *TaskStore) (string, error) {
 
 		task.Update(tid, "校验产物", 85, "校验扩展清单与产物...")
 		sub := filepath.Join(e.dir, name)
-		m, err := readExtManifest(sub)
-		if err != nil {
-			_ = os.RemoveAll(sub)
-			task.Update(tid, "", 0, "扩展清单缺失或损坏: extension.json")
+		if err := e.verifyInstalled(name, sub); err != nil {
+			_ = os.RemoveAll(sub) // 校验不过不留半成品(目录名/清单名错位会让它既打不开也卸不掉)
+			task.Update(tid, "", 0, err.Error())
 			return
 		}
-		if _, err := os.Stat(filepath.Join(sub, m.Entry)); err != nil {
-			_ = os.RemoveAll(sub)
-			task.Update(tid, "", 0, "扩展前端产物缺失: "+m.Entry+" (需先构建)")
-			return
+		label := name
+		if m, err := readExtManifest(sub); err == nil && m.Label != "" {
+			label = m.Label
 		}
 		done = true
-		task.Finish(tid, true, "扩展安装成功: "+m.Label+" ("+name+")", "", 100)
+		task.Finish(tid, true, "扩展安装成功: "+label+" ("+name+")", "", 100)
 	}()
 	return "queued", nil
 }
@@ -431,7 +508,7 @@ func (e *ExtStore) copyInto(src, name string) error {
 	return Copy(src, dst)
 }
 
-// Remove 卸载扩展。
+// Remove 卸载扩展: 按清单定位目录后整体删除, 并清掉同名安装残留。
 func (e *ExtStore) Remove(name string) error {
 	if !validExtName(name) {
 		return fmt.Errorf("非法扩展名: %q", name)
@@ -439,22 +516,28 @@ func (e *ExtStore) Remove(name string) error {
 	if isBuiltinName(name) {
 		return fmt.Errorf("%s 是内置功能, 不可卸载", name)
 	}
-	if _, ok := e.InstalledByName(name); !ok {
+	dir, ok := e.resolveExtDir(name)
+	if !ok {
 		return fmt.Errorf("扩展未安装: %s", name)
 	}
-	return os.RemoveAll(filepath.Join(e.dir, name))
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	_ = os.RemoveAll(filepath.Join(e.dir, name+tmpSuffix))
+	return nil
 }
 
 // AssetPath 解析扩展静态产物路径(防目录穿越), 返回绝对路径。
+// 目录按清单解析, 与卸载同一套逻辑, 避免"列得出来却打不开"。
 func (e *ExtStore) AssetPath(name, rel string) (string, bool) {
-	if !validExtName(name) {
+	base, ok := e.resolveExtDir(name)
+	if !ok {
 		return "", false
 	}
 	rel = strings.TrimPrefix(rel, "/")
 	if rel == "" {
 		return "", false
 	}
-	base := filepath.Join(e.dir, name)
 	full := filepath.Join(base, filepath.Clean("/"+rel))
 	if full != base && !strings.HasPrefix(full, base+string(os.PathSeparator)) {
 		return "", false

@@ -26,6 +26,16 @@ function readReg(n) {
   return (reg && typeof reg.mount === 'function') ? reg : null
 }
 
+// 卸掉内存里的旧注册: 扩展卸载/更新后, 上一次 eval 进来的代码还挂在 window 上,
+// 若这次取产物失败(404)就会把过期版本挂出来 —— 宁可报错, 不要挂旧代码。
+function dropReg(n) {
+  const regMap = window.__rcExt__
+  if (!regMap) return
+  for (const k in regMap) {
+    if (k.toLowerCase() === n.toLowerCase()) delete regMap[k]
+  }
+}
+
 async function loadExt() {
   mode.value = 'loading'
   err.value = ''
@@ -34,12 +44,13 @@ async function loadExt() {
   try {
     const url = `/api/ext/${encodeURIComponent(n)}/assets/extension.js`
     const r = await fetch(url, { cache: 'no-store' })
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${url}`)
+    if (!r.ok) throw new Error(`取扩展产物失败: HTTP ${r.status}`)
     const code = await r.text()
     if (!code || code.length < 50) throw new Error(`产物为空或异常(${code.length}B)`)
+    dropReg(n)
     ;(0, eval)(code)
     const reg = readReg(n)
-    if (!reg) throw new Error('产物未注册 mount (window.__rcExt__[' + n + '])')
+    if (!reg) throw new Error('产物没有注册挂载点(window.__rcExt__[' + n + '])')
     mode.value = 'ext'
     await nextTick()
     if (mountEl.value) {
@@ -49,6 +60,7 @@ async function loadExt() {
       })
     }
   } catch (e) {
+    dropReg(n)
     err.value = (e && e.message) || String(e)
     mode.value = 'missing'
   }
@@ -67,15 +79,8 @@ onBeforeUnmount(() => {
     <div v-if="mode === 'ext'" ref="mountEl" class="ext-mount"></div>
     <div v-else-if="mode === 'loading'" class="hint" style="padding:20px;">加载扩展...</div>
     <div v-else class="page">
-      <div class="page-head">
-        <h1>扩展未就绪</h1>
-        <div class="subtitle">{{ name }}</div>
-      </div>
       <div class="page-body">
-        <div class="ext-err">{{ err }}</div>
-        <div class="hint" style="padding:10px 2px;">
-          该扩展可能尚未安装, 或产物缺失。到「系统扩展」页安装后再打开。
-        </div>
+        <div class="ext-err">{{ name }}: {{ err }}</div>
         <button class="btn btn-sm" @click="router.push('/ext')">前往系统扩展</button>
       </div>
     </div>
