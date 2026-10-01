@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"time"
 )
 
 // ---- 面板版本与更新(手动) /api/panel ----
@@ -103,5 +106,108 @@ func (s *server) handlePanelInstallCommand(w http.ResponseWriter, r *http.Reques
 			out["size_bytes"] = e.Size
 		}
 	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ---- 更新检查(只读: 不下载、不改文件、不重启) ----
+
+type ghAsset struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	URL  string `json:"browser_download_url"`
+}
+
+type ghRelease struct {
+	TagName   string    `json:"tag_name"`
+	Name      string    `json:"name"`
+	Body      string    `json:"body"`
+	Draft     bool      `json:"draft"`
+	Published string    `json:"published_at"`
+	Assets    []ghAsset `json:"assets"`
+}
+
+// panelGHGet 以面板配置的 token 访问 GitHub API(与插件市场同一套凭据)。
+func panelGHGet(path string) ([]byte, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if globalStore != nil {
+		if tok := globalStore.Token(); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	cl := &http.Client{Timeout: 20 * time.Second}
+	resp, err := cl.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// handlePanelUpdateCheck GET /api/panel/update/check
+// 查主面板库 Release 列表与本机 VERSION 比对, 返回每个版本的 tag/更新日志/资产;
+// 只读接口 —— 下载与应用是另外的手动接口。
+func (s *server) handlePanelUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	cur := s.panelVersion()
+	out := map[string]interface{}{"current": cur, "source": "github", "versions": []map[string]interface{}{}}
+	if globalStore == nil {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	repo := globalStore.GetConfig().PanelRepo
+	if repo.Owner == "" || repo.Repo == "" {
+		out["error"] = "未配置面板仓库"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	raw, err := panelGHGet(fmt.Sprintf("/repos/%s/%s/releases?per_page=30", repo.Owner, repo.Repo))
+	if err != nil {
+		out["error"] = err.Error()
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	var rels []ghRelease
+	if err := json.Unmarshal(raw, &rels); err != nil {
+		out["error"] = "Release 列表解析失败"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	list := []map[string]interface{}{}
+	latest := ""
+	for _, rel := range rels {
+		if rel.Draft {
+			continue
+		}
+		ver := strings.TrimPrefix(rel.TagName, "v")
+		if latest == "" {
+			latest = ver
+		}
+		assetName, assetURL := "", ""
+		var assetSize int64
+		for _, a := range rel.Assets {
+			if strings.HasPrefix(a.Name, "raincough-linux-x86_64-") {
+				assetName, assetSize, assetURL = a.Name, a.Size, a.URL
+				break
+			}
+		}
+		list = append(list, map[string]interface{}{
+			"version": ver, "tag": rel.TagName, "notes": rel.Body, "date": rel.Published,
+			"asset": assetName, "size_bytes": assetSize, "url": assetURL,
+			"installed": ver == cur,
+		})
+	}
+	out["versions"] = list
+	out["latest"] = latest
+	out["has_update"] = latest != "" && cur != "" && latest != cur
 	writeJSON(w, http.StatusOK, out)
 }

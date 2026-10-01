@@ -265,6 +265,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	// 面板版本与安装命令(只读; 面板更新为手动三步, 见 core/panel 设计)
 	mux.HandleFunc("/api/panel/version", s.handlePanelVersion)
 	mux.HandleFunc("/api/panel/install-command", s.handlePanelInstallCommand)
+	mux.HandleFunc("/api/panel/update/check", s.handlePanelUpdateCheck)
 
 	// ---- 系统中心(服务/进程/日志/防火墙) ----
 	mux.HandleFunc("/api/sysfunc/", s.handleSysCenter)
