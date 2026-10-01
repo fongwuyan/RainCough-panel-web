@@ -134,7 +134,44 @@ type ghRelease struct {
 var (
 	panelVerRe = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$`)
 	panelTagRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
+	assetRefRe = regexp.MustCompile(`index-[A-Za-z0-9_-]+\.(?:js|css)`)
 )
+
+// copyTreeInto 把 src 目录内容合并覆盖到 dst。
+// 必须带 --remove-destination: 运行中的可执行文件不能被 truncate 打开(ETXTBSY),
+// 直接 cp 覆盖会得到 "cp: cannot create regular file ...: Text file busy"。
+func copyTreeInto(src, dst string) (string, error) {
+	out, err := exec.Command("sh", "-c",
+		fmt.Sprintf("cp -a --remove-destination %s/. %s/", src, dst)).CombinedOutput()
+	return string(out), err
+}
+
+// pruneStaleAssets 删掉 public/assets 下不再被 index.html 引用的旧构建产物。
+// cp 是合并语义, 不清会把上一版的 index-*.js/css 留在磁盘上, 排查时容易看错版本。
+func pruneStaleAssets(pub string) {
+	b, err := os.ReadFile(filepath.Join(pub, "index.html"))
+	if err != nil {
+		return
+	}
+	keep := map[string]bool{}
+	for _, m := range assetRefRe.FindAllString(string(b), -1) {
+		keep[m] = true
+	}
+	ents, err := os.ReadDir(filepath.Join(pub, "assets"))
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		n := e.Name()
+		if e.IsDir() || keep[n] || !strings.HasPrefix(n, "index-") {
+			continue
+		}
+		if !strings.HasSuffix(n, ".js") && !strings.HasSuffix(n, ".css") {
+			continue
+		}
+		_ = os.Remove(filepath.Join(pub, "assets", n))
+	}
+}
 
 // pruneBackups 只保留最近 keep 份备份目录(backup-*), 其余删掉。
 func pruneBackups(dir string, keep int) {
@@ -192,24 +229,37 @@ func ghMirror() string {
 // ghFetchBytes 先直连, 传输层失败或 5xx 时回退镜像; 返回数据与来源(直连/镜像)。
 // 带 token 的请求只发给 github.com 本身, 不发给镜像。
 func ghFetchBytes(raw string, withToken bool, timeout time.Duration) ([]byte, string, error) {
-	urls := []string{raw}
+	atts := []ghAttempt{{url: raw, label: "直连", timeout: timeout, token: withToken}}
 	if m := ghMirror(); m != "" {
-		urls = append(urls, m+raw)
+		atts = append(atts, ghAttempt{url: m + raw, label: "镜像", timeout: timeout})
 	}
+	return ghTry(atts)
+}
+
+// ghAttempt 一次抓取尝试。
+type ghAttempt struct {
+	url     string
+	label   string
+	timeout time.Duration
+	token   bool
+}
+
+// ghTry 按顺序尝试各来源; 4xx 视为确定答案立即返回, 传输层错误/5xx 才换下一个。
+func ghTry(atts []ghAttempt) ([]byte, string, error) {
 	var lastErr error
-	for i, u := range urls {
-		req, err := http.NewRequest("GET", u, nil)
+	for _, a := range atts {
+		req, err := http.NewRequest("GET", a.url, nil)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
-		if withToken && i == 0 && globalStore != nil {
+		if a.token && globalStore != nil {
 			if tok := globalStore.Token(); tok != "" {
 				req.Header.Set("Authorization", "Bearer "+tok)
 			}
 		}
-		cl := &http.Client{Timeout: timeout}
+		cl := &http.Client{Timeout: a.timeout}
 		resp, err := cl.Do(req)
 		if err != nil {
 			lastErr = err
@@ -223,16 +273,12 @@ func ghFetchBytes(raw string, withToken bool, timeout time.Duration) ([]byte, st
 		}
 		if resp.StatusCode != 200 {
 			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-			// 4xx 是确定的答案(如 404 无此版本), 换镜像也不会变, 直接返回
 			if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 				return nil, "", lastErr
 			}
 			continue
 		}
-		if i == 0 {
-			return body, "直连", nil
-		}
-		return body, "镜像", nil
+		return body, a.label, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("无可用下载源")
@@ -240,9 +286,16 @@ func ghFetchBytes(raw string, withToken bool, timeout time.Duration) ([]byte, st
 	return nil, "", lastErr
 }
 
-// panelGHDownload 下载 Release 资产(大文件, 长超时; 直连不通走镜像)。
+// panelGHDownload 下载 Release 资产。
+// 直连 github.com 在国内网络下常常"能连但极慢"(实测 30KB/s, 10MB 要几分钟),
+// 所以直连只给 45s, 超时立刻换镜像; 镜像也不通时再用长超时重试直连(慢速但可用)。
 func panelGHDownload(url string) ([]byte, string, error) {
-	return ghFetchBytes(url, true, 300*time.Second)
+	atts := []ghAttempt{{url: url, label: "直连", timeout: 45 * time.Second, token: true}}
+	if m := ghMirror(); m != "" {
+		atts = append(atts, ghAttempt{url: m + url, label: "镜像", timeout: 300 * time.Second})
+	}
+	atts = append(atts, ghAttempt{url: url, label: "直连(慢速重试)", timeout: 300 * time.Second, token: true})
+	return ghTry(atts)
 }
 
 // handlePanelUpdateCheck GET /api/panel/update/check
@@ -500,12 +553,12 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 
 		// 6) 覆盖(运行中的进程不受影响, 不重启)
 		globalTasks.Update(tid, "应用", 95, "覆盖面板文件(不重启)")
-		if out, err := exec.Command("sh", "-c",
-			fmt.Sprintf("cp -a %s/. %s/", stage, base)).CombinedOutput(); err != nil {
-			fail("应用失败: " + string(out))
+		if out, err := copyTreeInto(stage, base); err != nil {
+			fail("应用失败: " + out)
 			return
 		}
 		_ = os.Chmod(filepath.Join(base, "raincough"), 0o755)
+		pruneStaleAssets(filepath.Join(base, "public"))
 		s.writeUpdateState(updateState{Applied: target, Pending: true, Backup: bk, At: time.Now().Unix()})
 		s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: cur, To: target, Action: "apply", Result: "ok", Message: "已应用, 待确认重启", Backup: bk})
 		pruneBackups(ud, 3)
@@ -640,11 +693,13 @@ func (s *server) handlePanelUpdateRollback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	from := s.panelVersion()
-	if out, err := exec.Command("sh", "-c", fmt.Sprintf("cp -a %s/. %s/", bk, s.cfg.BaseDir)).CombinedOutput(); err != nil {
-		s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: from, Action: "rollback", Result: "fail", Message: string(out), Backup: bk})
-		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "回滚失败: " + string(out)})
+	if out, err := copyTreeInto(bk, s.cfg.BaseDir); err != nil {
+		s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: from, Action: "rollback", Result: "fail", Message: out, Backup: bk})
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "回滚失败: " + out})
 		return
 	}
+	_ = os.Chmod(filepath.Join(s.cfg.BaseDir, "raincough"), 0o755)
+	pruneStaleAssets(filepath.Join(s.cfg.BaseDir, "public"))
 	to := s.panelVersion()
 	s.writeUpdateState(updateState{Applied: "", Pending: true, Backup: bk, At: time.Now().Unix()})
 	s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: from, To: to, Action: "rollback", Result: "ok", Message: "已回滚, 待确认重启", Backup: bk})
