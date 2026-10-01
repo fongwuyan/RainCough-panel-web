@@ -373,14 +373,10 @@ onBeforeUnmount(() => {
       <div v-if="showLog" class="log-box">
         <div class="log-head">
           <span class="log-title">插件仓更新日志{{ logVer ? ' · 基线 v' + logVer : '' }}</span>
-          <span class="log-note">版本号只在明确确认后递增</span>
         </div>
         <div v-if="logLoading" class="hint">读取中…</div>
         <div v-else-if="logError" class="hint">{{ logError }}</div>
         <pre v-else class="log-pre">{{ logText || '(无更新日志)' }}</pre>
-        <div class="hint" style="margin-top:6px;">
-          每个插件独立维护 plugin.json:version; 更新在「插件市场」页签逐个插件进行。
-        </div>
       </div>
 
       <div v-if="status" class="status-line" :class="statusOk ? 'ok' : 'fail'"
@@ -566,7 +562,6 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 .log-title { font-weight: 700; font-size: 13px; }
-.log-note { font-size: 11px; color: var(--text-faint); }
 .log-pre {
   margin: 0;
   max-height: 260px;

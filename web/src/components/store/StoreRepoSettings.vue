@@ -129,8 +129,5 @@ onMounted(loadSettings)
     <div v-if="status" class="status-line" :class="statusOk ? 'ok' : 'fail'" style="padding:8px 0 0;">
       {{ status }}
     </div>
-    <div class="hint" style="padding-top:8px;">
-      改了仓库或 Token 后保存, 再回到 插件页 的插件市场点刷新即可拉取新清单。
-    </div>
   </div>
 </template>

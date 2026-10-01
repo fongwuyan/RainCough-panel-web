@@ -831,7 +831,7 @@ watch(paged, () => setupObserver())
 
         <!-- 操作参数(重做: 默认折叠 + 分组标签, 不用 ⚙ 符号) -->
         <details class="fm-params">
-          <summary>操作参数<span class="fm-params-hint">移动/复制目标 · 解压密码 · 哈希算法 · 打包 · 目录下载 · 重名策略</span></summary>
+          <summary>操作参数</summary>
           <div class="fm-params-row">
             <label class="fm-lbl fm-grow">移动/复制目标
               <input v-model="targetDir" class="input fm-target" placeholder="绝对路径" @keydown.enter="openPicker" />
@@ -1222,7 +1222,6 @@ watch(paged, () => setupObserver())
   font-size: 12.5px; font-weight: 600; color: var(--text-muted);
 }
 .fm-params summary:hover { color: var(--text); }
-.fm-params-hint { font-weight: 400; font-size: 11.5px; color: var(--text-faint); }
 .fm-params-row {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--border);

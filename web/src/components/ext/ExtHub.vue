@@ -155,7 +155,6 @@ onMounted(refresh)
 
       <div class="section">
         <div class="section-title">内置功能 ({{ builtins.length }})</div>
-        <div class="hint" style="margin-bottom:10px;">随面板主体安装, 不可卸载。</div>
         <div class="ext-grid">
           <div v-for="b in builtins" :key="b.name" class="ext-card builtin" @click="router.push(b.route || '/')">
             <div class="ext-name">{{ b.label }}</div>
