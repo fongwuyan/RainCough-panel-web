@@ -1,3 +1,21 @@
 {
-  "extensions": []
+  "extensions": [
+    {
+      "name": "drivers",
+      "label": "驱动",
+      "version": "1.0.0",
+      "description": "硬件识别、内核模块与 NVIDIA 矿卡魔改驱动（P104-100 / P106-100 / CMP 30HX）",
+      "author": "RainCough",
+      "icon": "DV",
+      "entry": "assets/extension.js",
+      "route": "/ext/drivers",
+      "backend": { "lang": "python", "exec": ["python3", "server.py"], "capabilities": ["linux", "apt", "kmod", "nvidia", "systemd"] },
+      "interfaces": [
+        { "id": "drivers.gpu", "visibility": "all", "version": "1", "description": "NVIDIA 卡专项体检: 型号/架构/算力/驱动来源/输出接口/链路/GSP/是否矿卡/匹配补丁条目/版本偏好" },
+        { "id": "drivers.repo", "visibility": "all", "version": "1", "description": "补丁清单来源状态与条目（主面板库 drivers/registry.json；直连 → gh-proxy 镜像 → 本地目录）" },
+        { "id": "drivers.repo.config", "visibility": "main", "version": "1", "description": "配置补丁清单来源（分支/镜像/本地目录/令牌；令牌只写不读）" },
+        { "id": "drivers.install", "visibility": "main", "version": "1", "description": "两阶段: precheck 出计划(不发命令) → apply 起任务(本构建 P5-1 只提供 precheck)" }
+      ]
+    }
+  ]
 }

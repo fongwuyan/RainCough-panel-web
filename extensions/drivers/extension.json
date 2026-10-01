@@ -1,0 +1,64 @@
+{
+  "name": "drivers",
+  "label": "驱动",
+  "version": "1.0.0",
+  "description": "硬件识别、内核模块与 NVIDIA 矿卡魔改驱动（P104-100 / P106-100 / CMP 30HX）",
+  "author": "RainCough",
+  "icon": "DV",
+  "entry": "assets/extension.js",
+  "route": "/ext/drivers",
+  "backend": {
+    "lang": "python",
+    "exec": ["python3", "server.py"],
+    "capabilities": ["linux", "apt", "kmod", "nvidia", "systemd"]
+  },
+  "interfaces": [
+    {
+      "id": "drivers.gpu",
+      "visibility": "all",
+      "version": "1",
+      "description": "NVIDIA 卡专项体检: 型号/架构/算力/驱动来源/输出接口/链路/GSP/是否矿卡/匹配到的补丁条目/版本偏好",
+      "input": { "type": "object", "properties": { "refresh": { "type": "boolean" } } },
+      "output": { "type": "object", "properties": {
+        "cards": { "type": "array" }, "display_provider": { "type": "object" },
+        "conflicts": { "type": "object" }, "secure_boot": { "type": "boolean" },
+        "requirements": { "type": "object" }, "collected_ms": { "type": "integer" } } }
+    },
+    {
+      "id": "drivers.repo",
+      "visibility": "all",
+      "version": "1",
+      "description": "补丁清单来源状态与条目（主面板库 drivers/registry.json，阶梯: 直连 raw → gh-proxy 镜像 → 本地目录）",
+      "input": { "type": "object", "properties": { "refresh": { "type": "boolean" } } },
+      "output": { "type": "object", "properties": {
+        "used": { "type": "string" }, "branch": { "type": "string" }, "fetched_at": { "type": "integer" },
+        "entries": { "type": "array" }, "sources": { "type": "array" }, "error": { "type": "string" } } }
+    },
+    {
+      "id": "drivers.repo.config",
+      "visibility": "main",
+      "version": "1",
+      "description": "配置补丁清单来源（分支/镜像/本地目录/令牌）；令牌只写不读",
+      "input": { "type": "object", "properties": {
+        "branch": { "type": "string" }, "mirror": { "type": "boolean" },
+        "local_dir": { "type": "string" }, "token": { "type": "string" },
+        "clear_token": { "type": "boolean" } } },
+      "output": { "type": "object", "properties": {
+        "branch": { "type": "string" }, "mirror": { "type": "boolean" },
+        "local_dir": { "type": "string" }, "token_set": { "type": "boolean" } } }
+    },
+    {
+      "id": "drivers.install",
+      "visibility": "main",
+      "version": "1",
+      "description": "两阶段: precheck 出计划(不发命令) → apply 起任务(本构建 P5-1 只提供 precheck)",
+      "input": { "type": "object", "properties": {
+        "mode": { "type": "string" }, "entry_id": { "type": "string" }, "kind": { "type": "string" },
+        "plan_id": { "type": "string" }, "confirm": { "type": "object" } } },
+      "output": { "type": "object", "properties": {
+        "plan_id": { "type": "string" }, "entry_id": { "type": "string" },
+        "base": { "type": "object" }, "patch": { "type": "object" }, "prereq": { "type": "array" },
+        "requires_confirm": { "type": "array" } } }
+    }
+  ]
+}
