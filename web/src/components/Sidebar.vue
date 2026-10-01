@@ -27,6 +27,10 @@ const PAGES = [
 // /ext/syscenter?sub=xxx(见 router.js)。
 const searchQ = ref('')
 const favs = ref(loadFavs())
+// 面板更新悬浮窗: 必须声明成 ref —— 曾漏声明, 模板里写 showUpdate 会落到未跟踪的 ctx 上,
+// 点击后不触发重渲染, 表现为"点了没反应/过一会儿才弹出"(见 PanelUpdate.vue 注释)
+const showUpdate = ref(false)
+const updBtn = ref(null)
 function loadFavs() { try { return JSON.parse(localStorage.getItem('rc-favs') || '[]') } catch (e) { return [] } }
 function saveFavs() { localStorage.setItem('rc-favs', JSON.stringify(favs.value)) }
 function favKey(label, path) { return path }
@@ -68,11 +72,11 @@ function extActive(x) { return route.name === 'ext-view' && String(route.params.
 
 <template>
   <aside class="sidebar">
-    <PanelUpdate v-if="showUpdate" @close="showUpdate = false" />
+    <PanelUpdate v-if="showUpdate" :anchor="updBtn" @close="showUpdate = false" />
     <div class="sidebar-header">
       <span class="brand-dot"></span>
       <h2>RainCough</h2>
-      <button class="upd-btn" title="面板更新" @click="showUpdate = !showUpdate">↓</button>
+      <button ref="updBtn" class="upd-btn" title="面板更新" @click="showUpdate = !showUpdate">↓</button>
     </div>
     <div style="padding:10px">
       <input v-model="searchQ" class="input" style="width:100%" placeholder="搜索: 页面/插件/功能…" @keydown.enter="searchResults.length && pick(searchResults[0])" />

@@ -250,6 +250,20 @@ export const api = {
   // 插件仓仓级版本 + 更新日志(CHANGELOG.md), 插件页「更新日志」悬浮窗用
   storeChangelog: () => req('GET', '/api/store/changelog'),
 
+  // 面板更新(手动三步: 检查 → 下载并应用 → 由你确认是否立即重启) —— 侧边栏标题右侧
+  // 下载按钮的悬浮窗(PanelUpdate.vue)用。
+  // ⚠ 这 8 个方法曾整体缺失: PanelUpdate.vue 里 api.panelVersion 等一直是 undefined,
+  // 一调用就抛 TypeError, 悬浮窗永远停在"当前版本 -/未检查"的空壳(2026-10-01 用 headless
+  // Chrome 实测发现)。改动这些方法名时请同步 PanelUpdate.vue。
+  panelVersion: () => req('GET', '/api/panel/version'),
+  panelInstallCommand: () => req('GET', '/api/panel/install-command'),
+  panelUpdateCheck: () => req('GET', '/api/panel/update/check'),
+  panelUpdateState: () => req('GET', '/api/panel/update/state'),
+  panelUpdateApply: (version) => req('POST', '/api/panel/update/apply', { version: version || '' }),
+  panelUpdateRestart: () => req('POST', '/api/panel/update/restart', {}),
+  panelUpdateLog: () => req('GET', '/api/panel/update/log'),
+  panelUpdateRollback: (backup) => req('POST', '/api/panel/update/rollback', { backup: backup || '' }),
+
   // 系统扩展(内置 7 项之外的功能包, 存于主面板库 extensions/)
   extList: () => req('GET', '/api/ext'),
   extRegistry: () => req('GET', '/api/ext/registry'),
