@@ -17,10 +17,6 @@ const navItems = [
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h1>设置</h1>
-    </div>
-
     <div class="page-body">
       <div class="settings-layout">
         <nav class="settings-nav">

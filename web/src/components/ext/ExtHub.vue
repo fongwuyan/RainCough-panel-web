@@ -140,10 +140,6 @@ onMounted(refresh)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h1>系统扩展</h1>
-    </div>
-
     <div class="page-body">
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px;">
         <button class="btn btn-sm" :disabled="refreshing" @click="refresh">

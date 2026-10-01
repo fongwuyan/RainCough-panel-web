@@ -348,10 +348,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h1>插件</h1>
-    </div>
-
     <div class="page-body">
       <div class="hub-bar">
         <div class="hub-tabs">
