@@ -124,24 +124,24 @@ function extActive(x) { return route.name === 'ext-view' && String(route.params.
         </div>
       </div>
 
-      <div class="sidebar-divider"></div>
-      <div class="sidebar-section-label">已装扩展</div>
-      <div v-if="!extensions.length" class="hint" style="padding:4px 12px 8px;font-size:11px;">
-        未安装扩展, 到「系统扩展」页安装
-      </div>
-      <div
-        v-for="x in extensions"
-        :key="'ext-' + x.name"
-        class="plugin-item"
-        :class="{ active: extActive(x) }"
-        @click="go(x.route || ('/ext/' + x.name))"
-      >
-        <div class="nav-icon">{{ x.icon || 'EX' }}</div>
-        <div class="info">
-          <div class="label">{{ x.label || x.name }}</div>
-          <div class="desc">{{ x.description || ('v' + (x.version || '-')) }}</div>
+      <!-- 已装扩展: 没有扩展时整组不显示(旧系统功能已抛弃, 不留空组与"去装扩展"的指路) -->
+      <template v-if="extensions.length">
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-section-label">已装扩展</div>
+        <div
+          v-for="x in extensions"
+          :key="'ext-' + x.name"
+          class="plugin-item"
+          :class="{ active: extActive(x) }"
+          @click="go(x.route || ('/ext/' + x.name))"
+        >
+          <div class="nav-icon">{{ x.icon || 'EX' }}</div>
+          <div class="info">
+            <div class="label">{{ x.label || x.name }}</div>
+            <div class="desc">{{ x.description || ('v' + (x.version || '-')) }}</div>
+          </div>
         </div>
-      </div>
+      </template>
 
       <div class="sidebar-divider"></div>
       <div class="sidebar-section-label">已装插件</div>
