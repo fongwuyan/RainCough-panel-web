@@ -40,3 +40,24 @@
 - 下载源回退：直连 github.com 不通或过慢时自动走只读镜像（RC_GH_MIRROR 可覆盖或关闭）
 - 版本基线：面板/扩展/插件全部 1.0.0
 - 资产重发：2026-10-01 重发一次 v1.0.0 资产（tag 移到修正提交，版本号不变）
+- 修复系统扩展后端的**"假重启"**：单元启动原用 `systemctl enable --now`，对已在运行的单元是空操作 ——
+  更新扩展（换掉 server.py / 前端产物）后旧进程会继续跑旧代码，「重启后端」按钮同样是空操作。
+  改为 `enable` + `restart`（未运行=启动、已运行=真正换上新代码）
+- 新增系统扩展「**驱动**」（自带后端 + 8 个接口，装在目标机上按需安装）：
+  - 只读体检 `drivers.gpu`：NVIDIA 卡型号/架构/算力、驱动来源（run/deb/none）、输出接口与链路、GSP、
+    是否矿卡（P1XX / CMP 系列）、匹配到的补丁条目、版本偏好、容器直通状态
+  - 补丁清单 `drivers.repo`：来源阶梯 本地目录 → GitHub raw → 三个 gh-proxy 镜像；**GPG 强制验签**
+    （临时 keyring + pin 指纹，签名损坏/指纹不符即拒绝使用该来源）；`drivers.repo.config` 可配分支/镜像/
+    本地目录/令牌/签名开关与指纹（令牌只写不读）
+  - 两阶段安装 `drivers.install`：precheck 出计划（不发任何命令）→ apply 起异步任务；
+    官方 `.run` **多路 Range 并发下载（断点续传 + 单段重试）** → sha256 → `sh --check` → `--extract-only` →
+    声明式补丁（命中数校验 + 结果 sha256 校验 + 原子写入 + `.orig-*` 备份）→ 移除冲突的发行版 nvidia 包 →
+    `nvidia-installer --silent --dkms` → 写托管 `rc-drivers.conf`（nouveau 黑名单，CMP 另加关 GSP）→
+    `depmod` + `update-initramfs` → `nvidia-smi` 校验 → 标需重启（不自动重启）
+  - 任务与回滚：`drivers.task`（进度/命令流/补丁报告）、`drivers.cancel`、`drivers.log`（审计 NDJSON）、
+    `drivers.revert` 三条退路（官方卸载 / 回 Debian 包 / 回补丁前）
+  - 容器直通：`drivers.install{kind:"container-toolkit"}` 一键装 NVIDIA 容器工具包
+    （官方源 + `signed-by` keyring，均 `rc-` 前缀可精确回滚；有 docker 时自动配 runtime 并重启）
+  - 补丁数据放主面板库 `drivers/`（`registry.json` + `patches/*.patch.json` + `pubkey.asc` + `.asc` 签名），
+    KB 级、不占仓库容量；已支持 P104-100 / P106-100（580.178.04）与 CMP 30HX（615.71.09），
+    补丁输出与上游 patcher 脚本**逐字节一致（4/4 比对通过）**
