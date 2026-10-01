@@ -113,7 +113,15 @@ func (s *server) extBackendUp(name string) error {
 		return fmt.Errorf("写单元失败: %s", strings.TrimSpace(out))
 	}
 	_, _ = s.privRun("systemctl", "daemon-reload")
-	if out, err := s.privRun("systemctl", "enable", "--now", extUnitName(name)); err != nil {
+	// 注意: 这里必须是 enable + restart，不能是 enable --now。
+	// enable --now 对"已经在运行"的单元是空操作 —— 更新扩展（换掉 server.py / 产物）后
+	// 旧进程会继续跑旧代码，界面上还以为更新生效了（2026-10-01 实测：更新后
+	// ExecMainStartTimestamp 不变、接口返回仍是旧字段）。restart 对未运行的单元等于启动，
+	// 对已运行的就是真正换上新代码。
+	if out, err := s.privRun("systemctl", "enable", extUnitName(name)); err != nil {
+		return fmt.Errorf("启用后端失败: %s", strings.TrimSpace(out))
+	}
+	if out, err := s.privRun("systemctl", "restart", extUnitName(name)); err != nil {
 		return fmt.Errorf("启动后端失败: %s", strings.TrimSpace(out))
 	}
 	return nil
