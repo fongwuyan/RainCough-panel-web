@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
 import { useExtensions } from '../stores/extensions'
+import PanelUpdate from './panel/PanelUpdate.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -67,9 +68,11 @@ function extActive(x) { return route.name === 'ext-view' && String(route.params.
 
 <template>
   <aside class="sidebar">
+    <PanelUpdate v-if="showUpdate" @close="showUpdate = false" />
     <div class="sidebar-header">
       <span class="brand-dot"></span>
       <h2>RainCough</h2>
+      <button class="upd-btn" title="面板更新" @click="showUpdate = !showUpdate">↓</button>
     </div>
     <div style="padding:10px">
       <input v-model="searchQ" class="input" style="width:100%" placeholder="搜索: 页面/插件/功能…" @keydown.enter="searchResults.length && pick(searchResults[0])" />
