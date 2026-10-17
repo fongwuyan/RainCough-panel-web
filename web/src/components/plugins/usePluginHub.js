@@ -52,6 +52,50 @@ export function usePluginHub() {
 
   const onlineCount = computed(() => installed.value.filter((p) => p.alive).length)
 
+  // 后端语言支持判断 —— 以 GET /api/plugins/runtime 为唯一事实来源。
+  //
+  // ★ 2026-10-17 事故记录: 这段函数定义曾被一次"替换版本比较代码"的编辑误删,
+  //   只剩 onMounted 里的调用和末尾的导出, 于是点「插件」页直接白屏报
+  //   ReferenceError: loadRuntime is not defined。
+  //   教训: 用字符串切片改代码必须重新 grep 一遍被删区间里的所有符号。
+  //
+  // 历史背景: 这里曾硬编码 `lang !== 'go' → 不兼容 v6`。v6 早期确实只支持 Go
+  // 静态二进制, 后来 internal/pluginrt 支持了 py/php/java/node/bash, 前端那份
+  // 判断没跟着改, 导致 JMComic(Python)明明能跑却一直标红。
+  // 现在读后端探测结果; LANG_FALLBACK 仅用于接口暂不可用时降级显示。
+  const runtimeInfo = ref(null)
+  const LANG_FALLBACK = ['go', 'binary', 'python', 'python3', 'php', 'java', 'node', 'nodejs', 'bash', 'sh']
+
+  async function loadRuntime() {
+    try {
+      runtimeInfo.value = await api.pluginsRuntime()
+    } catch (e) {
+      runtimeInfo.value = null // 退到兜底列表
+    }
+  }
+
+  const supportedLangs = computed(() => {
+    const d = runtimeInfo.value
+    if (d && Array.isArray(d.languages) && d.languages.length) return d.languages
+    return LANG_FALLBACK
+  })
+
+  // langUnavailable: 语言受支持但环境缺解释器(如声明 python 但没装)
+  function langUnavailable(p) {
+    const d = runtimeInfo.value
+    if (!d || !p || !p.lang) return false
+    const lang = String(p.lang).toLowerCase()
+    const detail = (d.details || []).find((x) => String(x.lang).toLowerCase() === lang)
+    return !!(detail && detail.supported && !detail.available)
+  }
+
+  // incompatible 语言根本不在支持列表里(未知语言)
+  function incompatible(p) {
+    if (!p || !p.lang) return false // 未声明语言: 按二进制处理, 不拦
+    const langs = supportedLangs.value.map((s) => String(s).toLowerCase())
+    return !langs.includes(String(p.lang).toLowerCase())
+  }
+
   // 版本比较统一走 ../version.js —— 面板与插件共用一份实现, 不再各处手写。
   // 只有"市场版本严格高于已装版本"才算可更新(否则会引导用户降级)。
   function hasUpdate(p) {

@@ -11,8 +11,9 @@
 //   node tools/check-bindings.mjs web/src/App.vue  # 只扫指定文件
 // 退出码: 0 = 全部干净; 1 = 有未声明绑定。
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, resolve, dirname } from 'node:path'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 
 const require = createRequire(new URL('../web/', import.meta.url))
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc')
@@ -27,8 +28,11 @@ function walk(dir, out = []) {
   return out
 }
 
+// ★ 用脚本自身位置定位仓库根, 不依赖 cwd ——
+//   否则从 web/ 目录跑(npm run check)会拼成 web/web/src 而 ENOENT。
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
-const files = args.length ? args : walk('web/src')
+const files = args.length ? args : walk(join(ROOT, 'web', 'src'))
 
 let bad = 0
 for (const file of files) {
@@ -47,7 +51,7 @@ for (const file of files) {
   const unknown = [...names].filter((n) => !n.startsWith('$') && !(n in script.bindings))
   if (unknown.length) {
     bad++
-    console.log(`${relative(process.cwd(), file)} -> 未声明绑定: ${unknown.join(', ')}`)
+    console.log(`${relative(ROOT, file)} -> 未声明绑定: ${unknown.join(', ')}`)
   }
 }
 console.log(bad ? `\n${bad} 个文件有未声明绑定` : `检查 ${files.length} 个文件: 无未声明绑定`)
