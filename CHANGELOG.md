@@ -4,6 +4,20 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## v1.0.0-beta — 版本号体系与两条更新链路
+- 版本号：面板 **1.0.0-beta**（tag `v1.0.0-beta`）、JMComic **1.00.1**
+- 版本号带 beta/前导零后，暴露并修掉 4 处"只认 x.y.z"的硬编码
+  - `install.sh`：内嵌版本不认 `-beta` → 被判占位符 → **静默回退查 latest Release**
+  - `panelTagRe`：带 `-beta` 的 Release 被整体过滤 → 更新检查看不到自己这版
+  - `verParts`：丢弃 `-beta` → `1.0.0-beta == 1.0.0` → **beta→正式版检测不到**
+  - 前端两份版本比较（`version.js` 从未被引用）→ 统一到一份
+- 插件更新链路修 3 个 bug
+  - 更新前不停进程（覆盖目录时插件仍跑旧代码）
+  - `Copy` 是合并语义 → 旧版独有文件残留；改用 `replaceDir`（整目录替换+回滚）
+  - 更新接口不校验方向 → 直接 POST 会降级；现返回 409 并说明两边版本
+- JMComic 版本号改为**单一来源**（读 plugin.json），修掉注册时上报硬编码 `2.0.0`
+- 新增 `panel_ver_test.go`（19 用例）、`tools/version-test.mjs`（20 项）
+
 ## 未发布 — 语言兼容判断修正 + 版本比较修正
 - **修「JMComic 仍提示不兼容 v6」**：前端硬编码 `lang !== 'go' → 不兼容 v6`，
   这是 v6 早期"只支持 Go 二进制"时代的判断，后端早已支持 py/php/java/node，前端没跟着改
