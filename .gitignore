@@ -51,3 +51,6 @@ dist-build/
 
 # 本地部署产物/凭据(含 SSH askpass 与交叉编译二进制, 绝不入库)
 _deploy/
+
+# 运行时生成的插件端点文件(机器相关的 UDS/TCP 地址, 每台机器不同)
+plugins/*/.rc.endpoint
