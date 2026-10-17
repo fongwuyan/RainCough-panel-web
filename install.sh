@@ -43,7 +43,7 @@ set -euo pipefail
 REPO="fongwuyan/RainCough-panel-web"
 # 版本: RC_VERSION 覆盖 > 本脚本内嵌版本(发布时写入, = 所在 tag 的版本) > latest
 # 未替换的占位符(开发树)与空值都按 latest 解析, 见下方「版本解析」。
-RC_PANEL_VERSION="${RC_VERSION:-1.0.0}"
+RC_PANEL_VERSION="${RC_VERSION:-1.0.0-beta}"
 MIRROR="${RC_MIRROR:-https://gh-proxy.com/https://github.com}"
 UNIT_NAME="${RC_UNIT_NAME:-raincough.service}"   # 单元名可覆盖(测试/多实例隔离)
 
@@ -387,9 +387,19 @@ EOF
 }
 
 # ---------- 版本解析(必须在 fail/info 定义之后) ----------
-# 只认 x.y.z 形态的内嵌版本; 占位符未替换/为空/latest 一律解析最新 Release。
-if printf '%s' "$RC_PANEL_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    PANEL_VERSION="$RC_PANEL_VERSION"
+# 认可的内嵌版本形态:
+#   01.0.0-beta   01.0.0   v01.0.0-beta   1.0.0-rc.1
+# 即: 可选 v 前缀 + 1-3 段数字(允许前导零) + 可选预发布后缀。
+#
+# ★ 早期只认 `^[0-9]+\.[0-9]+\.[0-9]+$`, 于是自定义成 01.0.0-beta 这种带前导零/
+#   预发布后缀的版本会被判为"占位符", 直接回退去查 GitHub latest Release ——
+#   内嵌版本被静默忽略, 装上的是另一个版本, 排查起来非常费劲。
+# 占位符未替换/为空/latest 仍按"解析最新 Release"处理。
+VER_RE='^[vV]?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+RAW_VER="${RC_PANEL_VERSION#v}"
+RAW_VER="${RAW_VER#V}"
+if printf '%s' "$RAW_VER" | grep -Eq "$VER_RE"; then
+    PANEL_VERSION="$RAW_VER"
     TAG="v$PANEL_VERSION"
 else
     TAG=$(curl -fsSL -m 15 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \

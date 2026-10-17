@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"raincough/internal/auth"
@@ -233,12 +235,60 @@ func (s *server) handleStorePluginUpdate(w http.ResponseWriter, r *http.Request)
 	if gateLocked(w, r) {
 		return
 	}
+	// ★ 更新前校验版本方向: 市场清单版本必须严格高于已装版本。
+	//   否则"更新"按钮等于把用户降级 —— 本地开发版/预发布/市场清单滞后时都可能发生。
+	//   前端已经改了判断(verNewer), 但接口也必须挡: 直接 POST 这个接口的人不该被降级。
+	if cur := installedPluginVersion(b.Name); cur != "" {
+		if wv := marketPluginVersion(b.Name); wv != "" && !verLess(cur, wv) {
+			writeJSON(w, http.StatusConflict, map[string]interface{}{
+				"error":     "市场版本 v" + wv + " 不高于已装版本 v" + cur + ", 无需更新(避免降级)",
+				"installed": cur, "market": wv,
+			})
+			return
+		}
+	}
 	status, err := globalStore.InstallPlugin(b.Name, globalTasks)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "message": "已重新安装(更新)"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "message": "已提交更新"})
+}
+
+// installedPluginVersion 读已装插件的 plugin.json 版本; 未装返回空串。
+func installedPluginVersion(name string) string {
+	if globalStore == nil {
+		return ""
+	}
+	dir := filepath.Join(globalStore.PluginsDir(), name)
+	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	return m.Version
+}
+
+// marketPluginVersion 从市场清单里取某插件的版本; 取不到返回空串(此时不拦, 交给安装器)。
+func marketPluginVersion(name string) string {
+	if globalStore == nil {
+		return ""
+	}
+	plugins, err := globalStore.Registry()
+	if err != nil {
+		return ""
+	}
+	for _, p := range plugins {
+		if p.Name == name {
+			return p.Version
+		}
+	}
+	return ""
 }
 
 // handleStoreProject GET /api/store/project/status + POST /api/store/project/install

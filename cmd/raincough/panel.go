@@ -128,11 +128,16 @@ type ghRelease struct {
 	Assets    []ghAsset `json:"assets"`
 }
 
-// 版本号与 tag 形状: 只认 v<数字>.<数字>.<数字>(大小写不敏感的前缀 v 可省),
+// 版本号与 tag 形状: v<数字>.<数字>.<数字>[-预发布](大小写不敏感的前缀 v 可省),
 // 用于挡住 Release 列表里的非面板资产(如 env-offline-0.1.0)与非法请求参数。
+//
+// ★ 必须接受预发布后缀: 面板从 1.0.0-beta 起进入 beta 阶段, 若这里只认 x.y.z,
+// 带 -beta 的 Release(含本机当前版本)会被整体过滤掉 ——
+// 表现是"更新检查里永远看不到自己这一版", 且当前版本条目消失, 很难排查。
+// 允许前导零(如 01.0.0), 与 install.sh 的版本正则保持一致。
 var (
 	panelVerRe = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$`)
-	panelTagRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
+	panelTagRe = regexp.MustCompile(`^[vV]?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
 	assetRefRe = regexp.MustCompile(`index-[A-Za-z0-9_-]+\.(?:js|css)`)
 )
 
@@ -698,8 +703,16 @@ func (s *server) handlePanelUpdateRollback(w http.ResponseWriter, r *http.Reques
 }
 
 // verParts 把 "1.2.3" 拆成数值段(非数字段按 0 处理)。
+// verParts 取主版本号数字段(丢弃预发布后缀)。
+// 注意: 单靠它无法区分 1.0.0-beta 与 1.0.0 —— 预发布比较见 verLess。
 func verParts(s string) []int {
-	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	s = strings.TrimPrefix(s, "V")
+	// 丢掉 -beta / +build
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		s = s[:i]
+	}
 	segs := strings.Split(s, ".")
 	out := make([]int, len(segs))
 	for i, seg := range segs {
@@ -715,7 +728,26 @@ func verParts(s string) []int {
 	return out
 }
 
+// verPre 取预发布标识("1.0.0-beta" → "beta"; 正式版 → "")
+func verPre(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	s = strings.TrimPrefix(s, "V")
+	if i := strings.Index(s, "+"); i >= 0 {
+		s = s[:i] // 丢弃 build metadata
+	}
+	if i := strings.Index(s, "-"); i >= 0 {
+		return s[i+1:]
+	}
+	return ""
+}
+
 // verLess 语义比较 a < b。
+//
+// ★ 必须处理预发布后缀(2026-10-17): 面板进入 1.0.0-beta 阶段后,
+// 只比数字段会把 1.0.0-beta 与 1.0.0 判成"相等", 于是「beta → 正式版」
+// 这个最典型的升级路径永远检测不到更新。规则同 semver:
+// 主版本号相同时, 有预发布后缀的更低(beta < rc < 正式版)。
 func verLess(a, b string) bool {
 	pa, pb := verParts(a), verParts(b)
 	n := len(pa)
@@ -734,5 +766,16 @@ func verLess(a, b string) bool {
 			return x < y
 		}
 	}
-	return false
+	// 主版本号相同 → 比预发布
+	preA, preB := verPre(a), verPre(b)
+	switch {
+	case preA == preB:
+		return false
+	case preA == "": // a 是正式版, b 是预发布 → a 更大
+		return false
+	case preB == "": // b 是正式版, a 是预发布 → a 更小
+		return true
+	default:
+		return preA < preB // beta < rc
+	}
 }

@@ -73,6 +73,18 @@ func NewStore(ns Namespacelike, pluginsDir string, onInstalled func()) *Store {
 // SetRemoveHook 注入"卸载前停进程"回调(宿主启动时调用)。
 func (s *Store) SetRemoveHook(fn func(name string)) { s.onBeforeRemove = fn }
 
+// PluginsDir 插件根目录(只读; 供上层做版本/清单校验)。
+func (s *Store) PluginsDir() string { return s.pluginsDir }
+
+// InstalledVersion 已装插件版本(未装或读不到返回空串)。供更新前校验版本方向。
+func (s *Store) InstalledVersion(name string) string {
+	ok, ver := s.installedVersion(name)
+	if !ok {
+		return ""
+	}
+	return ver
+}
+
 // Config 读取/设置配置(空值保留现有)。
 func (s *Store) Config(cfg StoreConfig) StoreConfig {
 	if cfg.PluginRepo.Owner != "" {
@@ -284,18 +296,31 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 			return
 		}
 		task.Update(tid, "", 50, "解压安装...")
+
+		// ★ 已装同名插件 = 更新。更新必须先停进程:
+		//   插件正在运行时, 我们马上要替换它的目录; 不停进程会得到
+		//   "进程还在跑旧代码/持有已删文件" 的孤儿, 且新版本文件可能写不进去
+		//   (二进制被占用在部分文件系统上会失败)。卸载路径早就有这个钩子,
+		//   更新路径之前漏了 —— 2026-10-17 检查时发现。
+		alreadyInstalled, _ := s.installedVersion(name)
+		if alreadyInstalled && s.onBeforeRemove != nil {
+			task.Update(tid, "", 55, "停止旧版本进程...")
+			s.onBeforeRemove(name)
+		}
 		// 从 zip 提取插件目录
-		_, err = extractPluginFromZip(data, name, s.pluginsDir)
-		if err != nil {
+		if _, err = extractPluginFromZip(data, name, s.pluginsDir); err != nil {
 			task.Update(tid, "", 0, "安装失败: "+err.Error())
 			return
 		}
-		// v6: 插件是静态 Go 二进制, 无解释器依赖需要安装。
 		if s.onInstalled != nil {
 			s.onInstalled()
 		}
 		done = true
-		task.Finish(tid, true, "插件安装成功: "+name, "", 100)
+		verb := "安装"
+		if alreadyInstalled {
+			verb = "更新"
+		}
+		task.Finish(tid, true, "插件"+verb+"成功: "+name, "", 100)
 	}()
 	return "queued", nil
 }
@@ -536,7 +561,11 @@ func extractPluginFromZip(data []byte, name, pluginsDir string) (string, error) 
 			if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
 				return "", err
 			}
-			if err := Copy(src, dst); err != nil {
+			// ★ 用 replaceDir 而不是 Copy:
+			//   Copy 是"合并"语义 —— 旧版本有、新版本没删掉的文件会残留下来。
+			//   插件更新时这会留下废弃的 .py/.js/二进制, 甚至让旧前端产物继续被加载。
+			//   replaceDir 做"整目录替换 + 备份 + 失败回滚"(与面板内上传安装同一条路径)。
+			if _, err := replaceDir(src, dst); err != nil {
 				return "", err
 			}
 			return dst, nil

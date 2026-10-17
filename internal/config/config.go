@@ -10,7 +10,11 @@ import (
 
 const (
 	AppName = "RainCough"
-	Version = "1.0.0"
+	// Version 面板版本。发布时与 git tag(去掉 v 前缀)保持一致。
+	// 当前为 beta: 1.0.0-beta(git tag 为 v1.0.0-beta) —— 前导零与预发布后缀按风悟言要求保留,
+	// 版本比较走语义化比较(见 web/src/components/plugins/usePluginHub.js 的 cmpVer),
+	// 前导零不影响比较; install.sh 的版本正则也已放宽以接受这种形态。
+	Version = "1.0.0-beta"
 )
 
 // Config 持有主系统全部运行配置。
