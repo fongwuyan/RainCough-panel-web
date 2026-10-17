@@ -1,7 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import Workspace from './components/workspace/Workspace.vue'
 import PluginView from './components/PluginView.vue'
-import Settings from './components/Settings.vue'
+import Settings from './components/settings/Settings.vue'
 import Terminal from './components/terminal/Terminal.vue'
 import PluginHub from './components/plugins/PluginHub.vue'
 import FmMain from './components/filemanager/FmMain.vue'
