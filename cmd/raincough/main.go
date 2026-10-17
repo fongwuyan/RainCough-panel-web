@@ -386,8 +386,57 @@ func (s *server) routes(mux *http.ServeMux) {
 	// ---- 静态前端(public/) ----
 	webDir := filepath.Join(s.cfg.BaseDir, "public")
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// ★ 插件 REST 桥的"前缀式"入口: /<插件名>/api/plugins/...
+		//
+		// 背景: 配套 Android App(JMReader)把 baseUrl 和固定路径拼起来用, 即
+		//   App 里填 http://host:3910/JMComic
+		//   实际请求 http://host:3910/JMComic/api/plugins/jmcomic/search?...
+		// 这里把 "/<插件名>" 剥掉还原成 "/api/plugins/...", 再交给正常分发。
+		//
+		// 为什么用这个前缀而不是直接放开 /api/plugins 的鉴权:
+		//   /api/ 前缀会经过登录中间件, 而 App 没有登录能力; 走非 /api/ 前缀
+		//   就完全不用动鉴权逻辑 —— 少改一处就少一处风险。
+		if s.rewritePluginPrefix(w, r) {
+			return
+		}
 		serveStatic(w, r, webDir)
 	})
+}
+
+// rewritePluginPrefix 处理 /<插件名>/api/... 形式的请求, 返回 true 表示已处理。
+//
+// 只改写"第一段是已注册插件名、第二段起是 api/"的路径, 其余(含正常 SPA 路由)
+// 一律不动 —— 避免把 /settings、/plugins 这类前端路由误当成插件前缀。
+func (s *server) rewritePluginPrefix(w http.ResponseWriter, r *http.Request) bool {
+	p := strings.TrimPrefix(r.URL.Path, "/")
+	seg, rest, found := strings.Cut(p, "/")
+	if !found || seg == "" {
+		return false
+	}
+	// 必须是 <插件名>/api/... 形态
+	if !strings.HasPrefix(rest, "api/") {
+		return false
+	}
+	name := globalPX.ResolveName(seg)
+	if name == "" {
+		return false // 不是插件名 → 交给静态/SPA
+	}
+	// 还原成面板标准路径并就地分发(不改 http.Request 的不可变字段之外的东西,
+	// 直接调目标 handler 更省事; URL.Path 需要临时改写以便各 handler 解析)
+	orig := r.URL.Path
+	r.URL.Path = "/" + rest
+	defer func() { r.URL.Path = orig }()
+
+	switch {
+	case r.URL.Path == "/api/plugins" || r.URL.Path == "/api/plugins/":
+		s.handlePlugins(w, r)
+		return true
+	case strings.HasPrefix(r.URL.Path, "/api/plugins/"):
+		s.handlePlugin(w, r)
+		return true
+	}
+	r.URL.Path = orig
+	return false
 }
 
 func (s *server) handlePlugins(w http.ResponseWriter, r *http.Request) {
@@ -434,6 +483,16 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, globalPX.ListPlugins())
 		return
 	}
+
+	// ★ 声明式 REST 桥最先尝试: 插件在 plugin.json 的 backend.rest 里声明的路由
+	//   (/api/plugins/<name>/album/{aid}、/cover/{aid} …) 给移动端 App 用。
+	//   未声明则返回 false, 继续走下面的 assets / cache / invoke 等分支。
+	//   放在 HasPlugin 之前, 是因为 App 传的插件名是小写(jmcomic), 而目录名是 JMComic,
+	//   REST 层自己做大小写不敏感解析。
+	if globalPX.HandlePluginREST(w, r) {
+		return
+	}
+
 	parts := strings.SplitN(rest, "/", 2)
 	name := parts[0]
 	sub := ""
@@ -442,6 +501,12 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !globalPX.HasPlugin(name) {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未注册: " + name})
+		return
+	}
+
+	// ★ 声明式 REST 桥优先: 插件在 plugin.json 里声明的路由(/api/plugins/<name>/album/{aid} …)
+	//   供移动端 App 使用。未声明则返回 false, 继续走下面的 assets/cache/invoke 等分支。
+	if globalPX.HandlePluginREST(w, r) {
 		return
 	}
 

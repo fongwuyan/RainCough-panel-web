@@ -1,20 +1,22 @@
 // Package auth 提供面板登录鉴权:
-//   · session 生命周期(创建/校验/过期清理)
-//   · SHA-512 crypt(3) 验证(/etc/shadow 哈希字段比对)
-//   · admin 密码验证(自动生成 + RC_ADMIN_PASSWORD 覆盖)
-//   · HTTP 中间件: 除登录/静态外的接口全部要求 session
+//
+//	· session 生命周期(创建/校验/过期清理)
+//	· SHA-512 crypt(3) 验证(/etc/shadow 哈希字段比对)
+//	· admin 密码验证(自动生成 + RC_ADMIN_PASSWORD 覆盖)
+//	· HTTP 中间件: 除登录/静态外的接口全部要求 session
 //
 // v6 零依赖红线: 仅使用标准库, 手写 crypt(3) SHA-512 算法(参考 mvo5/sha512crypt-node BSD-2)。
 //
 // 设计要点:
-//   · 默认走 SSH 密码(= 服务器登录密码), 用户不用多记一个密码
-//     —— 读 /etc/shadow 当前用户的哈希字段, SHA-512 crypt(3) 比对
-//   · admin 密码降级: 若面板以非 root 运行, 读不到 shadow, 则改用面板自带的 admin 密码
-//     —— 安装时随机生成 32 字符密码, 写到 <data>/secret/admin.pw(mode 0600), 打印到 journal
-//     —— 也可用 RC_ADMIN_PASSWORD 环境变量覆盖(便于测试/迁移)
-//   · session 持久化: <data>/sessions/<id>.json, 默认 30 天过期(用户感知"永久保留")
-//   · cookie 名: rc_session, HttpOnly + SameSite=Strict
-//   · 中间件: 白名单 /api/auth/login + /api/auth/status + /login + 静态资源, 其余需 session
+//
+//	· 默认走 SSH 密码(= 服务器登录密码), 用户不用多记一个密码
+//	  —— 读 /etc/shadow 当前用户的哈希字段, SHA-512 crypt(3) 比对
+//	· admin 密码降级: 若面板以非 root 运行, 读不到 shadow, 则改用面板自带的 admin 密码
+//	  —— 安装时随机生成 32 字符密码, 写到 <data>/secret/admin.pw(mode 0600), 打印到 journal
+//	  —— 也可用 RC_ADMIN_PASSWORD 环境变量覆盖(便于测试/迁移)
+//	· session 持久化: <data>/sessions/<id>.json, 默认 30 天过期(用户感知"永久保留")
+//	· cookie 名: rc_session, HttpOnly + SameSite=Strict
+//	· 中间件: 白名单 /api/auth/login + /api/auth/status + /login + 静态资源, 其余需 session
 package auth
 
 import (
@@ -55,8 +57,8 @@ const (
 // Session 表示一个登录会话
 type Session struct {
 	ID        string    `json:"id"`
-	User      string    `json:"user"`      // 当前用户名(如 "f", "root")
-	Method    string    `json:"method"`    // "ssh" | "admin"
+	User      string    `json:"user"`   // 当前用户名(如 "f", "root")
+	Method    string    `json:"method"` // "ssh" | "admin"
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
@@ -83,10 +85,10 @@ type Manager struct {
 	ttl      time.Duration
 
 	// 启动时一次性加载:
-	shadowHash string // /etc/shadow 的 $6$ 哈希; 空 = 不可用(非 $6$ 或无权限)
-	shadowUser string // /etc/shadow 里的用户名(默认 = 当前运行用户)
-	shadowWhy  string // shadowHash 为空的原因(给前端/日志解释)
-	adminCrypt string // 面板密码的 $6$ 哈希; 空 = 用 adminPlainHash
+	shadowHash string   // /etc/shadow 的 $6$ 哈希; 空 = 不可用(非 $6$ 或无权限)
+	shadowUser string   // /etc/shadow 里的用户名(默认 = 当前运行用户)
+	shadowWhy  string   // shadowHash 为空的原因(给前端/日志解释)
+	adminCrypt string   // 面板密码的 $6$ 哈希; 空 = 用 adminPlainHash
 	adminSHA   [32]byte // 面板密码明文 SHA-256(兼容 RC_ADMIN_PASSWORD / 旧明文文件)
 	hasAdmin   bool     // 是否启用面板密码通道
 }
@@ -99,9 +101,10 @@ type Options struct {
 }
 
 // New 创建 Manager 并:
-//   · 加载已有 sessions(过期自动清理)
-//   · 检测 /etc/shadow 当前用户(权限不足则降级)
-//   · 初始化 admin 密码(环境变量 / 自动生成)
+//
+//	· 加载已有 sessions(过期自动清理)
+//	· 检测 /etc/shadow 当前用户(权限不足则降级)
+//	· 初始化 admin 密码(环境变量 / 自动生成)
 func New(opts Options) (*Manager, error) {
 	if opts.DataDir == "" {
 		return nil, errors.New("auth: DataDir 必填")
@@ -167,11 +170,11 @@ func (m *Manager) adminKind() string {
 }
 
 // loadOrInitAdminPassword 加载或生成面板密码:
-//   1. RC_ADMIN_PASSWORD 环境变量非空 -> 直接用(不写文件, 只在内存; 明文)
-//   2. <data>/secret/admin.pw 已存在 ->
-//        · 内容以 "$6$" 开头: 当作 SHA-512 crypt 哈希(由 install.sh / -set-password 写入)
-//        · 否则: 当作明文(兼容旧版本, 向后兼容)
-//   3. 否则随机生成 32 字符密码, 写明文文件, 打印到 stderr(走 journal 可查)
+//  1. RC_ADMIN_PASSWORD 环境变量非空 -> 直接用(不写文件, 只在内存; 明文)
+//  2. <data>/secret/admin.pw 已存在 ->
+//     · 内容以 "$6$" 开头: 当作 SHA-512 crypt 哈希(由 install.sh / -set-password 写入)
+//     · 否则: 当作明文(兼容旧版本, 向后兼容)
+//  3. 否则随机生成 32 字符密码, 写明文文件, 打印到 stderr(走 journal 可查)
 func (m *Manager) loadOrInitAdminPassword(override string) error {
 	secretDir := filepath.Join(m.dataDir, SecretDir)
 	if err := os.MkdirAll(secretDir, 0o700); err != nil {
@@ -351,7 +354,8 @@ func (m *Manager) Status(sess Session, loggedIn bool) Status {
 // 这样在 yescrypt($y$)/bcrypt 等无法离线验证的系统上也能"用 SSH 密码登录"(用户感知一致)。
 //
 // ★ 同时清空 <dataDir>/sessions/ —— 改密码就必须让旧登录失效,
-//   否则密码泄露后改密码也踢不掉已在线的设备(安全默认)。
+//
+//	否则密码泄露后改密码也踢不掉已在线的设备(安全默认)。
 //
 // 不设硬下限: 面板密码通常就是复用系统 SSH 密码, 若系统本身允许短密码, 面板不该比它更严
 // (那样会让用户"SSH 能进、面板进不去", 反而困惑)。但 < 8 位会往 stderr 打告警。
@@ -509,9 +513,13 @@ func writeAuthOK(w http.ResponseWriter, v any) {
 }
 
 // Middleware HTTP 中间件: 白名单外的接口要求 session
-//   · 白名单: /api/auth/login, /api/auth/status, /api/auth/logout
-//   · SPA 资源(非 /api/): 任何都放行(让前端路由处理 /login 跳转)
-//   · API: 未登录返 401
+//
+//	· 白名单: /api/auth/login, /api/auth/status, /api/auth/logout
+//	· SPA 资源(非 /api/): 任何都放行(让前端路由处理 /login 跳转)
+//	· API: 未登录返 401
+//
+// 注: 移动端 App(JMReader)没有登录能力, 走的是 /<插件名>/... 前缀的 REST 桥,
+// 该前缀不在 /api/ 下, 天然不经过本中间件(见 cmd/raincough 的插件前缀改写)。
 func (m *Manager) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isAuthWhitelist(r.URL.Path) {

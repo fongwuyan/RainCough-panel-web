@@ -59,6 +59,16 @@ type ManifestV4 struct {
 		Lang         string   `json:"lang,omitempty"`
 		Exec         []string `json:"exec"`
 		Capabilities []string `json:"capabilities,omitempty"`
+		// REST 声明式 HTTP 桥: 把插件接口暴露成普通 REST 路由,
+		// 让移动端 App / 第三方客户端无需理解 JSON-RPC 也能用(见 rest.go)。
+		REST []RESTRoute `json:"rest,omitempty"`
+		// RESTPublic 是否允许这些 REST 路由免登录访问。
+		//
+		// ★ 必须显式声明才放行: 移动端 App 通常没有登录能力(JMReader 就是),
+		// 但把插件数据无门槛暴露到局域网是实打实的隐私风险。
+		// 所以做成"插件自己声明要公开", 而不是面板默默放开;
+		// 运维可用 RC_PLUGIN_REST_OPEN=off 强制全部回到登录后。
+		RESTPublic bool `json:"rest_public,omitempty"`
 	} `json:"backend"`
 	Interfaces []InterfaceDef `json:"interfaces"`
 }
@@ -122,6 +132,10 @@ type PluginX struct {
 	ifaces     map[string]*Iface
 	listeners  map[string]net.Listener
 	endpoints  map[string]string
+	// restRoutes 声明式 REST 桥(见 rest.go): 插件名 → 已编译路由表
+	restRoutes map[string][]RESTRoute
+	// restPublic 该插件的 REST 路由是否允许免登录(plugin.json backend.rest_public)
+	restPublic map[string]bool
 	stopCh     chan struct{}
 	seq        int64
 }
@@ -138,13 +152,15 @@ func New(opts Options, ns *shared.Namespace) *PluginX {
 		opts.UseTCP = runtime.GOOS == "windows"
 	}
 	return &PluginX{
-		opts:      opts,
-		ns:        ns,
-		plugins:   map[string]*Plugin{},
-		ifaces:    map[string]*Iface{},
-		listeners: map[string]net.Listener{},
-		endpoints: map[string]string{},
-		stopCh:    make(chan struct{}),
+		opts:       opts,
+		ns:         ns,
+		plugins:    map[string]*Plugin{},
+		ifaces:     map[string]*Iface{},
+		listeners:  map[string]net.Listener{},
+		endpoints:  map[string]string{},
+		restRoutes: map[string][]RESTRoute{},
+		restPublic: map[string]bool{},
+		stopCh:     make(chan struct{}),
 	}
 }
 
@@ -253,16 +269,19 @@ func (x *PluginX) scanDir(dir string, isExt bool) {
 		}
 		sub := filepath.Join(dir, e.Name())
 		var ok bool
+		var m *ManifestV4
 		if isExt {
-			m, err := LoadExtBackend(sub)
+			m, err = LoadExtBackend(sub)
 			ok = err == nil && m != nil
 		} else {
-			_, err := LoadManifestV4(sub)
-			ok = err == nil
+			mm, merr := LoadManifestV4(sub)
+			m, ok = mm, merr == nil
 		}
 		if !ok {
 			continue // 纯前端扩展/非 v4 清单(旧插件)跳过
 		}
+		// 编译声明式 REST 路由(移动端 App 用; 见 rest.go)
+		x.compileREST(e.Name(), m)
 		ep, err := x.listenFor(e.Name())
 		if err != nil {
 			log.Printf("[pluginx] %s 端点建立失败: %v", e.Name(), err)

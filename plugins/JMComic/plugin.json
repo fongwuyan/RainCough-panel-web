@@ -29,7 +29,113 @@
       "invoke",
       "heartbeat",
       "log.tail"
-    ]
+    ],
+    "rest": [
+      {
+        "method": "GET",
+        "path": "/search",
+        "iface": "jmcomic.search",
+        "args": {
+          "keyword": "?keyword",
+          "page": "?page",
+          "mode": "?mode"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/meta/{aid}",
+        "iface": "jmcomic.meta",
+        "args": {
+          "aid": "{aid}"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/album/{aid}",
+        "iface": "jmcomic.album",
+        "args": {
+          "aid": "{aid}"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/chapter/{aid}/{cid}",
+        "iface": "jmcomic.chapter",
+        "args": {
+          "aid": "{aid}",
+          "cid": "{cid}"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/cover/{aid}",
+        "iface": "jmcomic.cover",
+        "args": {
+          "aid": "{aid}"
+        },
+        "file": "cover"
+      },
+      {
+        "method": "GET",
+        "path": "/image/{aid}/{cid}/{filename}",
+        "iface": "jmcomic.image",
+        "args": {
+          "aid": "{aid}",
+          "cid": "{cid}",
+          "filename": "{filename}"
+        },
+        "file": "url"
+      },
+      {
+        "method": "GET",
+        "path": "/library",
+        "iface": "jmcomic.library.list"
+      },
+      {
+        "method": "DELETE",
+        "path": "/library/{aid}",
+        "iface": "jmcomic.library.delete",
+        "args": {
+          "aid": "{aid}"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/download/{aid}",
+        "iface": "jmcomic.download",
+        "args": {
+          "aid": "{aid}"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/download/{aid}",
+        "iface": "jmcomic.download.status",
+        "args": {
+          "aid": "{aid}"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/download/batch",
+        "iface": "jmcomic.batch.start",
+        "args": {
+          "mode": "body.mode",
+          "keyword": "body.keyword"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/download/batch",
+        "iface": "jmcomic.batch.status"
+      },
+      {
+        "method": "POST",
+        "path": "/download/batch/stop",
+        "iface": "jmcomic.batch.stop"
+      }
+    ],
+    "rest_public": true
   },
   "interfaces": [
     {
@@ -133,6 +239,24 @@
       "visibility": "all",
       "version": "1",
       "description": "性能统计(命中/解码/耗时采样)"
+    },
+    {
+      "id": "jmcomic.batch.start",
+      "visibility": "all",
+      "version": "1",
+      "description": "批量下载: 开始(按关键词/分类)"
+    },
+    {
+      "id": "jmcomic.batch.status",
+      "visibility": "all",
+      "version": "1",
+      "description": "批量下载: 进度"
+    },
+    {
+      "id": "jmcomic.batch.stop",
+      "visibility": "all",
+      "version": "1",
+      "description": "批量下载: 停止"
     }
   ]
 }

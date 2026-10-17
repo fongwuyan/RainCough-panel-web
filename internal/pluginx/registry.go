@@ -365,6 +365,8 @@ func (x *PluginX) Drop(name string) {
 	}
 	delete(x.endpoints, name)
 	x.mu.Unlock()
+	// REST 桥的路由表也要摘掉, 否则卸载后旧路径还能被分发(打到一个不存在的插件)
+	x.dropREST(name)
 	if x.ns != nil {
 		_ = x.ns.Delete("plugin:" + name)
 		items, _ := x.ns.List("iface:", 2000)

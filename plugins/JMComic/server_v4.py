@@ -182,7 +182,7 @@ def jm_search(params):
                     item['author'] = m.get('author', '')
                     item['tags'] = m.get('tags', [])
             _search_cache_set(cache_key, {'items': items, 'total': total, 'page_count': page_count})
-        return {'items': items, 'total': total, 'page_count': page_count}
+            return {'items': items, 'total': total, 'page_count': page_count}
         if mode == 'author':
             result = client.search_author(search_query=keyword, page=page)
         elif mode == 'tag':
@@ -624,6 +624,57 @@ def _lib_snap_get(force):
         _th.Thread(target=_lib_snap_refresh, daemon=True).start()
     return _LIB_SNAP['snap']
 
+# ---- 批量下载(移动端 App 依赖) ----
+# v4 迁移时漏掉了 batch: 旧的 server.py 的 DownloadManager 里本来就实现了
+# start_batch/stop_batch/batch_status, 但 v4 只包了单本下载。
+# 配套 App(JMReader)的"批量"页需要这三个接口, 这里补上并保持返回结构一致。
+# 返回结构(App 的 BatchStatusResponse):
+#   {running,status,mode,keyword,found,done,fail,skip,current,error,results:{aid:{name,status}}}
+
+
+@rc.interface("jmcomic.batch.start")
+def jm_batch_start(params):
+    mode = _s(params, 'mode', 'keyword') or 'keyword'
+    keyword = _s(params, 'keyword')
+    if not keyword:
+        _err('请输入批量关键词')
+    ok, msg = M._manager.start_batch(mode, keyword)
+    if not ok:
+        _err(msg)
+    return {'message': msg, 'mode': mode, 'keyword': keyword}
+
+
+@rc.interface("jmcomic.batch.status")
+def jm_batch_status(params):
+    b = M._manager.batch_status() or {}
+    # 只保留 App 认识的字段, results 里的结构也统一一下
+    results = {}
+    for aid, r in (b.get('results') or {}).items():
+        if isinstance(r, dict):
+            results[str(aid)] = {'name': r.get('name', '') or '', 'status': r.get('status', 'queued') or 'queued'}
+        else:
+            results[str(aid)] = {'name': '', 'status': str(r)}
+    return {
+        'running': bool(b.get('running')),
+        'status': b.get('status') or 'idle',
+        'mode': b.get('mode') or 'keyword',
+        'keyword': b.get('keyword') or '',
+        'found': int(b.get('found') or 0),
+        'done': int(b.get('done') or 0),
+        'fail': int(b.get('fail') or 0),
+        'skip': int(b.get('skip') or 0),
+        'current': b.get('current'),
+        'error': b.get('error') or '',
+        'results': results,
+    }
+
+
+@rc.interface("jmcomic.batch.stop")
+def jm_batch_stop(params):
+    M._manager.stop_batch()
+    return {'ok': True, 'message': '已请求停止批量下载'}
+
+
 if __name__ == "__main__":
     _start_cleaner()
     rc.serve(
@@ -636,6 +687,7 @@ if __name__ == "__main__":
                    "jmcomic.cover", "jmcomic.covers", "jmcomic.prefetch", "jmcomic.image",
                    "jmcomic.perf.stats", "jmcomic.download", "jmcomic.download.status",
                    "jmcomic.download.cancel", "jmcomic.library.list", "jmcomic.library.delete",
-                   "jmcomic.config.get", "jmcomic.config.save", "jmcomic.info"],
+                   "jmcomic.config.get", "jmcomic.config.save", "jmcomic.info",
+                   "jmcomic.batch.start", "jmcomic.batch.status", "jmcomic.batch.stop"],
         plugin_dir=os.path.dirname(os.path.abspath(__file__)),
     )
