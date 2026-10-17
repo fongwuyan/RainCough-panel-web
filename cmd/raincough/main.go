@@ -7,16 +7,20 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"raincough"
 	"raincough/internal/config"
 	"raincough/internal/core"
 	"raincough/internal/pluginx"
@@ -42,9 +46,8 @@ func main() {
 		}
 	}
 
-	// 数据层(单条查询带超时, 防止 DB 卡死拖垮主进程)
-	sd, err := shared.OpenWithTimeout(cfg.ResolveDSN(),
-		time.Duration(cfg.DBQueryTimeout)*time.Second)
+	// 数据层(纯标准库文件 KV, 无外部数据库)
+	sd, err := shared.Open(cfg.ResolveDSN())
 	if err != nil {
 		log.Fatalf("数据层初始化失败: %v", err)
 	}
@@ -60,7 +63,6 @@ func main() {
 	}
 	globalPX = pluginx.New(pluginx.Options{
 		PluginsDir: cfg.PluginsDir,
-		ExtDir:     filepath.Join(cfg.BaseDir, "extensions"), // 声明了 backend 的扩展也接入接口库
 		UDSDir:     os.Getenv("RC_UDS_DIR"),
 		Token:      os.Getenv("RC_REG_TOKEN"),
 		ProbeEvery: probeEvery,
@@ -70,7 +72,7 @@ func main() {
 	}
 	defer globalPX.Stop()
 
-	// 任务队列 + 调度器(core_tasks / core_scheduler namespace)
+	// 任务队列(core_tasks namespace)
 	taskNS, err := sd.Namespace("core_tasks")
 	if err != nil {
 		log.Fatalf("任务 namespace 初始化失败: %v", err)
@@ -91,13 +93,6 @@ func main() {
 		}
 	}()
 
-	schedNS, err := sd.Namespace("core_scheduler")
-	if err != nil {
-		log.Fatalf("调度器 namespace 初始化失败: %v", err)
-	}
-	globalSched = core.NewScheduler(schedNS, nil)
-	globalSched.Start()
-
 	// 终端管理器 + 闲置回收
 	globalTerm = core.NewTermManager()
 	go func() {
@@ -113,17 +108,6 @@ func main() {
 		}
 	}()
 
-	// 环境包管理器
-	envNS, err := sd.Namespace("core_envpkg")
-	if err != nil {
-		log.Fatalf("环境包 namespace 初始化失败: %v", err)
-	}
-	envRoot := os.Getenv("RC_ENV_ROOT")
-	if envRoot == "" {
-		envRoot = "/opt/envs"
-	}
-	globalEnv = core.NewEnvManager(envRoot, envNS)
-
 	// 插件市场(回调: 安装/卸载后触发接口库重新扫描端点)
 	storeNS, err := sd.Namespace("core_store")
 	if err != nil {
@@ -133,73 +117,23 @@ func main() {
 		globalPX.Reload()
 	})
 
-	// 系统扩展仓储: 内置功能之外的功能包, 存放于主面板库 extensions/, 按需安装
-	globalExt = core.NewExtStore(
-		filepath.Join(cfg.BaseDir, "extensions"),
-		filepath.Join(cfg.BaseDir, "extension-src", "extensions"),
-		globalStore,
-	)
-
-	// 系统中心(服务/进程/日志/防火墙)
-	globalSys = core.NewSysCenter(cfg.SudoPW)
-
-	// 系统备份(目录打包归档 + 保留轮换 + 定时间隔; 进度接入任务队列)
-	bkpNS, err := sd.Namespace("core_backup")
-	if err != nil {
-		log.Fatalf("备份 namespace 初始化失败: %v", err)
-	}
-	globalBkp = core.NewBackupManager(bkpNS, globalTasks)
-	globalBkp.Start()
-
 	// 终端主机/常用命令存储
 	initTermNS(sd)
-	initMediaNS(sd)
 
-	// M4: 系统功能注册为接口库内置 Provider(接口总览 source=system)
+	// 系统功能注册为接口库内置 Provider(接口总览 source=system)
 	registerSystemProviders(globalPX)
-	registerSystemProvidersMore(globalPX)
-
-	// 性能趋势采样(每 1s 一点, 保留 60 点, 供工作台 SysPerf)
-	perf = core.NewPerfTracker(sysMon)
-	go perf.Run()
 
 	// 工作台常驻历史: 每秒采样追加 data/workspace-history.ndjson
-	// 不限期(永不过期/不轮转), 唯一清理入口是"存储清理"(key=workspace)
 	globalWSH = core.NewWSHistory(filepath.Join(cfg.DataDir, "workspace-history.ndjson"))
 	globalWSH.Start(sysMon)
 
 	s := &server{cfg: cfg, sd: sd}
-	// 扩展安装/卸载后: 起停它自带的后端进程, 并让接口库重扫端点。
-	// (回调里做特权操作, 所以挂在 server 上; 纯前端扩展这两个函数直接返回)
-	globalExt.SetHooks(
-		func(name string) {
-			// 先让接口库把端点建好, 再拉后端进程 —— 反过来后端会先连一次空地址
-			// (虽然 Restart=always 会兜住, 但没必要让它先失败一次)
-			if globalPX != nil {
-				globalPX.Reload()
-			}
-			if err := s.extBackendUp(name); err != nil {
-				log.Printf("[ext] %s 后端启动失败: %v", name, err)
-			}
-		},
-		func(name string) { // 删文件之前: 先停后端
-			if err := s.extBackendDown(name); err != nil {
-				log.Printf("[ext] %s 后端停止失败: %v", name, err)
-			}
-		},
-		func(name string) { // 删文件之后: 摘接口注册 + 重扫端点
-			if globalPX != nil {
-				globalPX.Drop(name)
-				globalPX.Reload()
-			}
-		},
-	)
 	mux := http.NewServeMux()
 	s.routes(mux)
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", *port),
-		Handler:           apiMon.serve(mux), // 接口监控中间件(记录 /api/* 计数与流水)
+		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	if cfg.HTTPReadTimeout > 0 {
@@ -219,10 +153,6 @@ func main() {
 	go func() {
 		<-sig
 		close(taskCleanupStop)
-		globalSched.Stop()
-		if globalBkp != nil {
-			globalBkp.Stop()
-		}
 		if globalWSH != nil {
 			globalWSH.Stop()
 		}
@@ -240,11 +170,15 @@ func main() {
 }
 
 // routes 注册全部路由。
+// 保留范围: 工作台 / 文件管理 / 终端 / 插件 / 设置 / 面板更新(常驻浮窗)。
 func (s *server) routes(mux *http.ServeMux) {
-	// ---- 核心 API ----
+	// ---- 工作台 ----
 	mux.HandleFunc("/api/system", s.handleSystem)
 	mux.HandleFunc("/api/system/", s.handleSystemSub)
 	mux.HandleFunc("/api/workspace/history", s.handleWSHistory)
+	mux.HandleFunc("/api/disks", s.handleDisks)
+	mux.HandleFunc("/api/disks/unmount", s.handleDiskUnmount)
+	mux.HandleFunc("/api/net/status", s.handleNetStatus)
 
 	// ---- 文件管理 ----
 	mux.HandleFunc("/api/fm/ops", s.handleFmOps)  // 列表只在无子路径时生效
@@ -252,10 +186,10 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/fm/unzip", s.handleFmUnzip)
 	mux.HandleFunc("/api/fm/", s.handleFm)
 
-	// ---- 任务队列 + 调度器 ----
+	// ---- 任务队列(插件安装/文件批量操作共用) ----
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/tasks/", s.handleTaskDetail)
-	mux.HandleFunc("/api/scheduler/jobs", s.handleSchedulerJobs)
+	mux.HandleFunc("/api/tasks/purge", s.handleTasksPurge)
 
 	// ---- 终端 ----
 	mux.HandleFunc("/api/terminal/open", s.handleTermOpen)
@@ -264,16 +198,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/terminal/resize", s.handleTermResize)
 	mux.HandleFunc("/api/terminal/close", s.handleTermClose)
 	mux.HandleFunc("/api/terminal/hosts", s.handleTermHosts)
+	mux.HandleFunc("/api/terminal/hosts/set_sort", s.handleTermHostsSetSort)
 	mux.HandleFunc("/api/terminal/commands", s.handleTermCommands)
-
-	// ---- 环境包 ----
-	mux.HandleFunc("/api/envpkg/recipes", s.handleEnvRecipes)
-	mux.HandleFunc("/api/envpkg/envs", s.handleEnvList)
-	mux.HandleFunc("/api/envpkg/catalog", s.handleEnvCatalog)
-	mux.HandleFunc("/api/envpkg/install", s.handleEnvInstall)
-	mux.HandleFunc("/api/envpkg/tasks/", s.handleEnvTask)
-	mux.HandleFunc("/api/envpkg/uninstall", s.handleEnvUninstall)
-	mux.HandleFunc("/api/envpkg/run", s.handleEnvRun)
+	mux.HandleFunc("/api/terminal/ws_token", s.handleWsToken)
 
 	// ---- 插件市场 ----
 	mux.HandleFunc("/api/store/settings", s.handleStoreSettings)
@@ -281,17 +208,10 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/store/registry", s.handleStoreRegistry)
 	mux.HandleFunc("/api/store/changelog", s.handleStoreChangelog)
 	mux.HandleFunc("/api/store/plugin/install", s.handleStorePluginInstall)
+	mux.HandleFunc("/api/store/plugin/update", s.handleStorePluginUpdate)
 	mux.HandleFunc("/api/store/plugin/remove", s.handleStorePluginRemove)
-	// 系统扩展(内置功能之外的扩展包安装/卸载/产物服务)
-	mux.HandleFunc("/api/ext", s.handleExtList)
-	mux.HandleFunc("/api/ext/registry", s.handleExtRegistry)
-	mux.HandleFunc("/api/ext/install", s.handleExtInstall)
-	mux.HandleFunc("/api/ext/update", s.handleExtUpdate)
-	mux.HandleFunc("/api/ext/remove", s.handleExtRemove)
-	mux.HandleFunc("/api/ext/backend", s.handleExtBackend)
-	mux.HandleFunc("/api/ext/backend/restart", s.handleExtBackendRestart)
-	mux.HandleFunc("/api/ext/", s.handleExtAsset)
-	// 面板版本与安装命令(只读; 面板更新为手动三步, 见 core/panel 设计)
+
+	// ---- 面板版本与更新(常驻浮窗) ----
 	mux.HandleFunc("/api/panel/version", s.handlePanelVersion)
 	mux.HandleFunc("/api/panel/install-command", s.handlePanelInstallCommand)
 	mux.HandleFunc("/api/panel/update/check", s.handlePanelUpdateCheck)
@@ -300,58 +220,6 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/panel/update/restart", s.handlePanelUpdateRestart)
 	mux.HandleFunc("/api/panel/update/log", s.handlePanelUpdateLog)
 	mux.HandleFunc("/api/panel/update/rollback", s.handlePanelUpdateRollback)
-
-	// ---- 系统中心(服务/进程/日志/防火墙) ----
-	mux.HandleFunc("/api/sysfunc/", s.handleSysCenter)
-	mux.HandleFunc("/api/sysfunc/hardware", s.sysfHardware)
-	mux.HandleFunc("/api/sysfunc/updates/", s.sysfUpdates)
-	mux.HandleFunc("/api/sysfunc/updates", s.sysfUpdates)
-	mux.HandleFunc("/api/sysfunc/backup/", s.handleBackup)
-	mux.HandleFunc("/api/sysfunc/disks/fs", s.sysfDisks)
-	mux.HandleFunc("/api/sysfunc/snapshot/", s.sysfSnap)
-	mux.HandleFunc("/api/sysfunc/users", s.sysfUsers)
-	mux.HandleFunc("/api/sysfunc/ssh/keys", s.sysfSshKeys)
-	mux.HandleFunc("/api/sysfunc/ssh/keys/save", s.sysfSshKeysSave)
-	mux.HandleFunc("/api/sysfunc/clean/", s.sysfClean)
-	mux.HandleFunc("/api/sysfunc/pwr/", s.sysfPwr)
-	mux.HandleFunc("/api/sysfunc/kernels", s.sysfKernels)
-	mux.HandleFunc("/api/sysfunc/kernels/remove", s.sysfKernels)
-	mux.HandleFunc("/api/sysfunc/time/", s.sysfTime)
-	mux.HandleFunc("/api/sysfunc/time", s.sysfTime)
-	mux.HandleFunc("/api/sysfunc/health/", s.sysfHealth)
-	mux.HandleFunc("/api/sysfunc/events/timeline", s.sysfEvents)
-	mux.HandleFunc("/api/sysfunc/logrotate/", s.sysfLogrotate)
-	mux.HandleFunc("/api/sysfunc/boot/history", s.sysfBootHistory)
-	mux.HandleFunc("/api/sysfunc/perf/", s.sysfPerfNet)
-	mux.HandleFunc("/api/sysfunc/net/status", s.sysfPerfNet)
-
-	// ---- 旧前端兼容端点 ----
-	mux.HandleFunc("/api/disks", s.handleDisks)
-	mux.HandleFunc("/api/disks/unmount", s.handleDiskUnmount)
-	mux.HandleFunc("/api/terminal/ws_token", s.handleWsToken)
-	mux.HandleFunc("/api/terminal/hosts/set_sort", s.handleTermHostsSetSort)
-	mux.HandleFunc("/api/sys/processes/kill", s.handleSysKill)
-	mux.HandleFunc("/api/sys/logs", s.handleSysLogs)
-	mux.HandleFunc("/api/sys/processes", s.handleSysProcesses)
-	mux.HandleFunc("/api/tasks/purge", s.handleTasksPurge)
-	mux.HandleFunc("/api/scheduler/actions", s.handleSchedulerActions)
-	mux.HandleFunc("/api/scheduler/jobs/", s.handleSchedulerJob)
-	mux.HandleFunc("/api/envpkg/start", s.handleEnvStartStop)
-	mux.HandleFunc("/api/envpkg/stop", s.handleEnvStartStop)
-
-	// ---- 媒体中心 ----
-	mux.HandleFunc("/api/media/roots", s.handleMediaRoots)
-	mux.HandleFunc("/api/media/stats", s.handleMediaStats)
-	mux.HandleFunc("/api/media/list", s.handleMediaList)
-	mux.HandleFunc("/api/media/thumb", s.handleMediaFile)
-	mux.HandleFunc("/api/media/file", s.handleMediaFile)
-	mux.HandleFunc("/api/media/tag", s.handleMediaTag)
-	mux.HandleFunc("/api/media/dedup", s.handleMediaDedup)
-	mux.HandleFunc("/api/media/tool/", s.handleMediaTool)
-
-	// ---- 插件商店 ----
-	mux.HandleFunc("/api/store/plugin/update", s.handleStorePluginUpdate)
-	mux.HandleFunc("/api/store/project/", s.handleStoreProject)
 
 	// ---- 插件 ----
 	mux.HandleFunc("/api/plugins", s.handlePlugins) // 列表
@@ -362,6 +230,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/interfaces/", globalPX.HandleIfacesRoutes)
 	mux.HandleFunc("/api/services/health", globalPX.HandleServicesHealth)
 	mux.HandleFunc("/api/services/health/log", globalPX.HandleServiceLog)
+	mux.HandleFunc("/api/services/list", s.handleServicesList)
+	mux.HandleFunc("/api/services/action", s.handleServicesAction)
 
 	// ---- 静态前端(public/) ----
 	webDir := filepath.Join(s.cfg.BaseDir, "public")
@@ -370,32 +240,12 @@ func (s *server) routes(mux *http.ServeMux) {
 	})
 }
 
-// ---- 插件路由(v4 接口库, 无 v3 网关) ----
-// isSystemExtension: 该名字是否是"已安装的系统扩展"。
-// ★系统扩展的后端也注册在同一个接口库里, 但它属于「系统扩展」而不是「插件」——
-//   插件页/插件接口都不应把它当成插件(否则扩展会被当成插件列出、甚至被"删除插件"误删)。
-func (s *server) isSystemExtension(name string) bool {
-	if name == "" || s.cfg == nil || s.cfg.BaseDir == "" {
-		return false
-	}
-	st, err := os.Stat(filepath.Join(s.cfg.BaseDir, "extensions", name))
-	return err == nil && st.IsDir()
-}
-
 func (s *server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "仅支持 GET"})
 		return
 	}
-	all := globalPX.ListPlugins()
-	out := make([]map[string]interface{}, 0, len(all))
-	for _, p := range all {
-		if s.isSystemExtension(fmt.Sprintf("%v", p["name"])) {
-			continue // 系统扩展: 由「系统扩展」页管理
-		}
-		out = append(out, p)
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, globalPX.ListPlugins())
 }
 
 func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
@@ -411,17 +261,22 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	if len(parts) > 1 {
 		sub = parts[1]
 	}
-	if s.isSystemExtension(name) {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"error": "这是系统扩展, 请在「系统扩展」页管理: " + name})
-		return
-	}
 	if !globalPX.HasPlugin(name) {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件未注册: " + name})
 		return
 	}
 
 	switch {
+	case r.Method == http.MethodGet && sub == "":
+		// 单插件信息(GenericPlugin 回退卡片用)
+		for _, p := range globalPX.ListPlugins() {
+			if p["name"] == name {
+				writeJSON(w, http.StatusOK, p)
+				return
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "插件信息不可用: " + name})
+
 	case r.Method == http.MethodDelete && sub == "":
 		// 删除插件目录(外部进程由用户自行停用)
 		dir := filepath.Join(s.cfg.PluginsDir, name)
@@ -454,6 +309,17 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- 静态前端 ----
+// 优先用二进制内嵌的 public/(单文件分发); 内嵌缺失时回退磁盘目录(开发期)。
+var webFS fs.FS
+
+func init() {
+	if sub, err := fs.Sub(raincough.WebFS, "public"); err == nil {
+		if _, err := fs.Stat(sub, "index.html"); err == nil {
+			webFS = sub
+		}
+	}
+}
+
 func serveStatic(w http.ResponseWriter, r *http.Request, webDir string) {
 	p := r.URL.Path
 	// API 未知路径返回 JSON 404, 不落入 SPA fallback(否则缺路由伪装成 200 HTML)
@@ -464,6 +330,26 @@ func serveStatic(w http.ResponseWriter, r *http.Request, webDir string) {
 	if p == "/" {
 		p = "/index.html"
 	}
+	// index.html 与静态资源都禁缓存(否则升级后仍拿旧 bundle)
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+	if webFS != nil {
+		name := strings.TrimPrefix(path.Clean(p), "/")
+		if _, err := fs.Stat(webFS, name); err != nil {
+			name = "index.html" // SPA fallback
+		}
+		b, err := fs.ReadFile(webFS, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if ct := mime.TypeByExtension(path.Ext(name)); ct != "" {
+			w.Header().Set("Content-Type", ct)
+		}
+		_, _ = w.Write(b)
+		return
+	}
+
 	full := filepath.Join(webDir, filepath.Clean(p))
 	// 防穿越
 	if !strings.HasPrefix(full, webDir) {
@@ -474,8 +360,6 @@ func serveStatic(w http.ResponseWriter, r *http.Request, webDir string) {
 		// SPA fallback
 		full = filepath.Join(webDir, "index.html")
 	}
-	// index.html 必须无缓存(才能拿到最新 bundle 名); 其余静态也禁缓存避免旧前端
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	http.ServeFile(w, r, full)
 }
 

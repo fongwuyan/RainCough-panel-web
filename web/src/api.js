@@ -20,16 +20,23 @@ async function reqForm(url, fd) {
   return req('POST', url, fd, true)
 }
 
+// 与后端路由一一对应。删掉的接口不再保留空壳(历史上"点了没反应"多源于此)。
 export const api = {
 
+  // ---- 插件 ----
   listPlugins: () => req('GET', '/api/plugins'),
+  pluginInfo: (name) => req('GET', `/api/plugins/${encodeURIComponent(name)}`),
   removePlugin: (name) => req('DELETE', `/api/plugins/${name}`),
+
+  // ---- 工作台 ----
   sysInfo: () => req('GET', '/api/system'),
   sysGpus: () => req('GET', '/api/system/gpus'),
   disks: () => req('GET', '/api/disks'),
   diskUnmount: (device) => req('POST', '/api/disks/unmount', { device }),
+  netStatus: () => req('GET', '/api/net/status'),
+  wsHistory: (points) => req('GET', '/api/workspace/history?points=' + (points || 600)),
 
-  // 接口库 v4(自注册/服务总线)
+  // ---- 接口库 / 服务健康 ----
   ifaces: (params) => {
     const q = new URLSearchParams()
     for (const k in params || {}) if (params[k]) q.set(k, params[k])
@@ -44,34 +51,11 @@ export const api = {
     if (grep) u += '&grep=' + encodeURIComponent(grep)
     return req('GET', u)
   },
+  // 插件服务列表/操作(运行时由 Go 自管, 不再经 systemd)
+  serviceList: () => req('GET', '/api/services/list'),
+  serviceAction: (unit, action) => req('POST', '/api/services/action', { unit, action }),
 
-  mtImage: (files, opts) => {
-    const fd = new FormData()
-    for (const f of files) fd.append('files', f)
-    fd.append('format', opts.format || '')
-    fd.append('resize', opts.resize || '')
-    fd.append('quality', opts.quality || '')
-    fd.append('rotate', opts.rotate || '')
-    return reqForm('/api/media/tool/image', fd)
-  },
-  mtPdf: (files, action, extra) => {
-    const fd = new FormData()
-    for (const f of files) fd.append('files', f)
-    fd.append('action', action)
-    if (extra) for (const k in extra) fd.append(k, String(extra[k]))
-    return reqForm('/api/media/tool/pdf', fd)
-  },
-  mtMedia: (files, action, extra) => {
-    const fd = new FormData()
-    for (const f of files) fd.append('files', f)
-    fd.append('action', action)
-    if (extra) for (const k in extra) fd.append(k, String(extra[k]))
-    return reqForm('/api/media/tool/media', fd)
-  },
-  mtInfo: (file) => {
-    const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/media/tool/info', fd)
-  },
+  // ---- 文件管理 ----
   fmList: (path) => req('GET', `/api/fm/list?path=${encodeURIComponent(path || '/')}`),
   fmUpload: (path, files, conflict = 'rename', onProgress) => {
     const CHUNK = 8 * 1024 * 1024
@@ -150,96 +134,28 @@ export const api = {
     }
     return req('GET', `/api/fm/search?${qs.toString()}`)
   },
-  sysfServiceAction: (unit, action) => req('POST', '/api/sysfunc/service/action', { unit, action }),
-  sysfServiceList: () => req('GET', '/api/sysfunc/service/list'),
-  sysfHardware: () => req('GET', '/api/sysfunc/hardware'),
-  sysfUpdatesRefresh: () => req('POST', '/api/sysfunc/updates/refresh', {}),
-  sysfUpdatesList: () => req('GET', '/api/sysfunc/updates/list'),
-  sysfUpdatesRun: () => req('POST', '/api/sysfunc/updates/run', { confirm: 'yes' }),
-  sysfDisks: () => req('GET', '/api/sysfunc/disks/fs'),
-  sysfSnapCap: () => req('GET', '/api/sysfunc/snapshot/cap'),
-  sysfSnapCreate: (name) => req('POST', '/api/sysfunc/snapshot/create', { name }),
-  sysfSnapList: () => req('GET', '/api/sysfunc/snapshot/list'),
-  sysfUsers: () => req('GET', '/api/sysfunc/users'),
-  sysfSshKeys: (user) => req('GET', `/api/sysfunc/ssh/keys?user=${encodeURIComponent(user)}`),
-  sysfSshKeysSave: (user, keys) => req('POST', '/api/sysfunc/ssh/keys/save', { user, keys }),
 
-  // 系统 (日志 / 进程)
-  sysLogs: (lines, grep) => req('GET', `/api/sys/logs?lines=${lines || 200}&grep=${encodeURIComponent(grep || '')}`),
-  sysProcesses: (sort) => req('GET', `/api/sys/processes?sort=${sort || 'cpu'}`),
-
-  sysKill: (pid, sig) => req('POST', '/api/sys/processes/kill', { pid, sig }),
-  schedActions: () => req('GET', '/api/scheduler/actions'),
-
-  schedJobs: () => req('GET', '/api/scheduler/jobs'),
-  schedCreate: (data) => req('POST', '/api/scheduler/jobs', data),
-
-  schedUpdate: (id, data) => req('PUT', `/api/scheduler/jobs/${id}`, data),
-  schedDelete: (id) => req('DELETE', `/api/scheduler/jobs/${id}`),
-
-  schedPause: (id) => req('POST', `/api/scheduler/jobs/${id}/pause`),
-  schedResume: (id) => req('POST', `/api/scheduler/jobs/${id}/resume`),
-
-  schedRun: (id) => req('POST', `/api/scheduler/jobs/${id}/run`),
-  mediaRoots: () => req('GET', '/api/media/roots'),
-  mediaSaveRoots: (roots) => req('POST', '/api/media/roots', { roots }),
-  mediaStats: () => req('GET', '/api/media/stats'),
-  mediaList: (root, kind, page, tag) => req('GET', `/api/media/list?root=${encodeURIComponent(root)}&kind=${kind || ''}&page=${page || 0}&tag=${encodeURIComponent(tag || '')}`),
-  mediaThumb: (path) => `/api/media/thumb?path=${encodeURIComponent(path)}`,
-  mediaFile: (path) => `/api/media/file?path=${encodeURIComponent(path)}`,
-  mediaTag: (paths) => req('POST', '/api/media/tag', { paths }),
-  mediaDedup: (root) => req('POST', '/api/media/dedup', { root }),
-
-  vmInfo: (file) => {
-    const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/media/tool/vmerge?action=info', fd)
-  },
-  vmExtract: (file) => {
-    const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/media/tool/vmerge?action=extract', fd)
-  },
-  tbMediaInfo: (file) => {
-    const fd = new FormData(); fd.append('file', file)
-    return reqForm('/api/media/tool/media?action=info', fd)
-  },
-  tbMediaProcess: (files, action, extra) => {
-    const fd = new FormData()
-    for (const f of files) fd.append('files', f)
-    fd.append('action', action)
-    if (extra) for (const k in extra) fd.append(k, String(extra[k]))
-    return reqForm('/api/media/tool/media?action=convert', fd)
-  },
-  tbMediaMerge: (files) => {
-    const fd = new FormData()
-    for (const f of files) fd.append('files', f)
-    return reqForm('/api/media/tool/media?action=merge', fd)
-  },
+  // ---- 终端 ----
+  tmOpen: (rows, cols) => req('POST', '/api/terminal/open', { rows: rows || 24, cols: cols || 100 }),
+  tmInput: (sid, data) => req('POST', '/api/terminal/input', { sid, data }),
+  tmResize: (sid, rows, cols) => req('POST', '/api/terminal/resize', { sid, rows, cols }),
+  tmClose: (sid) => req('POST', '/api/terminal/close', { sid }),
   tmHostsList: () => req('GET', '/api/terminal/hosts'),
   tmHostCreate: (h) => req('POST', '/api/terminal/hosts', h),
   tmHostUpdate: (h) => req('PUT', '/api/terminal/hosts', h),
   tmHostDelete: (host) => req('DELETE', `/api/terminal/hosts?host=${encodeURIComponent(host)}`),
-  // 契约修正: 后端 /hosts/set_sort 读 {hosts:[...]} 数组(原 sort_list 键名+形状双错 → 恒400)
+  // 后端 /hosts/set_sort 读 {hosts:[...]} 数组(原 sort_list 键名+形状双错 → 恒 400)
   tmHostSort: (hosts) => req('POST', '/api/terminal/hosts/set_sort', { hosts }),
   tmCommandsList: () => req('GET', '/api/terminal/commands'),
   tmCommandCreate: (c) => req('POST', '/api/terminal/commands', c),
   tmCommandUpdate: (c) => req('PUT', '/api/terminal/commands', c),
   tmCommandDelete: (title) => req('DELETE', `/api/terminal/commands?title=${encodeURIComponent(title)}`),
 
-  // 环境包管理 (envpkg 系统模块)
-  envCatalog: () => req('GET', '/api/envpkg/catalog'),
-  envList: () => req('GET', '/api/envpkg/envs'),
-  envInstall: (name) => req('POST', '/api/envpkg/install', { name }),
-  envInstallRT: (type, version) => req('POST', '/api/envpkg/install', { type, version }),
-  envUninstall: (name) => req('POST', '/api/envpkg/uninstall', { name }),
-  envStart: (name) => req('POST', '/api/envpkg/start', { name }),
-  envStop: (name) => req('POST', '/api/envpkg/stop', { name }),
-  envRun: (name, command, timeout) => req('POST', '/api/envpkg/run', { name, command, timeout }),
-
-  // 统一任务队列
+  // ---- 统一任务队列 ----
   taskQueue: (includeDone, limit) => req('GET', `/api/tasks?done=${includeDone ? '1' : '0'}&limit=${limit || 0}`),
   taskQueuePurge: () => req('POST', '/api/tasks/purge'),
 
-  // 插件市场 / 面板更新 (store)
+  // ---- 插件市场 ----
   storeSettings: () => req('GET', '/api/store/settings'),
   storeSaveSettings: (cfg) => req('POST', '/api/store/settings', cfg),
   storePing: () => req('POST', '/api/store/ping', {}),
@@ -247,14 +163,11 @@ export const api = {
   storePluginInstall: (name) => req('POST', '/api/store/plugin/install', { name }),
   storePluginUpdate: (name) => req('POST', '/api/store/plugin/update', { name }),
   storePluginRemove: (name) => req('POST', '/api/store/plugin/remove', { name }),
-  // 插件仓仓级版本 + 更新日志(CHANGELOG.md), 插件页「更新日志」悬浮窗用
   storeChangelog: () => req('GET', '/api/store/changelog'),
 
-  // 面板更新(手动三步: 检查 → 下载并应用 → 由你确认是否立即重启) —— 侧边栏标题右侧
-  // 下载按钮的悬浮窗(PanelUpdate.vue)用。
-  // ⚠ 这 8 个方法曾整体缺失: PanelUpdate.vue 里 api.panelVersion 等一直是 undefined,
-  // 一调用就抛 TypeError, 悬浮窗永远停在"当前版本 -/未检查"的空壳(2026-10-01 用 headless
-  // Chrome 实测发现)。改动这些方法名时请同步 PanelUpdate.vue。
+  // ---- 面板更新(常驻浮窗) ----
+  // ⚠ 这 8 个方法曾整体缺失, PanelUpdate.vue 里 api.panelVersion 等一直是 undefined,
+  // 一调用就抛 TypeError, 悬浮窗永远停在空壳。改名时请同步 PanelUpdate.vue。
   panelVersion: () => req('GET', '/api/panel/version'),
   panelInstallCommand: () => req('GET', '/api/panel/install-command'),
   panelUpdateCheck: () => req('GET', '/api/panel/update/check'),
@@ -263,59 +176,4 @@ export const api = {
   panelUpdateRestart: () => req('POST', '/api/panel/update/restart', {}),
   panelUpdateLog: () => req('GET', '/api/panel/update/log'),
   panelUpdateRollback: (backup) => req('POST', '/api/panel/update/rollback', { backup: backup || '' }),
-
-  // 系统扩展(内置 7 项之外的功能包, 存于主面板库 extensions/)
-  extList: () => req('GET', '/api/ext'),
-  extRegistry: () => req('GET', '/api/ext/registry'),
-  extInstall: (name) => req('POST', '/api/ext/install', { name }),
-  extUpdate: (name) => req('POST', '/api/ext/update', { name }),
-  extRemove: (name) => req('POST', '/api/ext/remove', { name }),
-  extEntry: (name) => `/api/ext/${encodeURIComponent(name)}/assets/extension.js`,
-  // 扩展自带后端(清单里声明 backend 的扩展): 状态查询与重启
-  extBackend: () => req('GET', '/api/ext/backend'),
-  extBackendRestart: (name) => req('POST', '/api/ext/backend/restart', { name }),
-  // 已删除 storeProjectUpdateInfo / storeProjectCheck / storeProjectInstall /
-  // storeProjectStatus: 后端这几处只回伪造的 current=latest=v1.0.0 与空 env, 或早已
-  // 过时的"面板更新只能走部署脚本"说法。面板更新已由 /api/panel/update/* 实现
-  // (侧边栏标题右侧下载按钮 → PanelUpdate.vue), 前端不再有自升级类接口。
-  tmOpen: (rows, cols) => req('POST', '/api/terminal/open', { rows: rows || 24, cols: cols || 100 }),
-  tmInput: (sid, data) => req('POST', '/api/terminal/input', { sid, data }),
-  tmResize: (sid, rows, cols) => req('POST', '/api/terminal/resize', { sid, rows, cols }),
-  tmClose: (sid) => req('POST', '/api/terminal/close', { sid }),
-
-  // 系统级功能·第二批
-  sysfCleanScan: () => req('GET', '/api/sysfunc/clean/scan'),
-  sysfCleanDo: (item) => req('POST', '/api/sysfunc/clean/do', { item }),
-  sysfPerf: (hours) => req('GET', `/api/sysfunc/perf/history?hours=${hours || 24}`),
-  sysfNet: () => req('GET', '/api/sysfunc/net/status'),
-  sysfPwrPlan: (action, minutes) => req('POST', '/api/sysfunc/pwr/plan', { action, minutes }),
-  sysfPwrCancel: () => req('POST', '/api/sysfunc/pwr/cancel', {}),
-  sysfPwrState: () => req('GET', '/api/sysfunc/pwr/state'),
-  sysfKernels: () => req('GET', '/api/sysfunc/kernels'),
-  sysfKernelRemove: (pkg) => req('POST', '/api/sysfunc/kernels/remove', { pkg, confirm: 'yes' }),
-  sysfTime: () => req('GET', '/api/sysfunc/time/status'),
-  sysfTimeSync: () => req('POST', '/api/sysfunc/time/sync', {}),
-  sysfHealth: () => req('GET', '/api/sysfunc/health/check'),
-  sysfHealthRestart: () => req('POST', '/api/sysfunc/health/restart', { confirm: 'yes' }),
-  sysfEvents: (limit) => req('GET', `/api/sysfunc/events/timeline?limit=${limit || 100}`),
-  sysfLogrotateList: () => req('GET', '/api/sysfunc/logrotate/list'),
-  sysfLogrotateSave: (name, content) => req('POST', '/api/sysfunc/logrotate/save', { name, content }),
-
-  // 系统级功能·第四批
-  sysfBootHistory: () => req('GET', '/api/sysfunc/boot/history'),
-  sysfApiStats: () => req('GET', '/api/sysfunc/api-monitor/stats'),
-  sysfApiCalls: (n) => req('GET', `/api/sysfunc/api-monitor/calls?limit=${n || 300}`),
-  sysfApiClear: () => req('POST', '/api/sysfunc/api-monitor/clear', {}),
-
-  // 系统备份(目录打包 + 保留轮换 + 定时间隔)
-  bkpList: () => req('GET', '/api/sysfunc/backup/jobs'),
-  bkpCreate: (job) => req('POST', '/api/sysfunc/backup/jobs', job),
-  bkpUpdate: (name, patch) => req('POST', '/api/sysfunc/backup/jobs/update', { name, ...patch }),
-  bkpDelete: (name) => req('POST', '/api/sysfunc/backup/jobs/delete', { name }),
-  bkpRun: (name) => req('POST', '/api/sysfunc/backup/jobs/run', { name }),
-  bkpRuns: () => req('GET', '/api/sysfunc/backup/runs'),
-  bkpDeleteRun: (file) => req('POST', '/api/sysfunc/backup/runs/delete', { file }),
-
-  // 工作台常驻历史(服务端每秒采样, 不限期; 唯一清理入口=存储清理)
-  wsHistory: (points) => req('GET', '/api/workspace/history?points=' + (points || 600)),
 }

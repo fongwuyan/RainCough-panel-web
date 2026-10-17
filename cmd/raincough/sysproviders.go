@@ -33,9 +33,9 @@ func registerSystemProviders(px *pluginx.PluginX) {
 					"process_count":  s.ProcessCount,
 				}, nil
 			}},
-		{ID: "system.disks", Visibility: "main", Version: "1", Description: "磁盘列表(lsblk+df)",
+		{ID: "system.disks", Visibility: "main", Version: "1", Description: "磁盘列表(/proc/partitions + Statfs)",
 			Handler: func(params interface{}) (interface{}, error) {
-				return map[string]interface{}{"disks": globalSys.LsblkDisks()}, nil
+				return map[string]interface{}{"disks": core.Disks()}, nil
 			}},
 		{ID: "system.file.list", Visibility: "main", Version: "1",
 			Input:       map[string]interface{}{"type": "object", "props": map[string]interface{}{"path": map[string]interface{}{"type": "string"}}},
@@ -73,21 +73,9 @@ func registerSystemProviders(px *pluginx.PluginX) {
 				}
 				return map[string]interface{}{"path": abs, "content": content, "too_big": tooBig}, nil
 			}},
-		{ID: "system.media.stats", Visibility: "all", Version: "1", Description: "媒体中心统计",
-			Handler: func(params interface{}) (interface{}, error) {
-				if mediaSvc == nil {
-					return nil, fmt.Errorf("媒体服务未初始化")
-				}
-				counts, total := mediaSvc.Stats()
-				return map[string]interface{}{"counts": counts, "total_size": total}, nil
-			}},
 		{ID: "system.tasks.list", Visibility: "main", Version: "1", Description: "任务队列(含已完成)",
 			Handler: func(params interface{}) (interface{}, error) {
 				return map[string]interface{}{"tasks": globalTasks.List(false, 50)}, nil
-			}},
-		{ID: "system.envpkg.envs", Visibility: "main", Version: "1", Description: "已安装环境包",
-			Handler: func(params interface{}) (interface{}, error) {
-				return map[string]interface{}{"envs": globalEnv.List()}, nil
 			}},
 		{ID: "system.store.registry", Visibility: "main", Version: "1", Description: "插件市场注册表",
 			Handler: func(params interface{}) (interface{}, error) {

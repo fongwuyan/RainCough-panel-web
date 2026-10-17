@@ -3,7 +3,6 @@ import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { usePlugins } from '../stores/plugins'
 import { api } from '../api'
 import RealtimeChart from './sys/RealtimeChart.vue'
-import SysPerf from './sysfunc/SysPerf.vue'
 
 const { plugins } = usePlugins()
 
@@ -23,7 +22,7 @@ async function loadIfaceTotal() {
 // --- 网络摘要(原独立 SysNet 组件已并入「网络」卡, 避免区块重复) ---
 const netStat = ref({})
 async function loadNetStat() {
-  try { netStat.value = await api.sysfNet() } catch (e) { /* 静默, 不影响实时曲线 */ }
+  try { netStat.value = await api.netStatus() } catch (e) { /* 静默, 不影响实时曲线 */ }
 }
 
 const sys = ref(null)
@@ -545,11 +544,8 @@ async function loadSys() {
       </section>
     </div>
 
-    <!-- ===== 性能趋势 (span 5) ===== -->
-    <SysPerf class="span-5" />
-
-    <!-- ===== 磁盘设备 (span 7, 表格化) ===== -->
-    <section class="section span-7">
+    <!-- ===== 磁盘设备 (span 12, 表格化) ===== -->
+    <section class="section span-12">
       <div class="section-title">磁盘设备
         <span class="card-side">{{ disks.length }} 盘</span>
         <button class="btn btn-sm btn-ghost" @click="loadDisks">⟳ 刷新</button>

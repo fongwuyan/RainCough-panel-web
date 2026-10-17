@@ -46,7 +46,7 @@ var (
 	fmImageExt   = fmExtSet("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico", "tif", "tiff", "heic", "heif", "avif", "raw")
 	fmVideoExt   = fmExtSet("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "ts", "m2ts")
 	fmAudioExt   = fmExtSet("mp3", "wav", "flac", "ogg", "aac", "m4a", "wma", "opus", "mid", "midi")
-	fmArchiveExt = fmExtSet("zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "zst", "lz4", "lzma", "iso", "jar")
+	fmArchiveExt = fmExtSet("zip", "tar", "gz", "tgz", "bz2", "jar")
 	fmTextExt    = fmExtSet("txt", "md", "log", "json", "xml", "yaml", "yml", "ini", "conf", "cfg", "csv", "tsv",
 		"html", "htm", "css", "js", "mjs", "cjs", "ts", "jsx", "tsx", "vue", "go", "py", "sh", "bash", "zsh",
 		"fish", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php", "sql", "toml", "env", "rst", "bat", "ps1", "lock")

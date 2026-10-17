@@ -32,6 +32,9 @@ func extractArchive(src, destDir string) error {
 	}
 }
 
+// ExtractTarGz 解压 .tar.gz 到目标目录(供面板更新使用)。
+func ExtractTarGz(src, destDir string) error { return untarGzTo(src, destDir) }
+
 func untarGzTo(src, destDir string) error {
 	f, err := os.Open(src)
 	if err != nil {
@@ -133,13 +136,7 @@ func UnzipTo(src, destDir string) error {
 	return nil
 }
 
-// extractXZ 用外部 xz 命令解压(若可用)。
+// extractXZ xz 无标准库解码器, 零依赖前提下不支持(需要时请预先转成 tar.gz)。
 func extractXZ(src, destDir string) error {
-	// 内部用 xz -dc | tar x
-	_, err := runCommand("xz -dc "+shellQuote(src)+" | tar -x -C "+shellQuote(destDir), 600)
-	return err
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	return fmt.Errorf("不支持 .tar.xz(零依赖构建仅支持 zip/tar/tar.gz): %s", filepath.Base(src))
 }

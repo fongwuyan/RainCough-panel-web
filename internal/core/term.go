@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/creack/pty"
+	"raincough/internal/pty"
 )
 
 // ---- 终端(与旧面板 terminal.py 契约兼容) ----

@@ -77,7 +77,7 @@ async function loadHealth() {
 
 async function loadUnits() {
   try {
-    const d = await api.sysfServiceList()
+    const d = await api.serviceList()
     svcUnits.value = d.services || d.units || []
   } catch (e) { svcUnits.value = [] }
 }
@@ -143,7 +143,7 @@ async function restartSvc(p) {
   const verb = p.online ? '重启' : '启动'
   busy.value = p.name
   try {
-    await api.sysfServiceAction(u, act)
+    await api.serviceAction(u, act)
     flash(`${p.label || p.name}: 已下发${verb} (${u})`)
   } catch (e) {
     busy.value = ''
@@ -169,7 +169,7 @@ async function uninstall(p) {
   busy.value = p.name
   try {
     const u = unitFor(p.name)
-    if (u) { try { await api.sysfServiceAction(u, 'stop') } catch (e) { /* 服务本就未运行 */ } }
+    if (u) { try { await api.serviceAction(u, 'stop') } catch (e) { /* 服务本就未运行 */ } }
     await api.storePluginRemove(p.name)
     flash(`已卸载 ${p.label || p.name}`)
     await Promise.all([loadInstalled(), loadRegistry(), loadHealth()])

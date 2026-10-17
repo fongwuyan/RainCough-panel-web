@@ -19,7 +19,7 @@ func TestFileKind(t *testing.T) {
 		{"e.flac", false, "audio"},
 		{"f.mp3", false, "audio"},
 		{"g.tar.gz", false, "archive"}, // Ext=.gz
-		{"h.7z", false, "archive"},
+		{"h.zip", false, "archive"},
 		{"i.zip", false, "archive"},
 		{"j.md", false, "text"},
 		{"k.py", false, "text"},

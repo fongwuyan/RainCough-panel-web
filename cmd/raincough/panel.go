@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -136,15 +135,6 @@ var (
 	panelTagRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
 	assetRefRe = regexp.MustCompile(`index-[A-Za-z0-9_-]+\.(?:js|css)`)
 )
-
-// copyTreeInto 把 src 目录内容合并覆盖到 dst。
-// 必须带 --remove-destination: 运行中的可执行文件不能被 truncate 打开(ETXTBSY),
-// 直接 cp 覆盖会得到 "cp: cannot create regular file ...: Text file busy"。
-func copyTreeInto(src, dst string) (string, error) {
-	out, err := exec.Command("sh", "-c",
-		fmt.Sprintf("cp -a --remove-destination %s/. %s/", src, dst)).CombinedOutput()
-	return string(out), err
-}
 
 // pruneStaleAssets 删掉 public/assets 下不再被 index.html 引用的旧构建产物。
 // cp 是合并语义, 不清会把上一版的 index-*.js/css 留在磁盘上, 排查时容易看错版本。
@@ -513,8 +503,8 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 
 		// 3) 解包
 		globalTasks.Update(tid, "解包", 60, "解包到 stage")
-		if out, err := exec.Command("tar", "-xzf", zf, "-C", stage, "--strip-components=1").CombinedOutput(); err != nil {
-			fail("解包失败: " + string(out))
+		if err := extractTarGzStrip(zf, stage); err != nil {
+			fail("解包失败: " + err.Error())
 			return
 		}
 
@@ -543,9 +533,9 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 			fail("备份目录创建失败: " + err.Error())
 			return
 		}
-		_ = exec.Command("cp", "-a", filepath.Join(base, "raincough"), filepath.Join(bk, "raincough")).Run()
-		_ = exec.Command("cp", "-a", filepath.Join(base, "VERSION"), filepath.Join(bk, "VERSION")).Run()
-		_ = exec.Command("cp", "-a", filepath.Join(base, "public"), filepath.Join(bk, "public")).Run()
+		_ = copyFileInto(filepath.Join(base, "raincough"), filepath.Join(bk, "raincough"), 0o755)
+		_ = copyFileInto(filepath.Join(base, "VERSION"), filepath.Join(bk, "VERSION"), 0o644)
+		_ = copyDir(filepath.Join(base, "public"), filepath.Join(bk, "public"))
 		if _, err := os.Stat(filepath.Join(bk, "raincough")); err != nil {
 			fail("备份失败: 未取到当前二进制")
 			return
@@ -579,22 +569,16 @@ func (s *server) handlePanelUpdateRestart(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "环境未就绪"})
 		return
 	}
+	// 自重启: 不调用 systemctl, 由进程自己重新 exec 自身(保留 PID 由调用方决定)。
 	unit := os.Getenv("RC_UNIT_NAME")
 	if unit == "" {
 		unit = "raincough"
-	}
-	cmdline := fmt.Sprintf("setsid sh -c 'sleep 2; systemctl restart %s' >/dev/null 2>&1 &", unit)
-	if s.cfg.SudoPW != "" {
-		cmdline = fmt.Sprintf("setsid sh -c 'sleep 2; echo %s | sudo -S systemctl restart %s' >/dev/null 2>&1 &", s.cfg.SudoPW, unit)
-	}
-	if err := exec.Command("sh", "-c", cmdline).Run(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "下发重启失败: " + err.Error()})
-		return
 	}
 	st := s.readUpdateState()
 	st.Pending = false
 	s.writeUpdateState(st)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "unit": unit})
+	go selfRestart()
 }
 
 // ---- 更新历史 / 回滚 ----

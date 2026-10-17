@@ -1,15 +1,12 @@
 <script setup>
 import { onMounted, onUnmounted, ref, onErrorCaptured } from 'vue'
 import Sidebar from './components/Sidebar.vue'
-import InstallModal from './components/InstallModal.vue'
 import Lightbox from './components/Lightbox.vue'
 import { usePreview } from './stores/preview'
 import { useUi } from './stores/ui'
-import { useJmcomic } from './stores/jmcomic'
 
 const preview = usePreview()
 const ui = useUi()
-const jm = useJmcomic()
 const errGlobal = ref('')
 const blankHint = ref('')
 function startBlankProbe() {
@@ -39,7 +36,6 @@ onMounted(() => {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (preview.show.value) { preview.close(); return }
-      if (jm.popupAid.value) { jm.closePopup(); return }
       if (ui.installOpen.value) { ui.installOpen.value = false }
     }
     if (preview.show.value && !isTyping(e)) {
@@ -65,7 +61,6 @@ onUnmounted(() => {
       </router-view>
       </div>
     </main>
-    <InstallModal />
     <Lightbox />
   </div>
 </template>

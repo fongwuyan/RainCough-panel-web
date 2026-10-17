@@ -1,6 +1,7 @@
 package core
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -65,25 +66,6 @@ func toMap(v interface{}) map[string]interface{} {
 		m["updated_at"] = float64(t.UpdatedAt)
 		if t.Meta != nil {
 			m["meta"] = t.Meta
-		}
-		return m
-	}
-	if j, ok := v.(*ScheduleJob); ok {
-		m["id"] = j.ID
-		m["name"] = j.Name
-		m["cron"] = j.Cron
-		m["action"] = j.Action
-		m["enabled"] = j.Enabled
-		m["last_run"] = float64(j.LastRun)
-		m["last_status"] = j.LastStatus
-		m["last_message"] = j.LastMessage
-		m["created_at"] = float64(j.CreatedAt)
-		if j.Params != nil {
-			params := map[string]interface{}{}
-			for k, v := range j.Params {
-				params[k] = v
-			}
-			m["params"] = params
 		}
 		return m
 	}
@@ -179,95 +161,5 @@ func TestTaskCleanup(t *testing.T) {
 	}
 }
 
-// ---- 调度器测试 ----
-
-func mockExec(j *ScheduleJob) (string, error) {
-	return "executed:" + j.Action, nil
-}
-
-func TestSchedulerCRUD(t *testing.T) {
-	s := NewScheduler(newMockNS(), mockExec)
-	j, err := s.Create("每日备份", "0 3 * * *", "shell", map[string]string{"cmd": "backup"})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if j.ID == "" || !j.Enabled {
-		t.Fatalf("创建失败: %+v", j)
-	}
-	if len(s.List()) != 1 {
-		t.Fatal("List 应为 1")
-	}
-
-	// 更新
-	enabled := false
-	if err := s.Update(j.ID, "", "0 4 * * *", "", nil, &enabled); err != nil {
-		t.Fatalf("update: %v", err)
-	}
-	got, _ := s.Get(j.ID)
-	if got.Cron != "0 4 * * *" || got.Enabled {
-		t.Fatalf("更新失败: %+v", got)
-	}
-
-	// 手动执行
-	msg, err := s.RunNow(j.ID)
-	if err != nil || msg != "executed:shell" {
-		t.Fatalf("runNow: %v %q", err, msg)
-	}
-	got, _ = s.Get(j.ID)
-	if got.LastStatus != "ok" || got.LastRun == 0 {
-		t.Fatalf("runNow 未记录: %+v", got)
-	}
-
-	// 删除
-	if err := s.Delete(j.ID); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if len(s.List()) != 0 {
-		t.Fatal("删除后应为 0")
-	}
-}
-
-func TestCronValidation(t *testing.T) {
-	valid := []string{"0 3 * * *", "*/5 * * * *", "30 2 1 * *", "0 0 * * 0"}
-	invalid := []string{"", "60 * * * *", "* * * *", "* 25 * * *", "bad"}
-	for _, c := range valid {
-		if err := validateCron(c); err != nil {
-			t.Fatalf("合法 cron 被拒: %q -> %v", c, err)
-		}
-	}
-	for _, c := range invalid {
-		if err := validateCron(c); err == nil {
-			t.Fatalf("非法 cron 未被拒: %q", c)
-		}
-	}
-}
-
-func TestCronMatch(t *testing.T) {
-	// 每分钟
-	if !cronMatches("* * * * *", time.Date(2026, 8, 26, 10, 15, 0, 0, time.Local)) {
-		t.Fatal("* * * * * 应总是匹配")
-	}
-	// 每 5 分钟
-	if !cronMatches("*/5 * * * *", time.Date(2026, 8, 26, 10, 15, 0, 0, time.Local)) {
-		t.Fatal("10:15 应匹配 */5")
-	}
-	if cronMatches("*/5 * * * *", time.Date(2026, 8, 26, 10, 17, 0, 0, time.Local)) {
-		t.Fatal("10:17 不应匹配 */5")
-	}
-	// 整点 3 点
-	if !cronMatches("0 3 * * *", time.Date(2026, 8, 26, 3, 0, 0, 0, time.Local)) {
-		t.Fatal("03:00 应匹配 0 3 * * *")
-	}
-	if cronMatches("0 3 * * *", time.Date(2026, 8, 26, 4, 0, 0, 0, time.Local)) {
-		t.Fatal("04:00 不应匹配 0 3 * * *")
-	}
-}
-
-func containsStr(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
+// containsStr 子串判断(测试辅助)。
+func containsStr(s, sub string) bool { return strings.Contains(s, sub) }
