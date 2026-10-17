@@ -521,10 +521,33 @@ def jm_perf_stats(params):
             'page_hit': _PERF.get('page_hit', 0), 'page_miss': _PERF.get('page_miss', 0),
             'recent50_avg_ms': round(_st.mean(ms), 1) if ms else 0.0, 'samples': len(ms)}
 
+# ---- 版本号单一来源 ----
+# 平台会从 plugin.json 读版本用于展示/更新判断; 但插件注册与 jmcomic.info 也会
+# 上报版本。两处各写一份必然脱节 —— 2026-10-17 实测: plugin.json 改成 1.00.1 后,
+# 界面仍显示 2.0.0, 因为这里硬编码着 '2.0.0' 并在注册时覆盖了清单。
+# 统一为: 启动时读一次 plugin.json, 之后所有上报都用它。
+def _plugin_meta():
+    try:
+        import json as _json
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, 'plugin.json'), 'r', encoding='utf-8') as f:
+            m = _json.load(f)
+        return {'name': m.get('name', 'JMComic'),
+                'label': m.get('label', 'JMComic'),
+                'version': m.get('version', '0.0.0'),
+                'description': m.get('description', '')}
+    except Exception:
+        return {'name': 'JMComic', 'label': 'JMComic', 'version': '0.0.0', 'description': ''}
+
+
+_META = _plugin_meta()
+
+
 @rc.interface("jmcomic.info")
 def jm_info(params):
-    return {'name': 'jmcomic', 'label': 'JMComic', 'version': '2.0.0', 'lang': 'python',
-            'description': '禁漫天堂搜索与漫画阅读'}
+    return {'name': _META['name'].lower(), 'label': _META['label'],
+            'version': _META['version'], 'lang': 'python',
+            'description': _META['description']}
 
 
 
@@ -606,7 +629,7 @@ if __name__ == "__main__":
     rc.serve(
         endpoint=os.environ.get("RC_ENDPOINT", ""),
         name="JMComic",
-        version="2.0.0",
+        version=_META["version"],
         manifest={"label": "JMComic", "description": "禁漫搜索/阅读/库"},
         frontend={"pages": [{"path": "", "title": "JMComic"}]},
         iface_ids=["jmcomic.search", "jmcomic.meta", "jmcomic.album", "jmcomic.chapter",
