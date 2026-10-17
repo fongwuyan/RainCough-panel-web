@@ -36,6 +36,7 @@ type SystemSnapshot struct {
 	ThreadCount   int64  `json:"thread_count"`
 	Hostname      string `json:"hostname"`
 	Platform      string `json:"platform"`
+	Kernel        string `json:"kernel"`
 	Arch          string `json:"arch"`
 	GoVersion     string `json:"go_version"`
 	PythonVersion string `json:"python_version"` // 兼容旧前端"运行时"格: 新系统填 Go 版本

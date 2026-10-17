@@ -72,6 +72,7 @@ func (m *SystemMonitor) Snapshot() *SystemSnapshot {
 		ThreadCount:   ThreadCount(),
 		Hostname:      hostname,
 		Platform:      runtime.GOOS,
+		Kernel:        kernelVersion(),
 		Arch:          runtime.GOARCH,
 		GoVersion:     runtime.Version(),
 		PythonVersion: runtime.Version(),

@@ -17,6 +17,15 @@ import (
 
 // 本文件用纯标准库读取 /proc 与 /sys, 替代 df/lsblk/ip/ss 等外部命令。
 
+// kernelVersion 内核版本(/proc/sys/kernel/osrelease)。
+func kernelVersion() string {
+	b, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 // ---- 磁盘 ----
 
 type mountInfo struct {

@@ -10,11 +10,16 @@ export function useWorkspace() {
   const gpuLoading = ref(false)
   const err = ref('')
   const hist = ref({ series: [], points: [] })
+  const ifacesStats = ref(null)
+  const health = ref(null)
+  const plugins = ref([])
+  const tasks = ref([])
   const updatedAt = ref(0)
   const now = ref(Date.now())
 
   let tSys = null
   let tHist = null
+  let tBus = null
   let tClock = null
 
   const cpu = computed(() => num(sys.value && sys.value.cpu_percent))
@@ -53,6 +58,9 @@ export function useWorkspace() {
   const histUp = computed(() => col('up'))
   const histDown = computed(() => col('down'))
   const histDisk = computed(() => col('disk'))
+  const histL1 = computed(() => col('l1'))
+  const histL5 = computed(() => col('l5'))
+  const histL15 = computed(() => col('l15'))
   const histCore = computed(() => {
     const out = []
     for (let i = 0; i < cores.value.length; i++) out.push(col('pc' + i))
@@ -78,6 +86,20 @@ export function useWorkspace() {
     }
   }
 
+  // 接口库 / 服务 / 插件 / 任务: 运营侧状态, 5s 刷新一次
+  async function loadBus() {
+    try { ifacesStats.value = await api.ifacesSummary() } catch (e) { /* 忽略 */ }
+    try { health.value = await api.servicesHealth() } catch (e) { /* 忽略 */ }
+    try {
+      const d = await api.listPlugins()
+      plugins.value = Array.isArray(d) ? d : []
+    } catch (e) { /* 忽略 */ }
+    try {
+      const d = await api.taskQueue(false, 8)
+      tasks.value = (d && d.tasks) || []
+    } catch (e) { /* 忽略 */ }
+  }
+
   async function loadGpus() {
     gpuLoading.value = true
     try {
@@ -94,15 +116,18 @@ export function useWorkspace() {
   onMounted(() => {
     loadSys()
     loadHist()
+    loadBus()
     loadGpus()
     tSys = setInterval(loadSys, 1500)
     tHist = setInterval(loadHist, 5000)
+    tBus = setInterval(loadBus, 5000)
     tClock = setInterval(() => (now.value = Date.now()), 1000)
   })
 
   onUnmounted(() => {
     clearInterval(tSys)
     clearInterval(tHist)
+    clearInterval(tBus)
     clearInterval(tClock)
   })
 
@@ -111,6 +136,7 @@ export function useWorkspace() {
     cpu, cores, load, memTotal, memUsed, memPct, swapTotal, swapUsed, swapPct,
     upRate, downRate, ifaces, disks, diskPct, uptime, bootTime,
     histPoints, histCpu, histMem, histSwap, histUp, histDown, histDisk, histCore,
+    histL1, histL5, histL15, ifacesStats, health, plugins, tasks,
     loadSys, loadGpus,
   }
 }

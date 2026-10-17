@@ -11,6 +11,7 @@ const {
   cpu, cores, load, memTotal, memUsed, memPct, swapTotal, swapUsed, swapPct,
   upRate, downRate, ifaces, disks, diskPct, uptime,
   histCpu, histMem, histSwap, histUp, histDown, histDisk, histCore,
+  histL1, histL5, histL15, ifacesStats, health, plugins, tasks,
   loadGpus,
 } = ws
 
@@ -61,6 +62,7 @@ function coreColor(v) {
           <div class="ws-host">{{ (sys && sys.hostname) || '—' }}</div>
           <div class="ws-sub">
             {{ (sys && sys.platform) || '—' }} · {{ (sys && sys.arch) || '—' }}
+            <span v-if="sys && sys.kernel"> · {{ sys.kernel }}</span>
             <span v-if="sys && sys.cpu_model"> · {{ sys.cpu_model }}</span>
           </div>
         </div>
@@ -156,10 +158,14 @@ function coreColor(v) {
               <b class="ws-net-v up">{{ fmtRate(upRate) }}</b>
             </div>
           </div>
-          <div class="ws-chips">
-            <span v-for="n in ifaces" :key="n.name" class="ws-chip" :class="{ off: !n.up }">
-              {{ n.name }}<i v-if="n.addr"> · {{ n.addr }}</i>
-            </span>
+          <div v-if="ifaces.length" class="ws-ifs">
+            <div v-for="n in ifaces" :key="n.name" class="ws-ifrow">
+              <span class="ws-dot" :class="{ off: !n.up }"></span>
+              <span class="ws-ifname mono">{{ n.name }}</span>
+              <span class="ws-ifaddr mono">{{ n.addr || '—' }}</span>
+              <span class="ws-ifrate mono">↓ {{ fmtRate(n.down_rate) }}</span>
+              <span class="ws-ifrate mono">↑ {{ fmtRate(n.up_rate) }}</span>
+            </div>
           </div>
           <RealtimeChart
             :series="[
@@ -189,6 +195,72 @@ function coreColor(v) {
             </div>
           </div>
           <RealtimeChart :series="[{ name: '磁盘 %', data: histDisk, color: C.disk }]" :max="100" :height="72" />
+        </section>
+
+        <!-- 负载趋势 -->
+        <section class="ws-card">
+          <div class="ws-card-head">
+            <span class="ws-card-title">负载趋势</span>
+            <span class="ws-card-side mono">{{ load.map((x) => num(x).toFixed(2)).join(' / ') }}</span>
+          </div>
+          <RealtimeChart
+            :series="[
+              { name: '1 分钟', data: histL1, color: C.cpu },
+              { name: '5 分钟', data: histL5, color: C.mem },
+              { name: '15 分钟', data: histL15, color: C.down },
+            ]"
+            :height="90"
+          />
+        </section>
+
+        <!-- 接口与服务 -->
+        <section class="ws-card">
+          <div class="ws-card-head">
+            <span class="ws-card-title">接口库</span>
+            <span class="ws-card-side">{{ (ifacesStats && ifacesStats.providers) || 0 }} 个提供方</span>
+          </div>
+          <div class="ws-stat-grid">
+            <div class="ws-stat"><b>{{ (ifacesStats && ifacesStats.interfaces) || 0 }}</b><span>接口总数</span></div>
+            <div class="ws-stat"><b class="ok">{{ (ifacesStats && ifacesStats.online) || 0 }}</b><span>在线</span></div>
+            <div class="ws-stat"><b :class="{ bad: ifacesStats && ifacesStats.offline }">{{ (ifacesStats && ifacesStats.offline) || 0 }}</b><span>离线</span></div>
+            <div class="ws-stat"><b>{{ (ifacesStats && ifacesStats.system) || 0 }}</b><span>系统接口</span></div>
+            <div class="ws-stat"><b>{{ (ifacesStats && ifacesStats.plugin) || 0 }}</b><span>插件接口</span></div>
+            <div class="ws-stat"><b>{{ (health && health.online) || 0 }}<i>/{{ (health && health.total) || 0 }}</i></b><span>服务在线</span></div>
+          </div>
+        </section>
+
+        <!-- 插件 -->
+        <section class="ws-card">
+          <div class="ws-card-head">
+            <span class="ws-card-title">插件</span>
+            <span class="ws-card-side">{{ plugins.length }} 已装 · {{ plugins.filter((p) => p.alive).length }} 在线</span>
+            <button class="btn btn-sm btn-ghost" @click="$router.push('/plugins')">管理</button>
+          </div>
+          <div v-if="!plugins.length" class="hint">还没有安装插件</div>
+          <div v-else class="ws-plugins">
+            <div v-for="p in plugins.slice(0, 6)" :key="p.name" class="ws-plugin">
+              <span class="ws-dot" :class="{ off: !p.alive }"></span>
+              <span class="ws-plugin-name">{{ p.label || p.name }}</span>
+              <span class="ws-plugin-ver mono">v{{ p.version || '—' }}</span>
+            </div>
+            <div v-if="plugins.length > 6" class="faint ws-more">…还有 {{ plugins.length - 6 }} 个</div>
+          </div>
+        </section>
+
+        <!-- 任务队列 -->
+        <section class="ws-card">
+          <div class="ws-card-head">
+            <span class="ws-card-title">任务队列</span>
+            <span class="ws-card-side">{{ tasks.length }} 个进行中</span>
+          </div>
+          <div v-if="!tasks.length" class="hint">当前没有进行中的任务</div>
+          <div v-else class="ws-tasks">
+            <div v-for="t in tasks.slice(0, 5)" :key="t.id" class="ws-task">
+              <span class="ws-task-name" :title="t.name">{{ t.name || t.kind }}</span>
+              <div class="ws-bar grow"><i :style="{ width: (t.progress || 0) + '%' }"></i></div>
+              <span class="ws-task-pct mono">{{ t.progress || 0 }}%</span>
+            </div>
+          </div>
         </section>
 
         <!-- GPU -->
@@ -285,7 +357,32 @@ function coreColor(v) {
 .ws-net-v.down { color: #2f855a; }
 .ws-net-v.up { color: #c05621; }
 
-.ws-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-ifs { display: flex; flex-direction: column; gap: 3px; }
+.ws-ifrow { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-muted); }
+.ws-ifname { color: var(--text); min-width: 62px; }
+.ws-ifaddr { color: var(--text-faint); flex: 1; }
+.ws-ifrate { color: var(--text-faint); }
+.ws-dot { width: 6px; height: 6px; background: var(--success); display: inline-block; flex-shrink: 0; }
+.ws-dot.off { background: var(--text-faint); }
+
+.ws-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 10px; }
+.ws-stat { display: flex; flex-direction: column; gap: 2px; }
+.ws-stat b { font-size: 16px; color: var(--text); font-family: var(--font-mono); font-weight: 600; }
+.ws-stat b.ok { color: var(--success); }
+.ws-stat b.bad { color: var(--danger); }
+.ws-stat b i { font-style: normal; font-size: 10px; color: var(--text-faint); }
+.ws-stat span { font-size: 10px; color: var(--text-faint); }
+
+.ws-plugins { display: flex; flex-direction: column; gap: 5px; }
+.ws-plugin { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.ws-plugin-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-plugin-ver { color: var(--text-faint); }
+.ws-more { font-size: 10px; }
+
+.ws-tasks { display: flex; flex-direction: column; gap: 6px; }
+.ws-task { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.ws-task-name { color: var(--text); width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-task-pct { color: var(--text-faint); width: 34px; text-align: right; }
 .ws-chip {
   font-size: 10px; font-family: var(--font-mono); color: var(--text-muted);
   border: 1px solid var(--border); padding: 1px 6px; background: var(--surface-2);
