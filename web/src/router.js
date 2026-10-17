@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import Workspace from './components/Workspace.vue'
+import Workspace from './components/workspace/Workspace.vue'
 import PluginView from './components/PluginView.vue'
 import Settings from './components/Settings.vue'
 import Terminal from './components/terminal/Terminal.vue'
