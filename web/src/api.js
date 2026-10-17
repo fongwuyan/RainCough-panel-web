@@ -24,6 +24,36 @@ async function reqForm(url, fd) {
   return req('POST', url, fd, true)
 }
 
+// reqUpload 带上传进度的 form-data 请求(XHR; fetch 不支持上行进度)。
+// onProgress(loaded, total) 可选; 返回解析后的 JSON, 非 2xx 抛错(同样挂 status/data)。
+function reqUpload(url, fd, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url, true)
+    xhr.withCredentials = true
+    if (xhr.upload && typeof onProgress === 'function') {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(e.loaded, e.total)
+      }
+    }
+    xhr.onload = () => {
+      let data = null
+      try { data = JSON.parse(xhr.responseText) } catch (e) { /* 非 JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data)
+        return
+      }
+      const err = new Error((data && data.error) || `HTTP ${xhr.status}`)
+      err.status = xhr.status
+      err.data = data
+      reject(err)
+    }
+    xhr.onerror = () => reject(new Error('网络错误或连接被中断'))
+    xhr.onabort = () => reject(new Error('上传已取消'))
+    xhr.send(fd)
+  })
+}
+
 // authStatus 不抛 401: 该接口专用于「我登录了吗」, 401 = 未登录 = 正常状态
 async function reqAuthNoThrow(url, opts = {}) {
   const res = await fetch(url, { credentials: 'same-origin', ...opts })
@@ -189,6 +219,8 @@ export const api = {
   storeGateUnlock: (password) => req('POST', '/api/store/gate/unlock', { password }),
   storeGateLock: () => req('POST', '/api/store/gate/lock', {}),
   storeRegistry: () => req('GET', '/api/store/registry'),
+  // 面板内直接安装: 上传本地插件包(zip/tar.gz), 与"从仓库安装"是两套逻辑
+  storePluginUpload: (fd, onProgress) => reqUpload('/api/store/plugin/upload', fd, onProgress),
   storePluginInstall: (name) => req('POST', '/api/store/plugin/install', { name }),
   storePluginUpdate: (name) => req('POST', '/api/store/plugin/update', { name }),
   storePluginRemove: (name) => req('POST', '/api/store/plugin/remove', { name }),

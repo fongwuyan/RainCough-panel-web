@@ -22,6 +22,14 @@ export function usePluginHub() {
   const gateBusy = ref(false)
   const gateErr = ref('')
 
+  // 面板内直接安装(上传本地插件包) — 与"从仓库安装"完全独立的通道
+  const uploadOpen = ref(false)
+  const uploadBusy = ref(false)
+  const uploadPct = ref(0)
+  const uploadErr = ref('')
+  const uploadResult = ref(null)
+  const uploadFile = ref('')
+
   let tTask = null
   let tToast = null
 
@@ -139,6 +147,65 @@ export function usePluginHub() {
     marketErr.value = ''
   }
 
+  // ---- 面板内直接安装(上传本地插件包) ----
+
+  function openUpload() {
+    uploadOpen.value = true
+    uploadErr.value = ''
+    uploadResult.value = null
+    uploadPct.value = 0
+    uploadFile.value = ''
+  }
+
+  function closeUpload() {
+    if (uploadBusy.value) return   // 上传中不允许关闭(避免半截请求)
+    uploadOpen.value = false
+    uploadErr.value = ''
+    uploadResult.value = null
+    uploadPct.value = 0
+    uploadFile.value = ''
+  }
+
+  const UPLOAD_EXT = ['.zip', '.tar.gz', '.tgz', '.tar']
+
+  function pickExtOk(name) {
+    const n = (name || '').toLowerCase()
+    return UPLOAD_EXT.some((x) => n.endsWith(x))
+  }
+
+  // installFromFile 上传并安装。成功返回结果对象, 失败返回 null(错误写在 uploadErr)
+  async function installFromFile(file) {
+    if (!file) { uploadErr.value = '请选择插件包'; return null }
+    if (!pickExtOk(file.name)) {
+      uploadErr.value = '不支持的格式: 仅 .zip / .tar.gz / .tgz / .tar'
+      return null
+    }
+    uploadBusy.value = true
+    uploadErr.value = ''
+    uploadResult.value = null
+    uploadPct.value = 0
+    uploadFile.value = file.name
+    try {
+      const fd = new FormData()
+      fd.append('file', file, file.name)
+      const d = await api.storePluginUpload(fd, (loaded, total) => {
+        uploadPct.value = total ? Math.min(99, Math.round((loaded / total) * 100)) : 0
+      })
+      uploadPct.value = 100
+      uploadResult.value = d || { ok: true }
+      flash((d && d.message) || '安装成功')
+      // 已装列表要立刻刷新(新插件出现在「已安装」页签)
+      await loadInstalled()
+      await loadHealth()
+      return uploadResult.value
+    } catch (e) {
+      uploadErr.value = (e && e.message) || '安装失败'
+      return null
+    } finally {
+      uploadBusy.value = false
+    }
+  }
+
   async function loadHealth() {
     try {
       health.value = await api.servicesHealth()
@@ -234,8 +301,11 @@ export function usePluginHub() {
     installed, market, marketSource, health, tasks, activeTasks,
     loading, marketLoading, err, marketErr, q, busy, toast,
     gateLocked, gateEnabled, gateBusy, gateErr,
+    uploadOpen, uploadBusy, uploadPct, uploadErr, uploadResult, uploadFile,
     filteredInstalled, filteredMarket, onlineCount,
     hasUpdate, incompatible, flash,
-    refresh, refreshAll, loadMarket, loadGate, unlock, lockGate, install, update, remove,
+    refresh, refreshAll, loadMarket, loadGate, unlock, lockGate,
+    openUpload, closeUpload, installFromFile, pickExtOk,
+    install, update, remove,
   }
 }

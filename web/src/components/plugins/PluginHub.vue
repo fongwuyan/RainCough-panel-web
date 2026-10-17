@@ -9,14 +9,39 @@ const {
   installed, market, marketSource, health, activeTasks,
   loading, marketLoading, err, marketErr, q, busy, toast,
   gateLocked, gateEnabled, gateBusy, gateErr,
+  uploadOpen, uploadBusy, uploadPct, uploadErr, uploadResult, uploadFile,
   filteredInstalled, filteredMarket, onlineCount,
   hasUpdate, incompatible, flash,
-  refreshAll, loadMarket, unlock, lockGate, install, update, remove,
+  refreshAll, loadMarket, unlock, lockGate,
+  openUpload, closeUpload, installFromFile,
+  install, update, remove,
 } = hub
 
 const tab = ref('installed') // installed | market
 const gatePW = ref('')
 const gateInput = ref(null)
+
+// 上传弹窗: 拖拽状态 + 文件选择
+const dragOver = ref(false)
+const fileInput = ref(null)
+
+function onDrop(e) {
+  dragOver.value = false
+  if (uploadBusy.value) return
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
+  if (f) doUpload(f)
+}
+
+function onPick(e) {
+  const f = e.target && e.target.files && e.target.files[0]
+  if (f) doUpload(f)
+  // 清空 value, 否则同一个文件选第二次不触发 change
+  if (e.target) e.target.value = ''
+}
+
+async function doUpload(f) {
+  await installFromFile(f)
+}
 
 const summary = computed(() => {
   const total = installed.value.length
@@ -65,6 +90,7 @@ async function submitGate() {
       </div>
       <div class="ph-actions">
         <input v-model="q" class="input ph-search" placeholder="搜索插件…" />
+        <button class="btn btn-sm btn-primary" @click="openUpload">安装插件</button>
         <button class="btn btn-sm" :disabled="loading" @click="refreshAll">
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
@@ -99,8 +125,13 @@ async function submitGate() {
       <div v-else-if="loading" class="hint ph-empty">加载中…</div>
       <div v-else-if="!filteredInstalled.length" class="ph-empty">
         <div class="ph-empty-title">{{ q ? '没有匹配的插件' : '还没有安装插件' }}</div>
-        <div class="ph-empty-sub" v-if="!q">到「插件市场」页签挑一个装上</div>
-        <button v-if="!q" class="btn btn-sm btn-primary" @click="switchTab('market')">去市场看看</button>
+        <div class="ph-empty-sub" v-if="!q">
+          可以从「插件市场」挑一个装上，或直接安装你手上的插件包
+        </div>
+        <div v-if="!q" class="ph-empty-actions">
+          <button class="btn btn-sm btn-primary" @click="switchTab('market')">去市场看看</button>
+          <button class="btn btn-sm" @click="openUpload">安装插件包</button>
+        </div>
       </div>
 
       <div v-else class="ph-list">
@@ -166,6 +197,12 @@ async function submitGate() {
           </button>
         </div>
 
+        <!-- 两种安装方式的区别: 市场从仓库拉, 安装插件装本地包 -->
+        <div class="ph-hint-bar">
+          这里从 GitHub 仓库拉取插件；如果你手上已有插件包（离线/自研/第三方），
+          用右上角「安装插件」直接装。
+        </div>
+
         <div v-if="marketErr" class="error">{{ marketErr }}</div>
         <div v-else-if="marketLoading" class="hint ph-empty">正在拉取市场清单…</div>
         <div v-else-if="!filteredMarket.length" class="ph-empty">
@@ -213,6 +250,82 @@ async function submitGate() {
       </template>
     </div>
 
+    <!-- 安装插件弹窗(面板内直接安装: 上传本地插件包) -->
+    <div v-if="uploadOpen" class="ph-modal-mask" @click.self="closeUpload">
+      <div class="ph-modal">
+        <div class="ph-modal-head">
+          <span>安装插件</span>
+          <button class="ph-modal-x" :disabled="uploadBusy" @click="closeUpload">×</button>
+        </div>
+
+        <div class="ph-modal-body">
+          <!-- 成功态 -->
+          <div v-if="uploadResult" class="ph-up-ok">
+            <div class="ph-up-ok-icon">✓</div>
+            <div class="ph-up-ok-title">
+              {{ uploadResult.replaced ? '已更新' : '已安装' }}
+              {{ uploadResult.label || uploadResult.name }}
+            </div>
+            <div class="ph-up-ok-meta mono">
+              {{ uploadResult.name }} · v{{ uploadResult.version }}
+              <template v-if="uploadResult.author"> · {{ uploadResult.author }}</template>
+              · {{ uploadResult.files }} 个文件
+            </div>
+            <div class="ph-up-ok-hint">插件已出现在「已安装」页签，可直接打开使用</div>
+            <div class="ph-up-ok-actions">
+              <button class="btn btn-sm btn-primary" @click="closeUpload">完成</button>
+              <button class="btn btn-sm" @click="tab = 'installed'; closeUpload()">查看已安装</button>
+            </div>
+          </div>
+
+          <!-- 上传态 -->
+          <template v-else>
+            <div
+              class="ph-up-drop"
+              :class="{ over: dragOver, busy: uploadBusy }"
+              @dragover.prevent="dragOver = true"
+              @dragleave.prevent="dragOver = false"
+              @drop.prevent="onDrop"
+              @click="!uploadBusy && fileInput && fileInput.click()"
+            >
+              <input
+                ref="fileInput"
+                type="file"
+                accept=".zip,.tar.gz,.tgz,.tar"
+                style="display:none"
+                @change="onPick"
+              />
+              <template v-if="!uploadBusy">
+                <div class="ph-up-drop-icon">↑</div>
+                <div class="ph-up-drop-title">拖入插件包，或点击选择文件</div>
+                <div class="ph-up-drop-sub">支持 .zip / .tar.gz / .tgz / .tar（≤128MB）</div>
+              </template>
+              <template v-else>
+                <div class="ph-up-drop-title">正在安装 {{ uploadFile }}</div>
+                <div class="progress ph-up-bar"><div :style="{ width: uploadPct + '%' }"></div></div>
+                <div class="ph-up-drop-sub mono">{{ uploadPct }}%</div>
+              </template>
+            </div>
+
+            <div v-if="uploadErr" class="ph-up-err">{{ uploadErr }}</div>
+
+            <div class="ph-up-note">
+              <div class="ph-up-note-title">包内要求</div>
+              <ul>
+                <li><code>plugin.json</code>（v4 清单：name / frontend.entry / backend.exec）</li>
+                <li>清单放在包根目录，或包内唯一一层子目录下均可</li>
+                <li>一个包只能装一个插件；同名插件会被整体替换（等于更新）</li>
+              </ul>
+              <div class="ph-up-note-sub">
+                与「插件市场」的区别：市场从 GitHub 仓库拉取，这里直接装你手上的包，
+                离线环境也能用。
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
     <div v-if="toast" class="ph-toast">{{ toast }}</div>
   </div>
 </template>
@@ -250,8 +363,14 @@ async function submitGate() {
 .ph-empty { padding: 48px 16px; text-align: center; }
 .ph-empty-title { font-size: 13px; color: var(--text-muted); }
 .ph-empty-sub { font-size: 11px; color: var(--text-faint); margin: 6px 0 14px; }
+.ph-empty-actions { display: flex; gap: 8px; justify-content: center; }
 
 .ph-source { display: flex; align-items: center; gap: 10px; font-size: 11px; margin-bottom: 8px; }
+.ph-hint-bar {
+  font-size: 11px; line-height: 1.55; color: var(--text-muted);
+  background: var(--surface-2); border-left: 2px solid var(--border-strong);
+  padding: 7px 10px; margin-bottom: 10px;
+}
 
 .ph-list { border: 1px solid var(--border); background: var(--surface); }
 .ph-row {
@@ -303,4 +422,75 @@ async function submitGate() {
 
 .ph-relock { margin-left: auto; }
 .btn-xs { padding: 1px 7px; font-size: 10.5px; height: 20px; }
+
+/* ---- 安装插件弹窗 ---- */
+.ph-modal-mask {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.42);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200; padding: 16px;
+}
+.ph-modal {
+  width: 100%; max-width: 480px; max-height: calc(100vh - 64px);
+  display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+.ph-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 16px; border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.ph-modal-x {
+  border: 0; background: transparent; color: var(--text-muted);
+  font-size: 19px; line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.ph-modal-x:hover:not(:disabled) { color: var(--text); }
+.ph-modal-x:disabled { opacity: 0.4; cursor: not-allowed; }
+.ph-modal-body { padding: 16px; overflow: auto; }
+
+.ph-up-drop {
+  border: 1px dashed var(--border-strong); background: var(--surface-2);
+  padding: 26px 16px; text-align: center; cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+.ph-up-drop:hover:not(.busy) { border-color: var(--accent); }
+.ph-up-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.ph-up-drop.busy { cursor: default; }
+.ph-up-drop-icon { font-size: 22px; color: var(--text-faint); line-height: 1; margin-bottom: 8px; }
+.ph-up-drop-title { font-size: 12.5px; color: var(--text); }
+.ph-up-drop-sub { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+.ph-up-bar { width: 100%; height: 5px; margin: 12px 0 6px; }
+
+.ph-up-err {
+  margin-top: 12px; padding: 8px 10px; font-size: 11.5px; line-height: 1.5;
+  color: var(--danger); background: var(--danger-soft);
+  border-left: 2px solid var(--danger); word-break: break-word;
+}
+
+.ph-up-note {
+  margin-top: 14px; padding: 10px 12px;
+  background: var(--surface-2); border-left: 2px solid var(--border-strong);
+}
+.ph-up-note-title { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+.ph-up-note ul { margin: 0; padding-left: 16px; }
+.ph-up-note li { font-size: 11px; color: var(--text-muted); line-height: 1.65; }
+.ph-up-note code {
+  background: var(--surface-3); color: var(--text); padding: 1px 4px;
+  font-family: var(--font-mono); font-size: 10.5px;
+}
+.ph-up-note-sub {
+  font-size: 10.5px; color: var(--text-faint); line-height: 1.55;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+
+.ph-up-ok { text-align: center; padding: 12px 4px 4px; }
+.ph-up-ok-icon {
+  width: 40px; height: 40px; line-height: 40px; margin: 0 auto 12px;
+  border-radius: 50%; background: var(--success-soft); color: var(--success);
+  font-size: 20px;
+}
+.ph-up-ok-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.ph-up-ok-meta { font-size: 11px; color: var(--text-faint); margin-top: 6px; }
+.ph-up-ok-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 10px; }
+.ph-up-ok-actions { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
 </style>

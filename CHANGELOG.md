@@ -4,6 +4,26 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## 未发布 — 插件「面板内直接安装」
+- **新增「安装插件」**：上传本地插件包直接在面板内安装，与「从仓库安装」是两套独立逻辑
+  - 仓库安装：读 registry.json → 下载整仓 zipball → 从 `<repo>-<sha>/<name>/` 提取（需外网 + token）
+  - 面板内安装：上传单个插件包 → 解压 → 定位 plugin.json → 校验 → 落盘（**完全离线**）
+  - 支持 `.zip` / `.tar.gz` / `.tgz` / `.tar`（零依赖，不支持 `.tar.xz`），上限 128MB
+  - 包结构两种都认：`plugin.json` 在包根目录，或包内唯一一层子目录下
+- 安全与健壮性
+  - 安装目录一律取 `plugin.json` 的 `name`，**不按压缩包文件名**建目录
+    （旧版系统扩展踩过：包名与清单 name 不一致 → 错位安装，既打不开也卸不掉）
+  - 清单必须是 v4（name / frontend.entry / backend.exec），name 必须是安全目录名
+  - zip-slip 穿越防护复用现有解压器；包内有多个 plugin.json 直接拒绝
+  - 覆盖安装为**整目录替换**（不是合并），先备份再原子 rename，失败自动回滚到旧版本
+  - 解压后自动给 `backend.exec` 声明的二进制补执行位（zip 常丢权限，否则 fork 会 EACCES）
+  - 启动时清理安装中途崩溃留下的 `.installing-*` 残留目录
+- 接口 `POST /api/store/plugin/upload`（multipart，字段 `file`），同样受插件库口令闸门保护
+- 前端：插件页头部「安装插件」按钮 → 弹窗支持拖拽/选择文件、上传进度、
+  成功态展示（名称/版本/文件数）与「查看已安装」跳转；空态也提供入口
+- 新增探针：`tools/plugin-upload-probe.mjs`（UI 接线 18 项）、
+  `tools/plugin-upload-e2e.mjs`（真实上传端到端 11 项）
+
 ## 未发布 — 插件库口令闸门
 - **插件库上锁**：插件仓库（RainCough-Plugin）改为公开仓库后，插件内容仍需口令才能获取
   - 拉取市场清单 / 安装插件 / 更新插件 / 拉插件仓更新日志 → 未解锁一律 `403 + need_password`

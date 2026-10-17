@@ -31,13 +31,14 @@ import (
 )
 
 type server struct {
-	cfg     *config.Config
-	sd      *shared.Shared
-	sup     *supervisor.Supervisor
+	cfg *config.Config
+	sd  *shared.Shared
+	sup *supervisor.Supervisor
 }
 
 // globalPX 接口库 v4 运行时(插件自注册/接口总线/健康诊断)。
 var globalPX *pluginx.PluginX
+
 // globalSUP 插件进程 supervisor(纯 Go 标准库, fork/exec + backoff + 日志轮转)。
 var globalSUP *supervisor.Supervisor
 
@@ -201,6 +202,11 @@ func main() {
 		globalPX.SetOnConnSeen(func(name string) { globalSUP.ConnSeen(name) })
 	}
 
+	// 清理「面板内直接安装」中途崩溃留下的半成品目录(install 期临时目录)
+	if n := core.CleanupStaleInstalling(cfg.PluginsDir); n > 0 {
+		log.Printf("[store] 清理 %d 个安装残留目录", n)
+	}
+
 	// 终端主机/常用命令存储
 	initTermNS(sd)
 
@@ -299,13 +305,14 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/terminal/ws_token", s.handleWsToken)
 
 	// ---- 插件市场 ----
-	mux.HandleFunc("/api/store/gate", s.handleStoreGate)        // 闸门状态(需口令才可拉清单/装插件)
-	mux.HandleFunc("/api/store/gate/", s.handleStoreGate)       // /unlock  /lock
+	mux.HandleFunc("/api/store/gate", s.handleStoreGate)  // 闸门状态(需口令才可拉清单/装插件)
+	mux.HandleFunc("/api/store/gate/", s.handleStoreGate) // /unlock  /lock
 	mux.HandleFunc("/api/store/settings", s.handleStoreSettings)
 	mux.HandleFunc("/api/store/ping", s.handleStorePing)
 	mux.HandleFunc("/api/store/registry", s.handleStoreRegistry)
 	mux.HandleFunc("/api/store/changelog", s.handleStoreChangelog)
 	mux.HandleFunc("/api/store/plugin/install", s.handleStorePluginInstall)
+	mux.HandleFunc("/api/store/plugin/upload", s.handleStorePluginUpload) // 面板内直接安装(本地包)
 	mux.HandleFunc("/api/store/plugin/update", s.handleStorePluginUpdate)
 	mux.HandleFunc("/api/store/plugin/remove", s.handleStorePluginRemove)
 
