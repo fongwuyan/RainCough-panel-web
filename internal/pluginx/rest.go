@@ -299,7 +299,17 @@ func (x *PluginX) HandlePluginREST(w http.ResponseWriter, r *http.Request) bool 
 		}
 	}
 
-	result, err := x.invokeFrom("app", route.Iface, params, 60*time.Second)
+	// 调用身份用 "ui"(主系统界面), 不是 "app"。
+	//
+	// ★ 踩过的坑: 一开始用 "app" 结果所有 visibility=main 的接口全被拒 ——
+	//   jmcomic.download 正是 main, App 点"下载"直接返回
+	//   {"error":"main 接口仅主系统界面可调"}, 表现为"无法请求下载本子"。
+	//
+	// 为什么用 ui 是对的: REST 路由是**插件自己在 plugin.json 里声明的**
+	// (backend.rest), 声明即授权 —— 插件作者明确表示"这个接口要暴露给客户端"。
+	// 面板只是把这条声明兑现成 HTTP 路由, 不存在"越权调用插件私有接口"的问题:
+	// 未声明的接口这里根本匹配不到路由, 也就不会被代理。
+	result, err := x.invokeFrom("ui", route.Iface, params, 60*time.Second)
 	if err != nil {
 		var re *RPCError
 		if asRPCError(err, &re) {

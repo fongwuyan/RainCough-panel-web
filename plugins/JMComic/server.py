@@ -545,6 +545,10 @@ class DownloadManager:
             self._worker = threading.Thread(target=self._worker_loop, daemon=True)
             self._worker.start()
 
+    def _worker_alive_locked(self):
+        """worker 线程是否还活着。调用方需持锁。"""
+        return self._worker is not None and self._worker.is_alive()
+
     def enqueue(self, aid):
         aid = str(aid)
         with self._lock:
@@ -552,11 +556,38 @@ class DownloadManager:
                 return 'cached'
             t = self._tasks.get(aid)
             if t and t['status'] in ('queued', 'downloading'):
-                return 'queued'
+                # ★ 僵尸任务自愈(2026-10-17 实测):
+                #   worker 线程因未捕获异常退出后, 队列里没人处理, 但 _tasks 里
+                #   这条记录永远停在 queued/downloading。此时再点"下载"会直接
+                #   返回"已在下载队列中", 实际什么都不发生 —— 表现为"无法下载"。
+                #   判据: worker 不活 && 该 aid 不在队列里 => 状态是死的, 重置它。
+                if not self._worker_alive_locked() and aid not in self._queue:
+                    self._tasks[aid] = {'status': 'queued', 'name': (t.get('name') or '')}
+                    self._queue.append(aid)
+                    self._ensure_worker_locked()
+                    return 'queued'
+                return 'already'
             self._tasks[aid] = {'status': 'queued', 'name': ''}
             self._queue.append(aid)
             self._ensure_worker_locked()
         return 'queued'
+
+    def revive_if_stuck(self, aid):
+        """外部(状态接口)调用: 发现僵尸任务就清理掉, 让下次点击能重新开始。
+
+        返回 True 表示清理过。
+        """
+        aid = str(aid)
+        with self._lock:
+            t = self._tasks.get(aid)
+            if not t or t['status'] not in ('queued', 'downloading'):
+                return False
+            if self._worker_alive_locked() or aid in self._queue:
+                return False
+            t['status'] = 'failed'
+            t['error'] = '下载线程已退出(状态已重置, 请重新点击下载)'
+            self._current = None
+            return True
 
     def cancel(self, aid):
         """取消下载: 队列中立即移除; 下载中标记取消(整本收尾后不落地)。"""
@@ -601,6 +632,13 @@ class DownloadManager:
             if not self._batch['running']:
                 return False
             self._batch['stop'] = True
+            # ★ 清队列必须同步清 _tasks(2026-10-17):
+            #   旧实现只 clear 了 _queue, _tasks 里那些 aid 仍是 'queued',
+            #   于是"状态接口永远显示排队中"、再点下载也只会得到"已在队列中"。
+            for _aid in list(self._queue):
+                _t = self._tasks.get(_aid)
+                if _t and _t.get('status') == 'queued':
+                    _t['status'] = 'cancelled'
             self._queue.clear()
             for r in self._batch['results'].values():
                 if r['status'] == 'queued':
@@ -660,12 +698,39 @@ class DownloadManager:
                     self._batch['status'] = 'downloading'
 
     def _worker_loop(self):
+        try:
+            self._worker_loop_inner()
+        except BaseException:
+            # 无论如何不能让线程无声无息消失: 记录后把在跑的任务标失败, 便于用户重试
+            import traceback as _tb
+            try:
+                with self._lock:
+                    for _aid, _t in self._tasks.items():
+                        if _t.get('status') in ('queued', 'downloading'):
+                            _t['status'] = 'failed'
+                            _t['error'] = '下载线程异常退出'
+                    self._current = None
+                    self._worker = None
+            except Exception:
+                pass
+            try:
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.runtime.log'), 'a', encoding='utf-8') as _lf:
+                    _lf.write('[download] worker 线程异常退出:\n' + _tb.format_exc() + '\n')
+            except Exception:
+                pass
+
+    def _worker_loop_inner(self):
         while True:
             with self._lock:
                 if self._batch['stop']:
                     self._batch['stop'] = False
                     self._batch['running'] = False
                     self._batch['status'] = 'stopped'
+                    # 与 stop_batch 同理: 队列与任务状态必须一起清
+                    for _aid in list(self._queue):
+                        _t = self._tasks.get(_aid)
+                        if _t and _t.get('status') == 'queued':
+                            _t['status'] = 'cancelled'
                     self._queue.clear()
                 if not self._queue:
                     if self._batch['running'] and self._batch['status'] == 'collecting':
@@ -694,7 +759,20 @@ class DownloadManager:
                     except Exception:
                         pass
                 continue
-            ok = download_one(aid)
+            # ★ 单本异常绝不能杀掉 worker 线程(2026-10-17):
+            #   旧实现 download_one 返回后没有任何兜底, 一旦这里抛异常
+            #   (比如 results 结构变动、磁盘写满、库内部抛出非 Exception 子类),
+            #   线程直接退出, 而 _tasks 里这条永远停在 downloading ——
+            #   之后再点下载只会得到"已在下载队列中", 表现为"下载不了"。
+            try:
+                ok = download_one(aid)
+            except BaseException as _e:  # noqa: BLE001 - 这里是线程存活边界
+                ok = False
+                try:
+                    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.runtime.log'), 'a', encoding='utf-8') as _lf:
+                        _lf.write('[download] %s 异常: %r\n' % (aid, _e))
+                except Exception:
+                    pass
             with self._lock:
                 self._current = None
                 t = self._tasks.get(aid)

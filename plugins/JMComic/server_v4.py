@@ -309,8 +309,10 @@ def jm_download(params):
     result = M._manager.enqueue(aid)
     if result == 'cached':
         return {'message': '本子 %s 已缓存' % aid, 'status': 'cached'}
-    if result == 'queued':
+    if result == 'already':
         return {'message': '本子 %s 已在下载队列中' % aid, 'status': 'queued'}
+    if result == 'queued':
+        return {'message': '已开始下载 %s' % aid, 'status': 'queued'}
     return {'message': '开始下载 %s' % aid, 'status': 'downloading'}
 
 
@@ -353,6 +355,9 @@ def jm_download_status(params):
     total = entry.get('total') or 0
     if total and downloaded > total:
         downloaded = total
+    # 僵尸自愈: worker 线程已退出但状态还停在 queued/downloading 时清掉,
+    # 否则 App 会一直转圈, 用户再点下载也只会得到"已在队列中"。
+    M._manager.revive_if_stuck(aid)
     task = M._manager.status(aid)
     if task and task['status'] in ('queued', 'downloading'):
         status = 'downloading'
