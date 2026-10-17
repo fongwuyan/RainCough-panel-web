@@ -162,3 +162,65 @@ func TestDropClosesEndpoint(t *testing.T) {
 		t.Fatal("端点应已关闭, 不该还能连上")
 	}
 }
+
+// TestReloadPrunesMissing 卸载后 Reload 必须摘掉幽灵注册。
+// ★ 回归测试: 旧实现 Reload 只调 scanAndListen(只增不删), 卸载后
+// /api/plugins 仍返回该插件、接口总览还留着它的接口, 界面上像"卸载失败"
+// (2026-10-17 实测 echopi)。
+func TestReloadPrunesMissing(t *testing.T) {
+	pluginsDir := t.TempDir()
+	// 造一个真实存在的插件目录(带 v4 清单), 再手工登记到内存里模拟"已注册"
+	dir := filepath.Join(pluginsDir, "probe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mf := `{"name":"probe","frontend":{"entry":"plugin.js"},"backend":{"lang":"go","exec":["./probe"]}}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(mf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	x := New(Options{PluginsDir: pluginsDir, UseTCP: true}, nil)
+	x.plugins["probe"] = &Plugin{Name: "probe", Status: StatusOnline}
+	x.ifaces["probe.echo"] = &Iface{ID: "probe.echo", Plugin: "probe", Online: true}
+
+	// 目录还在 → 不该被摘
+	x.Reload()
+	if x.plugins["probe"] == nil {
+		t.Fatal("目录还在时不该被摘掉")
+	}
+
+	// 删目录(模拟卸载) → Reload 后注册与接口都要消失
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	x.Reload()
+	if x.plugins["probe"] != nil {
+		t.Fatal("Reload 后不该再有 probe 注册")
+	}
+	if x.ifaces["probe.echo"] != nil {
+		t.Fatal("Reload 后不该再有 probe.echo 接口")
+	}
+}
+
+// TestReloadKeepsAlive 目录还在的插件不能被误删(含系统扩展目录)。
+func TestReloadKeepsAlive(t *testing.T) {
+	pluginsDir := t.TempDir()
+	dir := filepath.Join(pluginsDir, "keep")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mf := `{"name":"keep","frontend":{"entry":"plugin.js"},"backend":{"lang":"go","exec":["./keep"]}}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(mf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	x := New(Options{PluginsDir: pluginsDir, UseTCP: true}, nil)
+	x.plugins["keep"] = &Plugin{Name: "keep", Status: StatusOnline}
+
+	for i := 0; i < 3; i++ {
+		x.Reload()
+	}
+	if x.plugins["keep"] == nil {
+		t.Fatal("目录还在的插件不应被摘掉")
+	}
+}

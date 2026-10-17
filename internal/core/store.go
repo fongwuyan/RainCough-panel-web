@@ -50,8 +50,11 @@ type Store struct {
 	token       string // GitHub token(解密后)
 	client      *http.Client
 	pluginsDir  string
-	onInstalled func()        // 安装/卸载后回调(宿主注入: PluginHost.Scan)
-	mu          chan struct{} // 并发控制(1)
+	onInstalled func() // 安装/卸载后回调(宿主注入: PluginHost.Scan)
+	// onBeforeRemove 卸载前回调(宿主注入: supervisor.RemovePlugin 停进程)。
+	// 必须先停进程再删目录, 否则插件进程会变成持有已删文件的孤儿。
+	onBeforeRemove func(name string)
+	mu             chan struct{} // 并发控制(1)
 }
 
 // NewStore 创建插件市场。
@@ -64,6 +67,9 @@ func NewStore(ns Namespacelike, pluginsDir string, onInstalled func()) *Store {
 	s.Config(StoreConfig{}) // 加载默认/持久化配置
 	return s
 }
+
+// SetRemoveHook 注入"卸载前停进程"回调(宿主启动时调用)。
+func (s *Store) SetRemoveHook(fn func(name string)) { s.onBeforeRemove = fn }
 
 // Config 读取/设置配置(空值保留现有)。
 func (s *Store) Config(cfg StoreConfig) StoreConfig {
@@ -291,7 +297,12 @@ func validPluginName(name string) bool {
 	return filepath.Base(name) == name && !strings.ContainsAny(name, `/\`)
 }
 
-// RemovePlugin 卸载插件(目录删除 + 重扫)。
+// RemovePlugin 卸载插件(停进程 + 删目录 + 重扫)。
+//
+// ★ 顺序很重要: 必须先停进程再删目录。
+// 旧实现直接 os.RemoveAll, 插件进程还活着时会把文件从它脚下抽走(Linux 允许),
+// 结果是"目录没了但进程成孤儿", 而且 supervisor 里的记录不会消失 ——
+// 界面上插件仍显示 running, 用户以为卸载失败(2026-10-17 实测 echopi)。
 func (s *Store) RemovePlugin(name string) error {
 	if !validPluginName(name) {
 		return fmt.Errorf("非法插件名: %q", name)
@@ -300,9 +311,28 @@ func (s *Store) RemovePlugin(name string) error {
 		return fmt.Errorf("filemanager 为系统模块不可卸载")
 	}
 	dir := filepath.Join(s.pluginsDir, name)
-	if err := os.RemoveAll(dir); err != nil {
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			// 目录本来就不在: 仍然走一遍清理, 把残留注册/进程记录扫掉(幂等)
+			if s.onInstalled != nil {
+				s.onInstalled()
+			}
+			return nil
+		}
 		return err
 	}
+	// 先停进程(由宿主注入的回调负责; 未注入时直接删目录)
+	if s.onBeforeRemove != nil {
+		s.onBeforeRemove(name)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("删除插件目录失败: %w", err)
+	}
+	// 校验: 目录必须真的没了, 否则明确报错而不是装作成功
+	if _, err := os.Stat(dir); err == nil {
+		return fmt.Errorf("插件目录删除后仍存在: %s", dir)
+	}
+	// 重扫: 触发 supervisor 摘掉进程记录 + PluginX 摘掉注册
 	if s.onInstalled != nil {
 		s.onInstalled()
 	}

@@ -194,6 +194,18 @@ func main() {
 			globalSUP.Rescan()
 		}
 	})
+	// 卸载前先停进程: 否则插件进程会变成持有已删文件的孤儿,
+	// 且 supervisor 记录不消失 → 界面上看着像"卸载失败"。
+	// ★ 这里必须在 globalSUP 创建【之前】就注册(store 先于 supervisor 初始化),
+	//   所以闭包里对 globalSUP 做 nil 判断 —— 调用发生在运行期, 那时它已就绪。
+	globalStore.SetRemoveHook(func(name string) {
+		if globalSUP == nil {
+			return
+		}
+		if err := globalSUP.RemovePlugin(name); err != nil {
+			log.Printf("[store] 卸载前停止 %s 失败: %v", name, err)
+		}
+	})
 
 	// 插件库口令闸门: 插件库改为公开仓库后, 用写死口令保护插件内容
 	// (RC_STORE_GATE=off 可关闭; 详见 internal/auth/gate.go 的能力边界说明)

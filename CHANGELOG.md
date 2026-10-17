@@ -4,6 +4,30 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## 未发布 — 卸载残留修复 + JMComic 适配优化
+- **修「无法移除插件」**（实测 echopi）：目录删了但注册表与 supervisor 记录没清，
+  界面上插件仍在，看起来像移除失败。根因是三处都只增不删：
+  - `PluginX.Reload()` 只调 `scanAndListen()`，从不摘除已消失的插件
+    → `/api/plugins` 仍返回它、接口总览还留着它的接口
+  - `Supervisor.Rescan()` 同理，`procs` 里的旧记录永远不删
+    → `/api/services/list` 仍显示 running
+  - `Store.RemovePlugin()` 直接 `os.RemoveAll`，**没先停进程**
+    → 插件进程变成持有已删文件的孤儿
+  - 修法：新增 `Supervisor.RemovePlugin`（停进程+删记录+清 autostart）、
+    `Reload/Rescan` 增加"清单已不存在就摘除"的自愈、`Store.RemovePlugin`
+    先走 `onBeforeRemove` 停进程并校验目录确实删除
+  - 已有 `PluginX.Drop()` 但**生产代码从未调用过**（只有测试在用），本次接上
+- **JMComic 适配**
+  - `exec` 从 `["python", …]` 改为 `["python3", …]`（Debian 12 无 `python`）
+  - 补回丢失的 `requirements`（jmcomic>=2.7 / requests>=2.31）
+  - registry.json 版本同步 1.0.0 → 2.0.0（与 plugin.json 一致，避免市场误报"可更新"）
+- **JMComic 前端优化**：构建脚本改用 `vue.esm-browser.prod.js` + 开启压缩
+  - 619KB → **184.5KB（-70%）**，同时消除 "You are running a development build of Vue" 警告
+  - `RC_VUE_DEV=1` 可切回 dev，`RC_NO_MINIFY=1` 可关闭压缩（排查产物时用）
+- **Python 依赖启动前自检**：插件声明了 `requirements` 但环境缺包时，
+  日志直接给出缺什么 + 具体 pip 命令，不再是"插件莫名一直崩"
+- 新增探针 `tools/jmcomic-probe.mjs`（登录→插件页→真实搜索→封面渲染）
+
 ## 未发布 — 多语言插件运行时 + 旧库迁移
 - **插件不再限于 Go 二进制**：新增 `internal/pluginrt` 运行时适配层，支持
   **Python / PHP / Java / Node / Go / Bash / 任意静态二进制**

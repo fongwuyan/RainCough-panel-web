@@ -41,6 +41,44 @@ type Supervisor struct {
 	mu            sync.Mutex
 	procs         map[string]*Proc // 按 name 索引
 	autostartBoot map[string]bool  // loadAutostart 阶段填入, scanAll upsert 读取
+	// depsChecked Python 依赖自检已跑过的插件(每个进程生命周期只查一次)
+	depsChecked map[string]bool
+}
+
+// checkPythonDepsOnce 启动前查一次 Python 依赖(缺包时打可操作日志)。
+func (s *Supervisor) checkPythonDepsOnce(p *Proc, pythonBin string) {
+	s.mu.Lock()
+	if s.depsChecked == nil {
+		s.depsChecked = map[string]bool{}
+	}
+	if s.depsChecked[p.Name] {
+		s.mu.Unlock()
+		return
+	}
+	s.depsChecked[p.Name] = true
+	s.mu.Unlock()
+
+	// 读 plugin.json 的 requirements
+	raw, err := os.ReadFile(filepath.Join(p.Dir, "plugin.json"))
+	if err != nil {
+		return
+	}
+	var mf struct {
+		Requirements []string `json:"requirements"`
+	}
+	if json.Unmarshal(raw, &mf) != nil || len(mf.Requirements) == 0 {
+		return
+	}
+	miss, err := pluginrt.CheckPythonModules(pythonBin, mf.Requirements)
+	if err != nil {
+		log.Printf("[supervisor] %s 依赖检查跳过: %v", p.Name, err)
+		return
+	}
+	if len(miss) == 0 {
+		return
+	}
+	log.Printf("[supervisor] %s 缺少 Python 依赖: %s —— 插件可能启动即崩, 请执行: %s -m pip install %s",
+		p.Name, strings.Join(miss, ", "), pythonBin, strings.Join(miss, " "))
 }
 
 // New 创建 supervisor。sd=nil 时 autostart 仅内存缓存(重启失效)。
@@ -154,6 +192,53 @@ func (s *Supervisor) StartPlugin(name string) error {
 	p.stopReason = ""
 	p.mu.Unlock()
 	return s.spawn(p, "manual")
+}
+
+// RemovePlugin 卸载插件: 先停进程, 再从 supervisor 记录里删掉。
+//
+// 为什么必须显式删记录: 卸掉目录后若只 Rescan(), procs 表里的旧条目会一直留着,
+// 服务列表里那个插件永远显示 "running/stopped", 用户以为卸载失败
+// (2026-10-17 实测: echopi 目录已删, /api/services/list 仍报 state=running)。
+//
+// 进程未启动时也安全(直接删记录)。返回 nil 表示记录原本就不存在(不视为错误)。
+func (s *Supervisor) RemovePlugin(name string) error {
+	s.mu.Lock()
+	p, ok := s.procs[name]
+	s.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	// 先停: 目录马上要被删, 不能让进程还在跑(否则会有孤儿进程持有已删文件)
+	s.stopLocked(p, "removed")
+	// 等它退干净(最多 6s), 避免紧接着的 spawn/rename 撞上
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		p.mu.Lock()
+		st, hasCmd := p.state, p.cmd != nil
+		p.mu.Unlock()
+		if st == StateStopped && !hasCmd {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.mu.Lock()
+	delete(s.procs, name)
+	s.mu.Unlock()
+	// 清掉 autostart / 运行态持久化, 否则重启后面板上还会冒出来
+	s.clearPersisted(name)
+	return nil
+}
+
+// clearPersisted 把该插件从持久化的 autostart 表里抹掉并立刻落盘。
+//
+// 注意: autostart 是**整张 map** 存在一个键里(autoKey), 不是按插件分键,
+// 所以不能简单 Delete("autostart:"+name) —— 必须重写整张表, 否则下一轮
+// persistAutostart 又会按内存重建, 插件删了却还在表里。
+func (s *Supervisor) clearPersisted(name string) {
+	_ = name
+	if err := s.persistAutostart(); err != nil {
+		log.Printf("[supervisor] 清理 autostart 记录失败: %v", err)
+	}
 }
 
 // StopPlugin 发 SIGTERM, 5s 后 SIGKILL。stopReason 写 "user"。
@@ -359,8 +444,22 @@ func (s *Supervisor) Rescan() {
 	}
 	s.mu.Unlock()
 	s.scanAll()
-	toSpawn := []*Proc{}
+
+	// ★ 自愈: 清掉"目录已不存在"的残留记录。
+	// 场景: 用户通过文件管理器手动删了插件目录, 或卸载过程中途失败。
+	// 旧实现只增不删 → 服务列表里永远挂着一个再也起不来的幽灵插件
+	// (2026-10-17 实测: echopi 目录已删, 列表仍报 state=running)。
+	for name := range before {
+		if s.pluginDirGone(name) {
+			log.Printf("[supervisor] %s 插件目录已不存在, 清理进程记录", name)
+			if err := s.RemovePlugin(name); err != nil {
+				log.Printf("[supervisor] 清理 %s 失败: %v", name, err)
+			}
+		}
+	}
+
 	s.mu.Lock()
+	toSpawn := []*Proc{}
 	for n, p := range s.procs {
 		if !before[n] && p.Autostart {
 			toSpawn = append(toSpawn, p)
@@ -370,6 +469,19 @@ func (s *Supervisor) Rescan() {
 	for _, p := range toSpawn {
 		_ = s.spawn(p, "autostart")
 	}
+}
+
+// pluginDirGone 插件目录是否已不存在(或已无有效 v4 清单)。
+func (s *Supervisor) pluginDirGone(name string) bool {
+	if s.opts.PluginsDir == "" {
+		return false
+	}
+	dir := filepath.Join(s.opts.PluginsDir, name)
+	if _, err := os.Stat(dir); err != nil {
+		return true
+	}
+	_, err := pluginx.LoadManifestV4(dir)
+	return err != nil
 }
 
 // upsertFromManifest 解析 manifest, 创建/更新 Proc。持 s.mu 进。
@@ -450,6 +562,13 @@ func (s *Supervisor) spawn(p *Proc, reason string) error {
 	}
 	for _, n := range spec.Notes {
 		log.Printf("[supervisor] %s 运行时: %s", p.Name, n)
+	}
+	// Python 插件: 启动前查一次依赖是否可导入。
+	// 缺包时插件会立刻 ImportError 退出, 日志里往往只有一行 traceback 甚至空白
+	// (取决于缓冲), 表现为"插件莫名其妙一直崩"。这里直接把缺什么、怎么装打出来。
+	// 每个插件每次进程生命周期只查一次(见 depsChecked), 避免拖慢重启。
+	if spec.Lang == pluginrt.LangPython {
+		s.checkPythonDepsOnce(p, spec.Interpreter)
 	}
 
 	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)

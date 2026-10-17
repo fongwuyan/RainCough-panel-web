@@ -13,8 +13,16 @@ const PLUGINS = path.join(ROOT, 'plugins')
 // 从主面板 web/node_modules 解析 esbuild, 避免插件方再装依赖
 const esbuild = require(path.join(ROOT, 'web', 'node_modules', 'esbuild'))
 
-// 打包 vue 进产物: 把 import 'vue' 解析到主面板内的 vue ESM(浏览器版)
-const VUE_ESM = path.join(ROOT, 'web', 'node_modules', 'vue', 'dist', 'vue.esm-browser.js')
+// 打包 vue 进产物: 把 import 'vue' 解析到主面板内的 vue ESM(浏览器版)。
+//
+// ★ 必须用 .prod.js: 用 dev 版会有两个后果 ——
+//   1) 体积大一倍多(JMComic 实测 619KB → 生产版约 200KB)
+//   2) 运行时打 "You are running a development build of Vue" 警告, 且 dev 版
+//      带完整校验/警告逻辑, 大列表渲染明显更慢
+//   可用 RC_VUE_DEV=1 临时切回 dev(调试模板警告时才需要)
+const VUE_PROD = path.join(ROOT, 'web', 'node_modules', 'vue', 'dist', 'vue.esm-browser.prod.js')
+const VUE_DEV = path.join(ROOT, 'web', 'node_modules', 'vue', 'dist', 'vue.esm-browser.js')
+const VUE_ESM = process.env.RC_VUE_DEV === '1' ? VUE_DEV : VUE_PROD
 
 async function buildPlugin(name) {
   const dir = path.join(PLUGINS, name)
@@ -41,9 +49,13 @@ async function buildPlugin(name) {
         },
       }],
       target: 'es2020',
-      minify: false,
+      // 默认压缩: 插件产物走局域网/HTTP 传输且解析耗时直接影响首屏
+      // RC_NO_MINIFY=1 可关闭(需要读产物源码排查时)
+      minify: process.env.RC_NO_MINIFY !== '1',
+      legalComments: 'none',
     })
-    console.log(`[ok]   ${name}: ${path.relative(ROOT, outFile)}`)
+    const kb = (fs.statSync(outFile).size / 1024).toFixed(1)
+    console.log(`[ok]   ${name}: ${path.relative(ROOT, outFile)} (${kb} KB${VUE_ESM.includes('.prod.') ? ', vue=prod' : ', vue=dev'})`)
     return true
   } catch (e) {
     console.error(`[fail] ${name}:`, e.message)

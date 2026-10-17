@@ -116,14 +116,14 @@ type PluginX struct {
 	opts Options
 	ns   *shared.Namespace // 持久化(可为 nil => 内存模式)
 
-	mu        sync.Mutex
+	mu         sync.Mutex
 	onConnSeen func(name string) // 握手成功回调(供 supervisor 标记 ConnSeen; nil 跳过)
-	plugins   map[string]*Plugin
-	ifaces    map[string]*Iface
-	listeners map[string]net.Listener
-	endpoints map[string]string
-	stopCh    chan struct{}
-	seq       int64
+	plugins    map[string]*Plugin
+	ifaces     map[string]*Iface
+	listeners  map[string]net.Listener
+	endpoints  map[string]string
+	stopCh     chan struct{}
+	seq        int64
 }
 
 // New 创建接口库运行时。
@@ -379,8 +379,30 @@ func (x *PluginX) Stop() {
 // Reload 重新扫描(安装新插件/扩展后调用): 新端点由 listenFor 自己起 accept 循环。
 // 旧实现这里再判一遍 listenerAlive 才起循环, 而那些名字本来就是从 listeners 里取的,
 // 判断恒为真 → 运行期新装的插件/扩展的 accept 循环永远起不来, 注册连不上(2026-10-01 审计)。
+//
+// ★ 自愈: 先摘掉"目录已不存在"的插件。旧实现只增不删, 卸载后注册表里会留幽灵条目 ——
+// /api/plugins 仍返回它、接口总览里还有它的接口, 界面上看起来像"卸载失败"
+// (2026-10-17 实测: echopi 目录已删, /api/plugins 仍在列)。
 func (x *PluginX) Reload() {
+	x.pruneMissing()
 	x.scanAndListen()
+}
+
+// pruneMissing 摘掉清单已读不到的插件(目录被删/清单损坏)。
+// 复用 Drop: 它会同时清内存注册、接口、listener、端点与 KV 持久化。
+func (x *PluginX) pruneMissing() {
+	x.mu.Lock()
+	names := make([]string, 0, len(x.plugins))
+	for n := range x.plugins {
+		names = append(names, n)
+	}
+	x.mu.Unlock()
+	for _, n := range names {
+		if _, err := x.loadManifestFor(n); err != nil {
+			log.Printf("[pluginx] %s 清单已不存在, 摘除注册记录", n)
+			x.Drop(n)
+		}
+	}
 }
 
 func (x *PluginX) listenerAlive(name string) bool {

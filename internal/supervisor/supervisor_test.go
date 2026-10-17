@@ -269,3 +269,75 @@ func TestSnapshotFieldsRoundTrip(t *testing.T) {
 		t.Fatal("snapshot name")
 	}
 }
+
+// TestRemovePlugin_clearsRecord 卸载后进程记录必须消失。
+// ★ 回归测试: 旧实现只删目录不删 procs 记录, 服务列表里插件仍显示 running,
+// 用户以为"无法移除"(2026-10-17 实测 echopi)。
+func TestRemovePlugin_clearsRecord(t *testing.T) {
+	dir := t.TempDir()
+	plug := makeFakePlugin(t, dir, "probe", "long")
+
+	s := New(Options{PluginsDir: dir, LogDir: filepath.Join(dir, "logs")}, nil)
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(s.Shutdown)
+	s.Rescan()
+	if _, err := s.View("probe"); err != nil {
+		t.Fatalf("Rescan 后应有记录: %v", err)
+	}
+
+	// 删目录 + RemovePlugin: 记录必须消失
+	if err := os.RemoveAll(plug); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemovePlugin("probe"); err != nil {
+		t.Fatalf("RemovePlugin: %v", err)
+	}
+	if _, err := s.View("probe"); err == nil {
+		t.Fatalf("RemovePlugin 后不应再有记录")
+	}
+	for _, snap := range s.List() {
+		if snap.Name == "probe" {
+			t.Fatalf("List 里仍有 probe: %+v", snap)
+		}
+	}
+	// 幂等: 再删一次不应报错
+	if err := s.RemovePlugin("probe"); err != nil {
+		t.Fatalf("重复 RemovePlugin 应幂等: %v", err)
+	}
+}
+
+// TestRescan_prunesMissingPlugin 目录被外部删掉后, Rescan 应自愈清掉幽灵记录。
+func TestRescan_prunesMissingPlugin(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"alive", "ghost"} {
+		makeFakePlugin(t, dir, n, "long")
+	}
+	s := New(Options{PluginsDir: dir, LogDir: filepath.Join(dir, "logs")}, nil)
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(s.Shutdown)
+	s.Rescan()
+	if len(s.List()) != 2 {
+		t.Fatalf("应有 2 个记录, 实得 %d", len(s.List()))
+	}
+
+	// 模拟用户用文件管理器删掉 ghost 目录
+	if err := os.RemoveAll(filepath.Join(dir, "ghost")); err != nil {
+		t.Fatal(err)
+	}
+	s.Rescan()
+
+	names := map[string]bool{}
+	for _, snap := range s.List() {
+		names[snap.Name] = true
+	}
+	if names["ghost"] {
+		t.Fatalf("Rescan 应清掉目录已不存在的 ghost")
+	}
+	if !names["alive"] {
+		t.Fatalf("不应误删 still-alive")
+	}
+}
