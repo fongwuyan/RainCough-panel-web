@@ -345,8 +345,15 @@ func (s *server) handlePanelUpdateCheck(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 	out["versions"] = list
+	// 取语义最大版本, 而不是 GitHub 返回的第一条(避免草稿/乱序导致误报)
+	for _, v := range list {
+		if ver := v["version"].(string); verLess(latest, ver) {
+			latest = ver
+		}
+	}
 	out["latest"] = latest
-	out["has_update"] = latest != "" && cur != "" && latest != cur
+	// 只有「最新 > 当前」才算有更新; 版本号不同不代表更新(曾把 6.0.0 判成 1.0.0 有更新)
+	out["has_update"] = latest != "" && cur != "" && verLess(cur, latest)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -688,4 +695,44 @@ func (s *server) handlePanelUpdateRollback(w http.ResponseWriter, r *http.Reques
 	s.writeUpdateState(updateState{Applied: "", Pending: true, Backup: bk, At: time.Now().Unix()})
 	s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: from, To: to, Action: "rollback", Result: "ok", Message: "已回滚, 待确认重启", Backup: bk})
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "from": from, "to": to, "backup": bk})
+}
+
+// verParts 把 "1.2.3" 拆成数值段(非数字段按 0 处理)。
+func verParts(s string) []int {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
+	segs := strings.Split(s, ".")
+	out := make([]int, len(segs))
+	for i, seg := range segs {
+		n := 0
+		for _, c := range seg {
+			if c < '0' || c > '9' {
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		out[i] = n
+	}
+	return out
+}
+
+// verLess 语义比较 a < b。
+func verLess(a, b string) bool {
+	pa, pb := verParts(a), verParts(b)
+	n := len(pa)
+	if len(pb) > n {
+		n = len(pb)
+	}
+	for i := 0; i < n; i++ {
+		var x, y int
+		if i < len(pa) {
+			x = pa[i]
+		}
+		if i < len(pb) {
+			y = pb[i]
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
 }
