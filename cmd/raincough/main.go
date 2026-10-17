@@ -25,6 +25,7 @@ import (
 	"raincough/internal/auth"
 	"raincough/internal/config"
 	"raincough/internal/core"
+	"raincough/internal/legacy"
 	"raincough/internal/pluginx"
 	"raincough/internal/shared"
 	"raincough/internal/supervisor"
@@ -47,9 +48,34 @@ func main() {
 	setPW := flag.Bool("set-password", false, "设置面板登录密码(从 stdin 读一行), 写入 <data>/secret/admin.pw 后退出")
 	hashPW := flag.Bool("hash-password", false, "把 stdin 的一行密码算成 $6$ 哈希并打印后退出(供安装器使用)")
 	verifyHash := flag.String("verify-hash", "", "诊断: 用 stdin 的一行密码验证给定的 $6$ 哈希, 匹配则退出码 0")
+	migrateDB := flag.String("migrate-db", "", "从旧版 SQLite(rc.db)迁移数据到 <data>/kv 后退出; 传 rc.db 路径")
+	migrateDry := flag.Bool("migrate-dry-run", false, "配合 -migrate-db: 只报告将要迁移什么, 不落盘")
+	migrateForce := flag.Bool("migrate-force", false, "配合 -migrate-db: 覆盖已存在的键(默认跳过)")
+	migrateAlso := flag.String("migrate-also", "", "配合 -migrate-db: 额外迁移的命名空间(逗号分隔), 含默认会被跳过的")
 	flag.Parse()
 
 	cfg := config.Load()
+
+	// ---- 离线 CLI: 旧库迁移(不启动服务) ----
+	if *migrateDB != "" {
+		// KV 目录: 与 ResolveDSN 的解析保持一致(<data>/kv)
+		dstDir := filepath.Join(cfg.DataDir, "kv")
+		var also []string
+		for _, s := range strings.Split(*migrateAlso, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				also = append(also, s)
+			}
+		}
+		rep, err := legacy.Migrate(legacy.MigrateOptions{
+			Src: *migrateDB, DstDir: dstDir,
+			DryRun: *migrateDry, Force: *migrateForce, ForceNamespaces: also,
+		})
+		if err != nil {
+			log.Fatalf("迁移失败: %v", err)
+		}
+		printMigrateReport(rep)
+		return
+	}
 
 	// ---- 离线 CLI: 密码管理(不启动服务) ----
 	if *verifyHash != "" {
@@ -474,6 +500,49 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// printMigrateReport 打印迁移报告(表格对齐, 中文宽度按 2 计)
+func printMigrateReport(rep *legacy.Report) {
+	mode := "迁移"
+	if rep.DryRun {
+		mode = "预演(不落盘)"
+	}
+	fmt.Printf("\n旧库 → KV %s\n", mode)
+	fmt.Printf("  源: %s\n", rep.Src)
+	fmt.Printf("  目标: %s\n\n", rep.Dst)
+	if rep.WALWarning != "" {
+		fmt.Printf("  ⚠ WAL: %s\n\n", rep.WALWarning)
+	}
+
+	fmt.Printf("  %-22s %-14s %6s %6s %6s  %s\n",
+		"命名空间", "动作", "行数", "写入", "跳过", "说明")
+	fmt.Printf("  %s\n", strings.Repeat("-", 92))
+	for _, t := range rep.Tables {
+		action := t.Action
+		switch action {
+		case "migrated":
+			action = "已迁移"
+		case "would-migrate":
+			action = "将迁移"
+		case "skipped":
+			action = "跳过"
+		}
+		fmt.Printf("  %-22s %-14s %6d %6d %6d  %s\n",
+			t.Namespace, action, t.Rows, t.Written, t.SkippedExisting, t.Reason)
+	}
+	fmt.Printf("  %s\n", strings.Repeat("-", 92))
+	fmt.Printf("  合计: %d 行, 写入 %d 条, 耗时 %dms\n\n", rep.TotalRows, rep.TotalWritten, rep.DurationMS)
+
+	if rep.DryRun {
+		fmt.Println("这是预演。去掉 -migrate-dry-run 才会真正写入。")
+		return
+	}
+	if rep.TotalWritten > 0 {
+		fmt.Println("迁移完成。请确认面板已停止后重启: systemctl restart raincough.service")
+	} else {
+		fmt.Println("没有新数据需要迁移(目标已有这些键, 或已迁移过)。")
+	}
 }
 
 // readPasswordLine 从 stdin 读一行密码(去尾部换行); 空则报错。

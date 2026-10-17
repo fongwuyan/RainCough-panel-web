@@ -159,7 +159,11 @@ func (s *server) handleServicesAutostart(w http.ResponseWriter, r *http.Request)
 	}
 	var b struct {
 		Name string `json:"name"`
-		On   bool   `json:"on"`
+		On   *bool  `json:"on"`
+		// Autostart 兼容写法: 早期前端/脚本可能用这个键。
+		// ★ 用指针接收: 缺字段时是 nil, 能明确拒绝, 而不是静默当成 false
+		//   (曾踩过: 传 {"autostart":true} 被忽略, 返回 autostart:false 却不报错)
+		Autostart *bool `json:"autostart"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
@@ -169,9 +173,19 @@ func (s *server) handleServicesAutostart(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
 		return
 	}
-	if err := globalSUP.SetAutostart(b.Name, b.On); err != nil {
+	on := b.On
+	if on == nil {
+		on = b.Autostart
+	}
+	if on == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error": "缺少 on 字段(布尔值, 表示是否开机自启)",
+		})
+		return
+	}
+	if err := globalSUP.SetAutostart(b.Name, *on); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"name": b.Name, "autostart": b.On})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"name": b.Name, "autostart": *on})
 }

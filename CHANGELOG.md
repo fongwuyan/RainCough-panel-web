@@ -4,6 +4,34 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## 未发布 — 多语言插件运行时 + 旧库迁移
+- **插件不再限于 Go 二进制**：新增 `internal/pluginrt` 运行时适配层，支持
+  **Python / PHP / Java / Node / Go / Bash / 任意静态二进制**
+  - 解释器解析带别名回退链：`python3 → python → python3.x`、`node → nodejs`、
+    `php → php8.x`、`java → $JAVA_HOME/bin/java`
+  - 缺解释器时给出**可执行的错误**（含 apt/apk 安装命令），不再是 exit=-1 的黑盒崩溃
+  - 自动补环境变量：`PYTHONUNBUFFERED=1`（否则插件日志卡在缓冲区，崩溃时一片空白）、
+    `PYTHONDONTWRITEBYTECODE=1`
+  - `.jar` 自动补 `java -jar`；`.py/.php/.js/.sh` 按后缀推断语言
+  - `CheckPythonModules`：插件声明 `requirements` 时可预先探测缺失模块
+- **实测修复的两个真 bug**
+  - `exec[0]` 是**绝对路径解释器**（如 `/bin/sh`）时被误当脚本，拼出 `bash /bin/sh run.sh`，
+    bash 把 ELF 当脚本读 → **exit=126**。echopi 插件因此一直起不来。（已加回归测试）
+  - `/api/services/autostart` 缺 `on` 字段时**静默设为 false**，现在兼容 `autostart` 键并在两者都缺时报错
+  - install.sh 新增步骤 2b：自动补 `python` 别名（Debian 12 只有 python3）、按需装 php/java/node、装 Go 官方二进制
+- **旧面板数据迁移** `internal/legacy`：零依赖手写 SQLite 只读解析器
+  - 支持表 b-tree 多层、varint/record 全类型、**overflow 页链**（旧库有 310KB 单值）、
+    **WAL 回放**（旧库 WAL 1.2MB > 主库 725KB，只读主库会丢掉最近写入）
+  - 用真实 SQLite 3.53 产出的库做 golden 对拍：606 个键值逐字节一致
+  - 迁移策略**白名单**：`core_terminal` / `core_store` / `core_tasks` + **仅 jmcomic** 插件；
+    其余 6 个旧插件（uptime/webspy/vpn/touchgal/laizhangsetu/mcserver）与已移除功能一律跳过并说明理由
+  - 不覆盖已有键（新面板数据优先）、干跑、幂等、失败不留残留；迁移标记写在 `<kv>/.legacy-migration.json`
+  - CLI：`raincough -migrate-db <rc.db> [-migrate-dry-run] [-migrate-force] [-migrate-also ns1,ns2]`
+- **JMComic 修复**：`jmcomic.search` 的 `return` 被插在错误位置（在搜索逻辑之前），
+  导致 `items` 未定义 + 后续整段成死代码。修复后搜索返回真实结果
+- 实测四种语言插件全部跑通并返回正确结果：
+  python 3.11.2 / php 8.2.33 / node v18.20.4 / java 17.0.20.1
+
 ## 未发布 — 设置页「密钥」替换「访问令牌」
 - 设置 → 仓库配置：移除「访问令牌」(GitHub Token) 输入，换成「密钥」(插件库口令)
   - 密钥不保存：口令哈希写死在二进制里，输入只用于解锁，解锁后 30 天有效

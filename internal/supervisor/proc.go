@@ -39,6 +39,7 @@ type Proc struct {
 
 	Dir       string   // 工作目录(插件根)
 	Args      []string // 启动命令(对应 manifest.backend.exec)
+	Lang      string   // 后端语言(py/php/java/go/node/…), 用于解释器解析
 	Endpoint  string   // 子进程连 UDS/TCP 的端点(.rc.endpoint 里写的)
 	LogPath   string   // stdout/stderr 文件路径
 	Autostart bool     // panel 启动时是否自动起(写盘)
@@ -48,9 +49,9 @@ type Proc struct {
 	cmd         *exec.Cmd
 	pid         int
 	startedAt   time.Time
-	lastExit    int // 上一次退出码
-	crashCount  int // 累计连续崩溃次数(手动 restart 清零)
-	backoffIdx  int // 当前 backoff 步 0..n
+	lastExit    int  // 上一次退出码
+	crashCount  int  // 累计连续崩溃次数(手动 restart 清零)
+	backoffIdx  int  // 当前 backoff 步 0..n
 	connSeen    bool // 已观察到至少一次 UDS 握手
 	connSeenAt  time.Time
 	stopReason  string // 主动 stop 时填, 区别于"进程自己崩了"
@@ -62,17 +63,18 @@ type Proc struct {
 
 // Snapshot 视图层用的不可变快照。锁内填, 锁外返。
 type Snapshot struct {
-	Name        string `json:"name"`
-	State       string `json:"state"`        // stopped/starting/running/backoff/crashed
-	Pid         int    `json:"pid"`          // 0 表示无
-	CrashCount  int    `json:"crash_count"`  // 累计连续崩
-	LastExit    int    `json:"last_exit"`    // 上次退出码
-	StartedAt   int64  `json:"started_at"`   // 最近一次拉起的 unix 时间
-	UpSec       int64  `json:"up_sec"`       // 当前 running 累计秒(若不是 running=0)
-	ConnSeen    bool   `json:"conn_seen"`    // 是否至少握手过一次
-	ConnSeenAt  int64  `json:"conn_seen_at"` // 最近一次握手 unix
-	Autostart   bool   `json:"autostart"`
-	StopReason  string `json:"stop_reason,omitempty"`
+	Name       string `json:"name"`
+	State      string `json:"state"`          // stopped/starting/running/backoff/crashed
+	Pid        int    `json:"pid"`            // 0 表示无
+	Lang       string `json:"lang,omitempty"` // 后端语言
+	CrashCount int    `json:"crash_count"`    // 累计连续崩
+	LastExit   int    `json:"last_exit"`      // 上次退出码
+	StartedAt  int64  `json:"started_at"`     // 最近一次拉起的 unix 时间
+	UpSec      int64  `json:"up_sec"`         // 当前 running 累计秒(若不是 running=0)
+	ConnSeen   bool   `json:"conn_seen"`      // 是否至少握手过一次
+	ConnSeenAt int64  `json:"conn_seen_at"`   // 最近一次握手 unix
+	Autostart  bool   `json:"autostart"`
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 // snapshot 锁内构造。
@@ -89,7 +91,7 @@ func (p *Proc) snapshot() Snapshot {
 	}
 	return Snapshot{
 		Name: p.Name, State: p.state.String(),
-		Pid: p.pid, CrashCount: p.crashCount, LastExit: p.lastExit,
+		Pid: p.pid, Lang: p.Lang, CrashCount: p.crashCount, LastExit: p.lastExit,
 		StartedAt: timeOrZero(p.startedAt), UpSec: up,
 		ConnSeen: p.connSeen, ConnSeenAt: cs,
 		Autostart: p.Autostart, StopReason: p.stopReason,

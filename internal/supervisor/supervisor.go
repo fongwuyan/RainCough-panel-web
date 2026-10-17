@@ -15,19 +15,20 @@ import (
 	"syscall"
 	"time"
 
+	"raincough/internal/pluginrt"
 	"raincough/internal/pluginx"
 	"raincough/internal/shared"
 )
 
 // Options 启动参数。
 type Options struct {
-	PluginsDir    string        // 插件根目录
-	LogDir        string        // 日志目录(默认 <DataDir>/log)
-	RestartMax    int           // 单插件连续崩溃上限(超过则 Crashed)
-	BackoffBase   time.Duration // 初次 backoff(下个 backoff = min(base*2^idx, max))
-	BackoffMax    time.Duration // backoff 上限
-	StartGrace    time.Duration // 启动到判崩的宽限秒数(期间不算 crash)
-	UDSDir        string        // 透传给 RC_REG_TOKEN 之外的 env(通常 pluginx 已自管)
+	PluginsDir  string        // 插件根目录
+	LogDir      string        // 日志目录(默认 <DataDir>/log)
+	RestartMax  int           // 单插件连续崩溃上限(超过则 Crashed)
+	BackoffBase time.Duration // 初次 backoff(下个 backoff = min(base*2^idx, max))
+	BackoffMax  time.Duration // backoff 上限
+	StartGrace  time.Duration // 启动到判崩的宽限秒数(期间不算 crash)
+	UDSDir      string        // 透传给 RC_REG_TOKEN 之外的 env(通常 pluginx 已自管)
 }
 
 // Supervisor 进程级 supervisor。
@@ -38,8 +39,8 @@ type Supervisor struct {
 	sd   *shared.Shared // 可为 nil: 内存模式, autostart 配置不持久化
 
 	mu            sync.Mutex
-	procs         map[string]*Proc        // 按 name 索引
-	autostartBoot map[string]bool         // loadAutostart 阶段填入, scanAll upsert 读取
+	procs         map[string]*Proc // 按 name 索引
+	autostartBoot map[string]bool  // loadAutostart 阶段填入, scanAll upsert 读取
 }
 
 // New 创建 supervisor。sd=nil 时 autostart 仅内存缓存(重启失效)。
@@ -389,6 +390,7 @@ func (s *Supervisor) upsertFromManifest(name string, m *pluginx.ManifestV4) {
 		// 已存在: 同步 args/exec; 不打断进程
 		cur.mu.Lock()
 		cur.Args = append([]string{}, m.Backend.Exec...)
+		cur.Lang = m.Backend.Lang
 		if cur.Dir == "" {
 			cur.Dir = dir
 		}
@@ -403,6 +405,7 @@ func (s *Supervisor) upsertFromManifest(name string, m *pluginx.ManifestV4) {
 		Name:       name,
 		Dir:        dir,
 		Args:       append([]string{}, m.Backend.Exec...),
+		Lang:       m.Backend.Lang,
 		Endpoint:   ep,
 		LogPath:    logPath,
 		Autostart:  auto,
@@ -433,15 +436,31 @@ func (s *Supervisor) spawn(p *Proc, reason string) error {
 		}
 	}
 	endpoint := p.Endpoint
+	args := append([]string{}, p.Args...)
+	lang := p.Lang
 	p.mu.Unlock()
-	cmd := exec.Command(p.Args[0], p.Args[1:]...)
+
+	// ★ 多语言适配: 把 backend{lang,exec} 解析成真正可执行的 argv。
+	// 这一步解决的是"解释器名字因发行版而异"的问题(如 Debian 12 只有 python3 没有 python,
+	// 旧 JMComic 的 exec 写的是 python, 于是必然 fork 失败)。解析失败时给出可读原因,
+	// 而不是留一个 exit=-1 的黑盒崩溃。
+	spec, err := pluginrt.Resolve(lang, args, p.Dir)
+	if err != nil {
+		return fmt.Errorf("插件 %s 运行环境不可用: %w", p.Name, err)
+	}
+	for _, n := range spec.Notes {
+		log.Printf("[supervisor] %s 运行时: %s", p.Name, n)
+	}
+
+	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
 	cmd.Dir = p.Dir
 	setupSysProcAttr(cmd)
-	cmd.Env = append(os.Environ(),
+	env := append(os.Environ(),
 		"RC_ENDPOINT="+endpoint,
 		"RC_PLUGIN_NAME="+p.Name,
 		"RC_PLUGIN_DIR="+p.Dir,
 	)
+	cmd.Env = append(env, spec.Env...)
 	if endpoint == "" {
 		log.Printf("[supervisor] 警告: %s endpoint 为空, 子进程拿不到 RC_ENDPOINT", p.Name)
 	}

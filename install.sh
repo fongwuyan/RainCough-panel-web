@@ -29,9 +29,14 @@
 #       RC_ADMIN_PASSWORD 可覆盖自动生成的 admin 密码(便于自动化/迁移)。
 #
 # 与 v3 (Python/Flask) 的区别:
-#   · 不再装 python3 / pip / 离线 wheels / p7zip-full / ffmpeg — v6 是零依赖 Go 二进制
+#   · 面板自身仍是零依赖 Go 二进制, 不需要 python3/pip 才能跑
+#   · 但**插件**可以任意语言: py / php / go / java / node / bash(见 RC_PLUGIN_LANGS)
+#     install.sh 会自动补齐这些解释器(python 别名、go 官方二进制), 详见步骤 2b
 #   · 不再有 env-offline Release / CORE_PIP_PKGS
 #   · 单 systemd 单元(raincough.service), 端口默认 3900 起找空闲
+#
+# 插件运行时(可选): RC_PLUGIN_LANGS 指定要保证的语言, 逗号分隔, 默认 "python,php,java,node,go"
+#   设 RC_SKIP_RUNTIMES=1 可完全跳过(只想跑无插件面板时)
 # ============================================================================
 set -euo pipefail
 
@@ -458,6 +463,106 @@ command -v curl >/dev/null 2>&1 || fail "缺少 curl (apt install curl)"
 command -v tar >/dev/null 2>&1 || fail "缺少 tar (apt install tar)"
 command -v ss >/dev/null 2>&1 || command -v netstat >/dev/null 2>&1 \
     || warn "缺少 ss/netstat(端口探测将退化为不可用, 仍可继续)"
+
+# ---------- 步骤 2b: 插件运行时环境(可选) ----------
+# 面板自身零依赖, 但插件可以是 py/php/go/java/node/bash。这里把常用解释器补齐,
+# 让"装上就能跑任意语言插件"成立。
+#
+# 为什么要补 python 别名: Debian 12 / Ubuntu 24.04+ **只有 python3, 没有 python**,
+#   而老插件(含 JMComic)的 plugin.json 写的是 exec:["python", ...] → fork 直接失败。
+#   面板侧已有解释器别名回退(见 internal/pluginrt), 这里再补一个系统级别名双保险。
+echo
+if [ "${RC_SKIP_RUNTIMES:-0}" = "1" ]; then
+    info "步骤 2b/5: 插件运行时检查(RC_SKIP_RUNTIMES=1, 已跳过)"
+else
+    info "步骤 2b/5: 插件运行时环境"
+    PLUGIN_LANGS="${RC_PLUGIN_LANGS:-python,php,java,node,go}"
+
+    has() { command -v "$1" >/dev/null 2>&1; }
+
+    # --- python: 保证 python3 + python 别名都存在 ---
+    case ",$PLUGIN_LANGS," in *,python,*)
+        if has python3; then
+            ok "python3 $(python3 --version 2>&1 | awk '{print $2}')"
+        elif has python; then
+            ok "python $(python --version 2>&1 | awk '{print $2}')"
+        else
+            warn "缺少 python3; 尝试安装..."
+            if $SUDO apt-get install -y -q python3 >/dev/null 2>&1; then
+                ok "已安装 python3"
+            else
+                warn "python3 安装失败(插件若依赖 Python 将无法启动)"
+            fi
+        fi
+        # 别名: 老插件 exec 写 "python"
+        if ! has python; then
+            PY3=$(command -v python3 2>/dev/null || true)
+            if [ -n "$PY3" ]; then
+                $SUDO ln -sf "$PY3" /usr/local/bin/python 2>/dev/null \
+                    && ok "已补 python 别名 → $PY3" || warn "python 别名创建失败"
+            fi
+        fi
+    ;; esac
+
+    # --- php ---
+    case ",$PLUGIN_LANGS," in *,php,*)
+        if has php; then ok "php $(php -r 'echo PHP_VERSION;' 2>/dev/null)"; else
+            warn "缺少 php; 尝试安装..."
+            $SUDO apt-get install -y -q php-cli >/dev/null 2>&1 && ok "已安装 php-cli" \
+                || warn "php 安装失败(可用 RC_PLUGIN_LANGS 去掉 php)"
+        fi
+    ;; esac
+
+    # --- java ---
+    case ",$PLUGIN_LANGS," in *,java,*)
+        if has java; then
+            ok "java $(java -version 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+        else
+            warn "缺少 java; 尝试安装 default-jre-headless..."
+            $SUDO apt-get install -y -q default-jre-headless >/dev/null 2>&1 && ok "已安装 JRE" \
+                || warn "java 安装失败(Java 插件将无法启动)"
+        fi
+    ;; esac
+
+    # --- node ---
+    case ",$PLUGIN_LANGS," in *,node,*)
+        if has node; then ok "node $(node --version 2>/dev/null)"; else
+            warn "缺少 node; 尝试安装..."
+            $SUDO apt-get install -y -q nodejs >/dev/null 2>&1 && ok "已安装 nodejs" \
+                || warn "node 安装失败(Node 插件将无法启动)"
+        fi
+    ;; esac
+
+    # --- go: 官方二进制(apt 源版本往往过旧, 且不影响面板运行, 仅编译插件用) ---
+    case ",$PLUGIN_LANGS," in *,go,*)
+        if has go; then
+            ok "go $(go version 2>/dev/null | awk '{print $3}')"
+        elif [ -x /usr/local/go/bin/go ]; then
+            $SUDO ln -sf /usr/local/go/bin/go /usr/local/bin/go 2>/dev/null || true
+            $SUDO ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt 2>/dev/null || true
+            ok "已链接 /usr/local/go/bin/go"
+        else
+            # Go 只用于开发/编译 Go 插件, 装不上不算失败
+            GOVER="${RC_GO_VERSION:-1.23.4}"
+            GARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+            case "$GARCH" in amd64|arm64) : ;; *) GARCH=amd64 ;; esac
+            info "安装 Go $GOVER($GARCH)..."
+            GOURL="https://go.dev/dl/go${GOVER}.linux-${GARCH}.tar.gz"
+            if curl -fsSL --max-time 180 -o /tmp/rc-go.tgz "$GOURL" 2>/dev/null \
+               || curl -fsSL --max-time 240 -o /tmp/rc-go.tgz "https://golang.google.cn/dl/go${GOVER}.linux-${GARCH}.tar.gz" 2>/dev/null; then
+                $SUDO rm -rf /usr/local/go
+                $SUDO tar -C /usr/local -xzf /tmp/rc-go.tgz && rm -f /tmp/rc-go.tgz
+                $SUDO ln -sf /usr/local/go/bin/go /usr/local/bin/go 2>/dev/null || true
+                $SUDO ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt 2>/dev/null || true
+                ok "已安装 Go $(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')"
+            else
+                warn "Go 下载失败(不影响面板; 需要编译 Go 插件时再手动安装)"
+            fi
+        fi
+    ;; esac
+
+    info "插件运行时: py / php / java / node / go 已按需就绪(可用 RC_PLUGIN_LANGS 调整)"
+fi
 
 # ---------- 步骤 3: 下载面板主体 ----------
 echo
