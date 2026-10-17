@@ -11,7 +11,11 @@ async function req(method, url, body, isForm) {
   const res = await fetch(url, opts)
   const data = await res.json().catch(() => null)
   if (!res.ok) {
-    throw new Error((data && data.error) || `HTTP ${res.status}`)
+    // 把状态码与响应体挂到 Error 上: 调用方需要区分 401(未登录) / 403+need_password(插件库上锁)
+    const err = new Error((data && data.error) || `HTTP ${res.status}`)
+    err.status = res.status
+    err.data = data
+    throw err
   }
   return data
 }
@@ -176,6 +180,14 @@ export const api = {
   storeSettings: () => req('GET', '/api/store/settings'),
   storeSaveSettings: (cfg) => req('POST', '/api/store/settings', cfg),
   storePing: () => req('POST', '/api/store/ping', {}),
+  // ---- 插件市场 ----
+  // 插件库上锁: 拉清单/装插件/更新都会 403 + need_password
+  storeGateStatus: async () => {
+    const r = await reqAuthNoThrow('/api/store/gate')
+    return r.data || { locked: false, enabled: false }
+  },
+  storeGateUnlock: (password) => req('POST', '/api/store/gate/unlock', { password }),
+  storeGateLock: () => req('POST', '/api/store/gate/lock', {}),
   storeRegistry: () => req('GET', '/api/store/registry'),
   storePluginInstall: (name) => req('POST', '/api/store/plugin/install', { name }),
   storePluginUpdate: (name) => req('POST', '/api/store/plugin/update', { name }),

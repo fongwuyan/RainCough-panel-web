@@ -168,6 +168,19 @@ func main() {
 		}
 	})
 
+	// 插件库口令闸门: 插件库改为公开仓库后, 用写死口令保护插件内容
+	// (RC_STORE_GATE=off 可关闭; 详见 internal/auth/gate.go 的能力边界说明)
+	if !auth.IsStoreGateOff() {
+		g, err := auth.NewStoreGate(storeNS)
+		if err != nil {
+			log.Fatalf("插件库闸门初始化失败: %v", err)
+		}
+		globalGate = g
+		log.Printf("[gate] 插件库已上锁: 拉取清单/安装/更新需口令(rc_store_gate cookie 30 天)")
+	} else {
+		log.Printf("[gate] 插件库闸门已关闭(RC_STORE_GATE=off)")
+	}
+
 	// 插件 supervisor(接管所有 v4 后端进程: fork/exec + backoff + 日志)
 	globalSUP = supervisor.New(supervisor.Options{
 		PluginsDir:  cfg.PluginsDir,
@@ -286,6 +299,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/terminal/ws_token", s.handleWsToken)
 
 	// ---- 插件市场 ----
+	mux.HandleFunc("/api/store/gate", s.handleStoreGate)        // 闸门状态(需口令才可拉清单/装插件)
+	mux.HandleFunc("/api/store/gate/", s.handleStoreGate)       // /unlock  /lock
 	mux.HandleFunc("/api/store/settings", s.handleStoreSettings)
 	mux.HandleFunc("/api/store/ping", s.handleStorePing)
 	mux.HandleFunc("/api/store/registry", s.handleStoreRegistry)

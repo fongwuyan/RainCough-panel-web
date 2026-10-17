@@ -16,6 +16,12 @@ export function usePluginHub() {
   const busy = ref('')
   const toast = ref('')
 
+  // 插件库口令闸门: 插件库是公开仓库, 拉清单/装插件需先输入口令
+  const gateLocked = ref(false)
+  const gateEnabled = ref(false)
+  const gateBusy = ref(false)
+  const gateErr = ref('')
+
   let tTask = null
   let tToast = null
 
@@ -76,12 +82,61 @@ export function usePluginHub() {
       const d = await api.storeRegistry()
       market.value = (d && d.plugins) || []
       marketSource.value = (d && d.source) || 'github'
+      gateLocked.value = false
     } catch (e) {
-      marketErr.value = e.message || String(e)
+      // 403 + need_password = 插件库上锁(不是故障, 不要显示成红色错误)
+      if (e && e.status === 403 && e.data && e.data.need_password) {
+        gateLocked.value = true
+        gateEnabled.value = true
+        marketErr.value = ''
+      } else {
+        marketErr.value = e.message || String(e)
+      }
       market.value = []
     } finally {
       marketLoading.value = false
     }
+  }
+
+  // 拉闸门状态(进入页面时调用; 已解锁则不显示口令框)
+  async function loadGate() {
+    try {
+      const d = await api.storeGateStatus()
+      gateEnabled.value = !!(d && d.enabled)
+      gateLocked.value = !!(d && d.locked)
+    } catch (e) {
+      gateEnabled.value = false
+      gateLocked.value = false
+    }
+  }
+
+  // 提交口令; 成功后自动拉清单
+  async function unlock(password) {
+    gateBusy.value = true
+    gateErr.value = ''
+    try {
+      await api.storeGateUnlock(password)
+      gateLocked.value = false
+      await loadMarket()
+      return true
+    } catch (e) {
+      gateErr.value = (e && e.message) || '口令错误'
+      return false
+    } finally {
+      gateBusy.value = false
+    }
+  }
+
+  // 主动上锁(下次要用再输口令)
+  async function lockGate() {
+    try {
+      await api.storeGateLock()
+    } catch (e) {
+      /* 忽略: 即便失败, 前端也按已上锁显示 */
+    }
+    gateLocked.value = true
+    market.value = []
+    marketErr.value = ''
   }
 
   async function loadHealth() {
@@ -163,6 +218,7 @@ export function usePluginHub() {
   }
 
   onMounted(() => {
+    loadGate()
     refreshAll()
     loadTasks().then(() => {
       if (activeTasks.value.length) startTaskPoll()
@@ -177,8 +233,9 @@ export function usePluginHub() {
   return {
     installed, market, marketSource, health, tasks, activeTasks,
     loading, marketLoading, err, marketErr, q, busy, toast,
+    gateLocked, gateEnabled, gateBusy, gateErr,
     filteredInstalled, filteredMarket, onlineCount,
     hasUpdate, incompatible, flash,
-    refresh, refreshAll, loadMarket, install, update, remove,
+    refresh, refreshAll, loadMarket, loadGate, unlock, lockGate, install, update, remove,
   }
 }

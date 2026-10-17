@@ -6,12 +6,83 @@ import (
 	"net/http"
 	"strings"
 
+	"raincough/internal/auth"
 	"raincough/internal/config"
 	"raincough/internal/core"
 )
 
 // 全局插件市场(main 中初始化)。
 var globalStore *core.Store
+
+// globalGate 插件库口令闸门(插件库将改为公开仓库, 用写死口令保护插件内容)。
+// 为 nil 表示闸门关闭(RC_STORE_GATE=off), 所有接口直接放行。
+var globalGate *auth.StoreGate
+
+// gateLocked 返回 true 表示该请求未通过闸门 —— 已经写好 403 响应, 调用方直接 return。
+// note: 这是"面板内可见性"的锁, 防不住知道 GitHub 地址的人直接 clone(见 gate.go 注释)。
+func gateLocked(w http.ResponseWriter, r *http.Request) bool {
+	if globalGate == nil {
+		return false
+	}
+	if globalGate.Unlocked(r) {
+		return false
+	}
+	writeJSON(w, http.StatusForbidden, map[string]interface{}{
+		"error":         "插件库已上锁: 需要输入口令",
+		"need_password": true,
+	})
+	return true
+}
+
+// handleStoreGate GET /api/store/gate  +  POST /api/store/gate/unlock  +  POST /api/store/gate/lock
+func (s *server) handleStoreGate(w http.ResponseWriter, r *http.Request) {
+	sub := strings.TrimPrefix(r.URL.Path, "/api/store/gate")
+	sub = strings.Trim(sub, "/")
+
+	// 闸门关闭时: 一律视为已解锁, 前端不显示解锁面板
+	if globalGate == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"locked": false, "enabled": false})
+		return
+	}
+
+	switch {
+	case sub == "" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"locked":  !globalGate.Unlocked(r),
+			"enabled": true,
+		})
+
+	case sub == "unlock" && r.Method == http.MethodPost:
+		var b struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
+			return
+		}
+		remaining, err := globalGate.Unlock(r, w, b.Password)
+		if err != nil {
+			log.Printf("[gate] 口令失败 from %s: %v", r.RemoteAddr, err)
+			code := http.StatusUnauthorized
+			if remaining < 0 {
+				code = http.StatusTooManyRequests
+			}
+			writeJSON(w, code, map[string]interface{}{
+				"error": err.Error(), "locked": true, "remaining": remaining,
+			})
+			return
+		}
+		log.Printf("[gate] 插件库已解锁 from %s", r.RemoteAddr)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "locked": false})
+
+	case sub == "lock" && r.Method == http.MethodPost:
+		globalGate.Lock(w)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "locked": true})
+
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unknown"})
+	}
+}
 
 // handleStoreSettings GET/POST /api/store/settings
 func (s *server) handleStoreSettings(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +143,9 @@ func (s *server) handleStorePing(w http.ResponseWriter, r *http.Request) {
 // 附带 source(github|local) 与 has_token: local 说明仓库清单拉取失败已回退到
 // 本机扫描, 前端据此明确提示"当前仅显示已装插件、无法安装新插件"。
 func (s *server) handleStoreRegistry(w http.ResponseWriter, r *http.Request) {
+	if gateLocked(w, r) {
+		return
+	}
 	plugins, source, err := globalStore.RegistryWithSource()
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]interface{}{"error": err.Error()})
@@ -92,6 +166,9 @@ func (s *server) handleStoreChangelog(w http.ResponseWriter, r *http.Request) {
 	}
 	if globalStore == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "环境未就绪"})
+		return
+	}
+	if gateLocked(w, r) {
 		return
 	}
 	cl, err := globalStore.Changelog()
@@ -118,6 +195,9 @@ func (s *server) handleStorePluginInstall(w http.ResponseWriter, r *http.Request
 	}
 	if b.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
+		return
+	}
+	if gateLocked(w, r) {
 		return
 	}
 	status, err := globalStore.InstallPlugin(b.Name, globalTasks)
@@ -161,6 +241,9 @@ func (s *server) handleStorePluginUpdate(w http.ResponseWriter, r *http.Request)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "name 必填"})
+		return
+	}
+	if gateLocked(w, r) {
 		return
 	}
 	status, err := globalStore.InstallPlugin(b.Name, globalTasks)

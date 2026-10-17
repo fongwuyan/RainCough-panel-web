@@ -8,12 +8,15 @@ const hub = usePluginHub()
 const {
   installed, market, marketSource, health, activeTasks,
   loading, marketLoading, err, marketErr, q, busy, toast,
+  gateLocked, gateEnabled, gateBusy, gateErr,
   filteredInstalled, filteredMarket, onlineCount,
   hasUpdate, incompatible, flash,
-  refreshAll, loadMarket, install, update, remove,
+  refreshAll, loadMarket, unlock, lockGate, install, update, remove,
 } = hub
 
 const tab = ref('installed') // installed | market
+const gatePW = ref('')
+const gateInput = ref(null)
 
 const summary = computed(() => {
   const total = installed.value.length
@@ -32,8 +35,22 @@ async function doRemove(p) {
 
 async function switchTab(t) {
   tab.value = t
-  if (t === 'market' && !market.value.length && !marketLoading.value) {
+  if (t === 'market' && !market.value.length && !marketLoading.value && !gateLocked.value) {
     await loadMarket()
+  }
+  if (t === 'market' && gateLocked.value) {
+    setTimeout(() => { try { gateInput.value && gateInput.value.focus() } catch (e) {} }, 60)
+  }
+}
+
+async function submitGate() {
+  if (gateBusy.value || !gatePW.value) return
+  const okUnlocked = await unlock(gatePW.value)
+  if (okUnlocked) {
+    gatePW.value = ''
+  } else {
+    gatePW.value = ''
+    setTimeout(() => { try { gateInput.value && gateInput.value.focus() } catch (e) {} }, 0)
   }
 }
 </script>
@@ -108,56 +125,92 @@ async function switchTab(t) {
 
     <!-- 市场 -->
     <div v-else class="ph-body">
-      <div class="ph-source">
-        <span v-if="marketSource === 'local'" class="ph-tag warn">本地清单（GitHub 不可达）</span>
-        <span v-else-if="marketSource" class="ph-tag">来源：GitHub</span>
-        <span class="faint">仓库地址可在「设置 → 仓库配置」修改</span>
-      </div>
-
-      <div v-if="marketErr" class="error">{{ marketErr }}</div>
-      <div v-else-if="marketLoading" class="hint ph-empty">正在拉取市场清单…</div>
-      <div v-else-if="!filteredMarket.length" class="ph-empty">
-        <div class="ph-empty-title">{{ q ? '没有匹配的插件' : '市场里没有插件' }}</div>
-        <div class="ph-empty-sub" v-if="marketSource === 'local'">
-          GitHub 不可达，已回退到本机扫描，但本机也没有已装插件
+      <!-- 插件库上锁: 输口令才能看清单/安装 -->
+      <div v-if="gateLocked" class="ph-gate">
+        <div class="ph-gate-lock">🔒</div>
+        <div class="ph-gate-title">插件库已上锁</div>
+        <div class="ph-gate-sub">
+          插件库为公开仓库，插件内容受口令保护。<br />
+          输入口令后本设备 30 天内免输。
         </div>
-        <div class="ph-empty-sub" v-else>检查「设置 → 仓库配置」里的仓库地址与令牌</div>
+        <form class="ph-gate-form" @submit.prevent="submitGate">
+          <input
+            ref="gateInput"
+            v-model="gatePW"
+            type="password"
+            class="input ph-gate-input"
+            :class="{ 'has-err': !!gateErr }"
+            placeholder="插件库口令"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            :disabled="gateBusy"
+            @input="gateErr = ''"
+          />
+          <button class="btn btn-sm btn-primary" type="submit" :disabled="gateBusy || !gatePW">
+            {{ gateBusy ? '验证中…' : '解锁' }}
+          </button>
+        </form>
+        <div v-if="gateErr" class="ph-gate-err">{{ gateErr }}</div>
+        <div v-else class="ph-gate-hint">连续输错 5 次会锁定 60 秒</div>
       </div>
 
-      <div v-else class="ph-list">
-        <div v-for="p in filteredMarket" :key="p.name" class="ph-row">
-          <div class="ph-main">
-            <div class="ph-row-title">
-              <span class="ph-name">{{ p.label || p.name }}</span>
-              <span class="ph-ver mono">v{{ p.version || '—' }}</span>
-              <span v-if="p.installed" class="ph-tag ok">已装 {{ p.installed_version || '' }}</span>
-              <span v-if="hasUpdate(p)" class="ph-tag warn">可更新</span>
+      <template v-else>
+        <div class="ph-source">
+          <span v-if="marketSource === 'local'" class="ph-tag warn">本地清单（GitHub 不可达）</span>
+          <span v-else-if="marketSource" class="ph-tag">来源：GitHub</span>
+          <span class="faint">仓库地址可在「设置 → 仓库配置」修改</span>
+          <button v-if="gateEnabled" class="btn btn-xs ph-relock" title="清除解锁状态" @click="lockGate">
+            重新上锁
+          </button>
+        </div>
+
+        <div v-if="marketErr" class="error">{{ marketErr }}</div>
+        <div v-else-if="marketLoading" class="hint ph-empty">正在拉取市场清单…</div>
+        <div v-else-if="!filteredMarket.length" class="ph-empty">
+          <div class="ph-empty-title">{{ q ? '没有匹配的插件' : '市场里没有插件' }}</div>
+          <div class="ph-empty-sub" v-if="marketSource === 'local'">
+            GitHub 不可达，已回退到本机扫描，但本机也没有已装插件
+          </div>
+          <div class="ph-empty-sub" v-else>检查「设置 → 仓库配置」里的仓库地址与令牌</div>
+        </div>
+
+        <div v-else class="ph-list">
+          <div v-for="p in filteredMarket" :key="p.name" class="ph-row">
+            <div class="ph-main">
+              <div class="ph-row-title">
+                <span class="ph-name">{{ p.label || p.name }}</span>
+                <span class="ph-ver mono">v{{ p.version || '—' }}</span>
+                <span v-if="p.installed" class="ph-tag ok">已装 {{ p.installed_version || '' }}</span>
+                <span v-if="hasUpdate(p)" class="ph-tag warn">可更新</span>
+              </div>
+              <div class="ph-desc">{{ p.description || '（无描述）' }}</div>
+              <div v-if="p.author" class="ph-author">作者 {{ p.author }}</div>
             </div>
-            <div class="ph-desc">{{ p.description || '（无描述）' }}</div>
-            <div v-if="p.author" class="ph-author">作者 {{ p.author }}</div>
-          </div>
-          <div class="ph-row-actions">
-            <button
-              v-if="!p.installed"
-              class="btn btn-sm btn-primary"
-              :disabled="busy === p.name"
-              @click="install(p.name)"
-            >
-              {{ busy === p.name ? '提交中…' : '安装' }}
-            </button>
-            <button
-              v-else-if="hasUpdate(p)"
-              class="btn btn-sm btn-primary"
-              :disabled="busy === p.name"
-              @click="update(p.name)"
-            >
-              {{ busy === p.name ? '提交中…' : '更新' }}
-            </button>
-            <button v-else class="btn btn-sm" disabled>已是最新</button>
-            <button v-if="p.installed" class="btn btn-sm btn-ghost" @click="open(p.name)">管理</button>
+            <div class="ph-row-actions">
+              <button
+                v-if="!p.installed"
+                class="btn btn-sm btn-primary"
+                :disabled="busy === p.name"
+                @click="install(p.name)"
+              >
+                {{ busy === p.name ? '提交中…' : '安装' }}
+              </button>
+              <button
+                v-else-if="hasUpdate(p)"
+                class="btn btn-sm btn-primary"
+                :disabled="busy === p.name"
+                @click="update(p.name)"
+              >
+                {{ busy === p.name ? '提交中…' : '更新' }}
+              </button>
+              <button v-else class="btn btn-sm" disabled>已是最新</button>
+              <button v-if="p.installed" class="btn btn-sm btn-ghost" @click="open(p.name)">管理</button>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <div v-if="toast" class="ph-toast">{{ toast }}</div>
@@ -229,4 +282,25 @@ async function switchTab(t) {
   position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%);
   background: var(--text); color: var(--bg); padding: 8px 16px; font-size: 12px; z-index: 90;
 }
+
+/* ---- 插件库上锁 ---- */
+.ph-gate {
+  max-width: 420px; margin: 48px auto 0; padding: 28px 24px;
+  border: 1px solid var(--border); background: var(--surface);
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+}
+.ph-gate-lock { font-size: 26px; line-height: 1; margin-bottom: 12px; opacity: 0.75; }
+.ph-gate-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.ph-gate-sub {
+  font-size: 11.5px; color: var(--text-muted); line-height: 1.6;
+  margin: 8px 0 18px;
+}
+.ph-gate-form { display: flex; gap: 8px; width: 100%; }
+.ph-gate-input { flex: 1; height: 32px; font-size: 13px; }
+.ph-gate-input.has-err { border-color: var(--danger); }
+.ph-gate-err { font-size: 11.5px; color: var(--danger); margin-top: 10px; }
+.ph-gate-hint { font-size: 11px; color: var(--text-faint); margin-top: 10px; }
+
+.ph-relock { margin-left: auto; }
+.btn-xs { padding: 1px 7px; font-size: 10.5px; height: 20px; }
 </style>
