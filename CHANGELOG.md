@@ -4,6 +4,22 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## 未发布 — 语言兼容判断修正 + 版本比较修正
+- **修「JMComic 仍提示不兼容 v6」**：前端硬编码 `lang !== 'go' → 不兼容 v6`，
+  这是 v6 早期"只支持 Go 二进制"时代的判断，后端早已支持 py/php/java/node，前端没跟着改
+  - 新增 `GET /api/plugins/runtime`：返回支持的语言、各解释器是否就绪、缺什么怎么装
+  - 前端改为**读后端能力**判断，不再自建白名单（两侧各写一份必然脱节）
+  - 语言标签改为中性显示（`python` / `php` / `java` …），只有真的不支持才标红
+  - 新增"缺 XX 环境"提示：语言受支持但解释器没装时给出具体安装建议
+  - `/api/store/registry` 与本地扫描都会带上 `lang`（registry 没写时从已装 plugin.json 补）
+  - 兜底：runtime 接口不可用时退到一个内置列表，不会因接口失败而误禁
+- **修「可更新」误报**：`hasUpdate` 只判断"版本不相等"，已装版本比市场高时也提示可更新，
+  点下去等于**降级**（实测：远端 registry 1.0.0 / 本地已装 2.0.0）
+  - 改为语义化版本比较，仅"市场版本 > 已装版本"才提示
+  - 新增「本地版本更高」标签与「无需更新」按钮文案（悬停显示两边版本）
+- 测试：`TestProbe_coversAllSupported` 守"Supported() 与 Probe() 不脱节"；
+  新增探针 `tools/plugin-lang-probe.mjs`（14 项）
+
 ## 未发布 — 卸载残留修复 + JMComic 适配优化
 - **修「无法移除插件」**（实测 echopi）：目录删了但注册表与 supervisor 记录没清，
   界面上插件仍在，看起来像移除失败。根因是三处都只增不删：

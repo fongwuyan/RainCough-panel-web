@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"raincough/internal/config"
 	"raincough/internal/core"
 	"raincough/internal/legacy"
+	"raincough/internal/pluginrt"
 	"raincough/internal/pluginx"
 	"raincough/internal/shared"
 	"raincough/internal/supervisor"
@@ -366,6 +368,9 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	// ---- 插件 ----
 	mux.HandleFunc("/api/plugins", s.handlePlugins) // 列表
+	// 运行时能力(支持哪些语言 / 各解释器是否就绪)。前端据此判断"语言是否受支持",
+	// 不再自己硬编码白名单 —— 两处各写一份必然脱节(曾导致 JMComic 被误标"不兼容 v6")。
+	mux.HandleFunc("/api/plugins/runtime", s.handlePluginsRuntime)
 	mux.HandleFunc("/api/plugins/", s.handlePlugin) // 网关+资产+删除
 
 	// ---- 接口库 v4(自注册/接口总线/健康) ----
@@ -392,6 +397,35 @@ func (s *server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, globalPX.ListPlugins())
 }
+
+// handlePluginsRuntime GET /api/plugins/runtime
+//
+// 返回面板支持的插件后端语言与各解释器就绪状态。
+// 前端用它判断"某插件的语言是否受支持", 而不是自己维护一份白名单 ——
+// 两处各写一份判断必然脱节(2026-10-17: 前端写着 lang!=='go' 即不兼容,
+// 后端其实已支持 py/php/java/node, 导致 JMComic 被误标"不兼容 v6")。
+//
+// 结果缓存 30s: 探测要遍历 PATH, 不必每个页面都跑; 但装了解释器后能较快反映。
+func (s *server) handlePluginsRuntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "仅支持 GET"})
+		return
+	}
+	pluginsRuntimeMu.Lock()
+	if pluginsRuntimeAt.IsZero() || time.Since(pluginsRuntimeAt) > 30*time.Second {
+		pluginsRuntimeCache = pluginrt.Probe()
+		pluginsRuntimeAt = time.Now()
+	}
+	info := pluginsRuntimeCache
+	pluginsRuntimeMu.Unlock()
+	writeJSON(w, http.StatusOK, info)
+}
+
+var (
+	pluginsRuntimeMu    sync.Mutex
+	pluginsRuntimeCache pluginrt.RuntimeInfo
+	pluginsRuntimeAt    time.Time
+)
 
 func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/plugins/")

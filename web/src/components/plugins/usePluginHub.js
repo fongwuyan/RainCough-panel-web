@@ -51,14 +51,83 @@ export function usePluginHub() {
 
   const onlineCount = computed(() => installed.value.filter((p) => p.alive).length)
 
-  // 市场里有新版: 已装且版本号不同
-  function hasUpdate(p) {
-    return !!(p.installed && p.installed_version && p.version && p.installed_version !== p.version)
+  // hasUpdate 只有"市场版本 > 已装版本"才算可更新。
+  //
+  // ★ 不能只判 `installed_version !== version`: 已装版本比市场高时(本地开发版、
+  //   预发布、或市场清单还没更新)也会被标成"可更新", 用户一点就等于**降级**。
+  //   实测: 远端 registry 1.0.0 / 本地已装 2.0.0, 界面提示"可更新"。
+  function parseVer(v) {
+    return String(v || '')
+      .replace(/^v/i, '')
+      .split(/[-+]/)[0] // 丢掉 -beta.1 之类预发布标记
+      .split('.')
+      .map((x) => parseInt(x, 10) || 0)
   }
 
-  // v6 只认 Go 插件; 旧 Python 插件标记为不兼容(装上也起不来)
+  // cmpVer 返回 1/0/-1(兼容 1.2 与 1.2.0 这类长度不齐的写法)
+  function cmpVer(a, b) {
+    const pa = parseVer(a)
+    const pb = parseVer(b)
+    const n = Math.max(pa.length, pb.length)
+    for (let i = 0; i < n; i++) {
+      const x = pa[i] || 0
+      const y = pb[i] || 0
+      if (x > y) return 1
+      if (x < y) return -1
+    }
+    return 0
+  }
+
+  function hasUpdate(p) {
+    if (!p || !p.installed) return false
+    if (!p.installed_version || !p.version) return false
+    return cmpVer(p.version, p.installed_version) > 0
+  }
+
+  // localNewer 本地已装版本比市场更高(本地开发版/预发布/市场清单未更新)。
+  // 这种情况不该提示"可更新", 否则点了会降级。
+  function localNewer(p) {
+    if (!p || !p.installed) return false
+    if (!p.installed_version || !p.version) return false
+    return cmpVer(p.installed_version, p.version) > 0
+  }
+
+  // 后端语言支持判断 —— 以 GET /api/plugins/runtime 为唯一事实来源。
+  //
+  // ★ 历史教训: 这里曾硬编码 `lang !== 'go' → 不兼容 v6`。v6 早期确实只支持 Go 静态
+  // 二进制, 但后来 internal/pluginrt 支持了 py/php/java/node/bash, 前端这份判断没跟着改,
+  // 结果 JMComic(Python)明明能跑, 却一直顶着"不兼容 v6"的红标误导用户。
+  // 现在改为读后端探测结果; 下面的兜底列表只用于接口暂不可用时的降级显示。
+  const runtimeInfo = ref(null)
+  const LANG_FALLBACK = ['go', 'binary', 'python', 'python3', 'php', 'java', 'node', 'nodejs', 'bash', 'sh']
+
+  async function loadRuntime() {
+    try {
+      runtimeInfo.value = await api.pluginsRuntime()
+    } catch (e) {
+      runtimeInfo.value = null // 退到兜底列表
+    }
+  }
+
+  const supportedLangs = computed(() => {
+    const d = runtimeInfo.value
+    if (d && Array.isArray(d.languages) && d.languages.length) return d.languages
+    return LANG_FALLBACK
+  })
+
+  // langUnavailable: 语言受支持但环境缺解释器(如声明 python 但没装)
+  function langUnavailable(p) {
+    const d = runtimeInfo.value
+    if (!d || !p || !p.lang) return false
+    const lang = String(p.lang).toLowerCase()
+    const detail = (d.details || []).find((x) => String(x.lang).toLowerCase() === lang)
+    return !!(detail && detail.supported && !detail.available)
+  }
+
+  // incompatible 语言根本不在支持列表里(未知语言)
   function incompatible(p) {
-    return !!(p.lang && p.lang !== 'go')
+    if (!p || !p.lang) return false // 未声明语言: 按二进制处理, 不拦
+    return !supportedLangs.value.map((s) => String(s).toLowerCase()).includes(String(p.lang).toLowerCase())
   }
 
   const activeTasks = computed(() =>
@@ -286,6 +355,7 @@ export function usePluginHub() {
 
   onMounted(() => {
     loadGate()
+    loadRuntime() // 先拉运行时能力, incompatible() 才有依据
     refreshAll()
     loadTasks().then(() => {
       if (activeTasks.value.length) startTaskPoll()
@@ -303,7 +373,8 @@ export function usePluginHub() {
     gateLocked, gateEnabled, gateBusy, gateErr,
     uploadOpen, uploadBusy, uploadPct, uploadErr, uploadResult, uploadFile,
     filteredInstalled, filteredMarket, onlineCount,
-    hasUpdate, incompatible, flash,
+    runtimeInfo, langUnavailable,
+    hasUpdate, localNewer, incompatible, flash,
     refresh, refreshAll, loadMarket, loadGate, unlock, lockGate,
     openUpload, closeUpload, installFromFile, pickExtOk,
     install, update, remove,

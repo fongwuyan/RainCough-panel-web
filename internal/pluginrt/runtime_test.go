@@ -312,3 +312,66 @@ func TestIsKnownInterpreter(t *testing.T) {
 		}
 	}
 }
+
+// TestProbe_coversAllSupported 探测结果必须覆盖 Supported() 里每一种语言。
+// ★ 这条测试守的是"前后端语言判断不会脱节" ——
+// 曾出现前端硬编码 `lang!=='go' 即不兼容`, 而后端早已支持 py/php/java/node,
+// 导致 JMComic 明明能跑却被标"不兼容 v6"。现在前端读 Probe() 的结果,
+// 所以 Supported() 里的语言必须一条不漏地出现在 Probe().Languages 里。
+func TestProbe_coversAllSupported(t *testing.T) {
+	info := Probe()
+	got := map[string]bool{}
+	for _, l := range info.Languages {
+		got[l] = true
+	}
+	for _, l := range Supported() {
+		if !got[string(l)] {
+			t.Fatalf("Probe().Languages 缺少 %q(前端会误判不受支持); 实得 %v", l, info.Languages)
+		}
+	}
+	// 归一化别名也要覆盖, 否则插件写 "python3"/"nodejs"/"sh" 时前端会误判
+	for _, alias := range []string{"python3", "nodejs", "sh"} {
+		if !got[alias] {
+			t.Fatalf("Probe().Languages 缺少别名 %q; 实得 %v", alias, info.Languages)
+		}
+	}
+	// Details 条数与 Supported() 对齐
+	if len(info.Details) != len(Supported()) {
+		t.Fatalf("Details 有 %d 条, Supported() 有 %d 个", len(info.Details), len(Supported()))
+	}
+}
+
+// TestIsLangSupported 与前端使用的判断保持一致
+func TestIsLangSupported(t *testing.T) {
+	yes := []string{"", "go", "golang", "binary", "python", "python3", "py",
+		"php", "java", "jar", "node", "nodejs", "bash", "sh"}
+	for _, l := range yes {
+		if !IsLangSupported(l) {
+			t.Errorf("%q 应受支持", l)
+		}
+	}
+	no := []string{"cobol", "rust", "csharp", "brainfuck"}
+	for _, l := range no {
+		if IsLangSupported(l) {
+			t.Errorf("%q 不应受支持", l)
+		}
+	}
+}
+
+// TestProbe_missingHasHint 缺解释器时必须带安装建议(前端 tooltip 用)
+func TestProbe_missingHasHint(t *testing.T) {
+	info := Probe()
+	for _, d := range info.Details {
+		if d.Supported && d.NeedsInterpreter && !d.Available {
+			if d.Hint == "" {
+				t.Fatalf("%s 不可用但没给 hint", d.Lang)
+			}
+			if d.Interpreter != "" {
+				t.Fatalf("%s 不可用却报告了解释器 %q", d.Lang, d.Interpreter)
+			}
+		}
+		if d.Available && d.NeedsInterpreter && d.Interpreter == "" {
+			t.Fatalf("%s 可用却没给解释器路径", d.Lang)
+		}
+	}
+}

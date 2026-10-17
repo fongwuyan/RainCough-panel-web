@@ -11,7 +11,8 @@ const {
   gateLocked, gateEnabled, gateBusy, gateErr,
   uploadOpen, uploadBusy, uploadPct, uploadErr, uploadResult, uploadFile,
   filteredInstalled, filteredMarket, onlineCount,
-  hasUpdate, incompatible, flash,
+  runtimeInfo, langUnavailable,
+  hasUpdate, localNewer, incompatible, flash,
   refreshAll, loadMarket, unlock, lockGate,
   openUpload, closeUpload, installFromFile,
   install, update, remove,
@@ -41,6 +42,13 @@ function onPick(e) {
 
 async function doUpload(f) {
   await installFromFile(f)
+}
+
+// langHint 取后端给的缺失提示(没有就给个通用的)
+function langHint(p) {
+  const d = runtimeInfo.value
+  const detail = d && (d.details || []).find((x) => String(x.lang).toLowerCase() === String(p.lang).toLowerCase())
+  return (detail && detail.hint) || ('当前环境缺少 ' + p.lang + ' 解释器')
 }
 
 const summary = computed(() => {
@@ -141,7 +149,17 @@ async function submitGate() {
             <div class="ph-row-title">
               <span class="ph-name">{{ p.label || p.name }}</span>
               <span class="ph-ver mono">v{{ p.version || '—' }}</span>
-              <span v-if="incompatible(p)" class="ph-tag danger" title="v6 只支持 Go 插件">不兼容 v6</span>
+              <span v-if="p.lang" class="ph-tag mono">{{ p.lang }}</span>
+              <span
+                v-if="incompatible(p)"
+                class="ph-tag danger"
+                :title="'后端语言 ' + p.lang + ' 不在当前支持列表内'"
+              >语言不受支持</span>
+              <span
+                v-else-if="langUnavailable(p)"
+                class="ph-tag warn"
+                :title="langHint(p)"
+              >缺 {{ p.lang }} 环境</span>
             </div>
             <div class="ph-desc">{{ p.description || '（无描述）' }}</div>
           </div>
@@ -211,8 +229,15 @@ async function submitGate() {
               <div class="ph-row-title">
                 <span class="ph-name">{{ p.label || p.name }}</span>
                 <span class="ph-ver mono">v{{ p.version || '—' }}</span>
+                <span v-if="p.lang" class="ph-tag mono">{{ p.lang }}</span>
                 <span v-if="p.installed" class="ph-tag ok">已装 {{ p.installed_version || '' }}</span>
                 <span v-if="hasUpdate(p)" class="ph-tag warn">可更新</span>
+                <span
+                  v-else-if="localNewer(p)"
+                  class="ph-tag"
+                  :title="'本地已装 v' + p.installed_version + '，比市场清单里的 v' + p.version + ' 更新'"
+                >本地版本更高</span>
+                <span v-if="incompatible(p)" class="ph-tag danger" :title="'后端语言 ' + p.lang + ' 不受支持'">语言不受支持</span>
               </div>
               <div class="ph-desc">{{ p.description || '（无描述）' }}</div>
               <div v-if="p.author" class="ph-author">作者 {{ p.author }}</div>
@@ -234,7 +259,7 @@ async function submitGate() {
               >
                 {{ busy === p.name ? '提交中…' : '更新' }}
               </button>
-              <button v-else class="btn btn-sm" disabled>已是最新</button>
+              <button v-else class="btn btn-sm" disabled>{{ localNewer(p) ? '无需更新' : '已是最新' }}</button>
               <button v-if="p.installed" class="btn btn-sm btn-ghost" @click="open(p.name)">管理</button>
             </div>
           </div>

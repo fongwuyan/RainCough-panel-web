@@ -219,6 +219,8 @@ export const api = {
   storeGateUnlock: (password) => req('POST', '/api/store/gate/unlock', { password }),
   storeGateLock: () => req('POST', '/api/store/gate/lock', {}),
   storeRegistry: () => req('GET', '/api/store/registry'),
+  // 运行时能力: 支持哪些插件语言、各解释器是否就绪(前端判断"不兼容"的依据)
+  pluginsRuntime: () => req('GET', '/api/plugins/runtime'),
   // 面板内直接安装: 上传本地插件包(zip/tar.gz), 与"从仓库安装"是两套逻辑
   storePluginUpload: (fd, onProgress) => reqUpload('/api/store/plugin/upload', fd, onProgress),
   storePluginInstall: (name) => req('POST', '/api/store/plugin/install', { name }),

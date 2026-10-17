@@ -40,6 +40,8 @@ type StorePlugin struct {
 	Description string `json:"description"`
 	Installed   bool   `json:"installed"`
 	InstalledV  string `json:"installed_version,omitempty"`
+	// Lang 后端语言(python/php/java/go/node/…)。前端用于"语言是否受支持"提示。
+	Lang string `json:"lang,omitempty"`
 }
 
 // Store 插件市场: GitHub 私有仓库 registry 拉取/安装/更新/卸载。
@@ -159,15 +161,25 @@ func (s *Store) RegistryWithSource() ([]StorePlugin, string, error) {
 							Author      string `json:"author"`
 							Path        string `json:"path"`
 							Description string `json:"description"`
+							// Lang 后端语言(registry.json 可选字段)。
+							// 前端据此判断"语言是否受支持"; 缺省时前端不拦(按二进制处理)。
+							Lang string `json:"lang"`
 						} `json:"plugins"`
 					}
 					if err := json.Unmarshal(raw, &reg); err == nil {
 						out := []StorePlugin{}
 						for _, p := range reg.Plugins {
 							installed, ver := s.installedVersion(p.Name)
+							// registry 没写 lang 时, 从已装插件的 plugin.json 里补一个
+							// (已装的才知道真实语言; 未装的只能等装完)
+							lang := p.Lang
+							if lang == "" && installed {
+								lang = s.installedLang(p.Name)
+							}
 							out = append(out, StorePlugin{
 								Name: p.Name, Label: p.Label, Version: p.Version,
 								Author: p.Author, Path: p.Path, Description: p.Description,
+								Lang:      lang,
 								Installed: installed, InstalledV: ver,
 							})
 						}
@@ -224,6 +236,7 @@ func (s *Store) localRegistry() ([]StorePlugin, error) {
 		out = append(out, StorePlugin{
 			Name: name, Label: label, Version: orDefault(version, ver),
 			Author: author, Path: dir, Description: desc,
+			Lang:      s.installedLang(name),
 			Installed: installed, InstalledV: ver,
 		})
 	}
@@ -414,6 +427,60 @@ func (s *Store) ghDownload(url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// installedLang 读已装插件的后端语言(plugin.json → backend.lang)。
+// 读不到返回空串(前端按"未知"处理, 不拦)。
+func (s *Store) installedLang(name string) string {
+	raw, err := os.ReadFile(filepath.Join(s.pluginsDir, name, "plugin.json"))
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Backend struct {
+			Lang string   `json:"lang"`
+			Exec []string `json:"exec"`
+		} `json:"backend"`
+	}
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	if m.Backend.Lang != "" {
+		return m.Backend.Lang
+	}
+	// 没声明 lang: 从 exec[0] 猜一个(与后端 pluginrt 的推断保持一致)
+	if len(m.Backend.Exec) > 0 {
+		return guessLangFromExec(m.Backend.Exec[0])
+	}
+	return ""
+}
+
+// guessLangFromExec 从可执行文件名猜语言(只覆盖常见情况, 猜不出返回空)
+func guessLangFromExec(s string) string {
+	b := strings.ToLower(filepath.Base(s))
+	switch {
+	case strings.HasPrefix(b, "python"):
+		return "python"
+	case strings.HasPrefix(b, "php"):
+		return "php"
+	case b == "java", b == "javaw":
+		return "java"
+	case strings.HasPrefix(b, "node"):
+		return "node"
+	case b == "sh", b == "bash", b == "dash", b == "zsh":
+		return "bash"
+	case strings.HasSuffix(b, ".py"):
+		return "python"
+	case strings.HasSuffix(b, ".php"):
+		return "php"
+	case strings.HasSuffix(b, ".jar"):
+		return "java"
+	case strings.HasSuffix(b, ".js"):
+		return "node"
+	case strings.HasSuffix(b, ".sh"):
+		return "bash"
+	}
+	return ""
 }
 
 // installedVersion 检查插件是否已安装, 并返回 plugin.json 里的真实版本。
