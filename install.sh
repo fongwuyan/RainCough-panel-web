@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# RainCough 主面板 (Go) 一键安装器 — 7 步流程
+# RainCough 主面板 (Go, v6) 一键安装器 — 5 步流程
 #
 # 全新 Linux 主机(x86_64 + systemd)一条命令安装, 机器上无需预先有任何 sh 文件:
 #
@@ -9,8 +9,8 @@
 # (gh-proxy 不可用时可去掉前缀直连 raw.githubusercontent.com;
 #  资产下载默认走 gh-proxy 镜像, 可用 RC_MIRROR=https://github.com 覆盖)
 #
-# 流程: 1 yes/no 确认 -> 2 环境检查 -> 3 下载缺失环境包并安装 -> 4 下载面板主体
-#       -> 5 输入信息(含可选的"把当前 DHCP 地址固定为静态") -> 6 安装 + 固定静态 IP -> 7 完成
+# 流程: 1 确认 -> 2 环境检查 -> 3 下载面板主体 -> 4 安装(解压+建目录+写 systemd)
+#       -> 5 验证 HTTP 200 + 完成
 #
 # 固定静态 IP(一步到位, 避免面板地址漂移): 安装时读默认路由网卡的当前地址/网关/上游 DNS,
 #   原样写成静态配置(NetworkManager / netplan / ifupdown 自动识别, 只动这块网卡),
@@ -19,10 +19,14 @@
 #   相关开关: RC_NET_STATIC=yes|no|dry(默认问一次, 回车=yes) RC_NET_FORCE=1(已是静态也强写)
 #             RC_NET_DRYRUN=1(只看将写什么) RC_ONLY_NET=1(只跑这一步)
 #
-# 范围: 只装面板主体 = 主程序 + 内置功能(工作台/文件管理/终端/系统扩展/插件/设置/开发文档)。
-#       不含插件, 也不含系统扩展: 插件在面板内【插件】页安装;
-#       系统扩展(媒体中心/任务队列/调度器等)在面板内【系统扩展】页安装, 扩展包存放于主面板库
-#       extensions/ 目录。
+# 范围: 只装面板主体 = 单二进制 raincough + public/(SPA) + 内置功能
+#       (工作台/文件管理/终端/系统扩展/插件/设置/开发文档)。
+#       不含插件: 插件在面板内【插件】页安装; 插件依赖由各插件自行处理。
+#
+# 与 v3 (Python/Flask) 的区别:
+#   · 不再装 python3 / pip / 离线 wheels / p7zip-full / ffmpeg — v6 是零依赖 Go 二进制
+#   · 不再有 env-offline Release / CORE_PIP_PKGS
+#   · 单 systemd 单元(raincough.service), 端口默认 3900 起找空闲
 # ============================================================================
 set -euo pipefail
 
@@ -30,12 +34,8 @@ REPO="fongwuyan/RainCough-panel-web"
 # 版本: RC_VERSION 覆盖 > 本脚本内嵌版本(发布时写入, = 所在 tag 的版本) > latest
 # 未替换的占位符(开发树)与空值都按 latest 解析, 见下方「版本解析」。
 RC_PANEL_VERSION="${RC_VERSION:-1.0.0}"
-RELEASE_TAG="env-offline-0.1.0"   # 环境包资产另挂此 Release
-ENV_ASSET="env-offline-linux-x86_64-0.1.0.tar.gz"
 MIRROR="${RC_MIRROR:-https://gh-proxy.com/https://github.com}"
 UNIT_NAME="${RC_UNIT_NAME:-raincough.service}"   # 单元名可覆盖(测试/多实例隔离)
-# 面板核心 python 环境(与主仓 requirements.txt 保持一致; 供插件运行基座)
-CORE_PIP_PKGS="flask flask-cors curl_cffi psutil cryptography apscheduler Pillow numpy onnxruntime requests gunicorn"
 
 C_G=$'\033[32m'; C_Y=$'\033[33m'; C_C=$'\033[36m'; C_R=$'\033[31m'; C_0=$'\033[0m'
 ok()   { echo "${C_G}[OK]${C_0} $*"; }
@@ -105,7 +105,8 @@ read_tty() {
     fi
     printf '%s' "$__r"
 }
-confirm_yes() {   # 必须输入 yes 才返回 0(回车=no)    local a
+confirm_yes() {   # 必须输入 yes 才返回 0(回车=no)
+    local a
     if [ "$HAVE_TTY" = 0 ]; then
         echo "  (no tty) $1 -> no" >&2
         return 1
@@ -146,11 +147,6 @@ fetch() {         # $1 仓库相对路径 $2 输出文件; 镜像失败回退直
         warn "镜像失败, 尝试下一个源..."
     done
     return 1
-}
-pip_install() {   # $@ = 参数; 以特权系统级安装(服务以 RUN_USER 运行, 用户级 ~/.local 不可见)
-    $SUDO python3 -m pip install --no-input --disable-pip-version-check \
-        --break-system-packages "$@" 2>/dev/null \
-        || $SUDO python3 -m pip install --no-input --disable-pip-version-check "$@"
 }
 
 # ---------- 静态 IP 固定(可选): 把 DHCP 拿到的地址原样写成静态配置 ----------
@@ -393,10 +389,11 @@ fi
 
 echo
 echo "${C_C}=======================================================${C_0}"
-echo "${C_C}   RainCough 主面板 (Go) 安装向导  v${PANEL_VERSION}${C_0}"
+echo "${C_C}   RainCough 主面板 (Go, v6) 安装向导  v${PANEL_VERSION}${C_0}"
 echo "${C_C}=======================================================${C_0}"
-echo "  将安装: 面板主体 + 内置功能 + 核心 Python 环境 (不含插件与系统扩展)"
-echo "  插件在面板内【插件】页安装; 系统扩展(媒体中心/任务队列等)在【系统扩展】页安装"
+echo "  将安装: 单二进制 raincough + public/(SPA) + 内置功能"
+echo "  (工作台/文件管理/终端/系统扩展/插件/设置/开发文档)"
+echo "  插件在面板内【插件】页安装, 依赖由各插件自行处理"
 echo "  下载源: $MIRROR (失败回退 https://github.com; RC_MIRROR 可覆盖)"
 if [ "$HAVE_TTY" = 0 ]; then
     echo "${C_Y}[!!]${C_0} no interactive terminal (no tty): all prompts will use their defaults"
@@ -408,21 +405,21 @@ if [ "$TERM_UTF8" = 0 ]; then
 fi
 
 # ---------- 步骤 1: 确认(回车=开始; 无交互终端按默认继续) ----------
-if ! confirm_default "Step 1/7: start install? / 步骤 1/7: 是否开始安装?" "yes"; then
+if ! confirm_default "Step 1/5: start install? / 步骤 1/5: 是否开始安装?" "yes"; then
     echo "已取消安装 / cancelled."
     exit 0
 fi
 
 # ---------- 步骤 2: 环境检查 ----------
 echo
-info "步骤 2/7: 环境检查"
+info "步骤 2/5: 环境检查"
 [ "$(uname -s)" = "Linux" ] || fail "仅支持 Linux, 当前: $(uname -s)"
 case "$(uname -m)" in x86_64|amd64) ;; *) fail "仅支持 x86_64, 当前: $(uname -m)" ;; esac
 ok "系统 Linux x86_64"
 [ -d /run/systemd/system ] || fail "需要 systemd 环境"
 ok "systemd 可用"
 AVAIL_K=$(df -Pk . | awk 'NR==2{print $4}')
-[ "$AVAIL_K" -ge 2097152 ] || fail "磁盘可用不足 2G (当前 $((AVAIL_K/1024))M)"
+[ "$AVAIL_K" -ge 102400 ] || fail "磁盘可用不足 100M (当前 $((AVAIL_K/1024))M)"
 ok "磁盘可用 $((AVAIL_K/1024))M"
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
@@ -437,57 +434,23 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 ok "权限就绪 (root${SUDO:+ via sudo})"
 curl -fsSL -m 10 -o /dev/null https://api.github.com 2>/dev/null \
-    && ok "GitHub 连通" || warn "api.github.com 不通(将依赖镜像下载, 市场功能以后需自行解决)"
-command -v python3 >/dev/null 2>&1 || warn "python3 缺失 (步骤3 将安装)"
+    && ok "GitHub 连通" || warn "api.github.com 不通(将依赖镜像下载, 后续更新需自行解决)"
 command -v curl >/dev/null 2>&1 || fail "缺少 curl (apt install curl)"
+command -v tar >/dev/null 2>&1 || fail "缺少 tar (apt install tar)"
+command -v ss >/dev/null 2>&1 || command -v netstat >/dev/null 2>&1 \
+    || warn "缺少 ss/netstat(端口探测将退化为不可用, 仍可继续)"
 
-# ---------- 步骤 3: 下载缺失环境包并安装 ----------
+# ---------- 步骤 3: 下载面板主体 ----------
 echo
-info "步骤 3/7: 环境包检查与安装"
-NEED_APT=""
-export DEBIAN_FRONTEND=noninteractive   # 防 apt/needrestart 交互提示卡死(如 TTY 下"重启哪些服务")
-export NEEDRESTART_MODE=a
-command -v python3 >/dev/null 2>&1 || NEED_APT="python3"
-if ! python3 -m pip --version >/dev/null 2>&1; then NEED_APT="$NEED_APT python3-pip"; fi
-if [ -n "$NEED_APT" ]; then
-    info "安装系统包:$NEED_APT"
-    $SUDO apt-get update -qq
-    $SUDO apt-get install -y $NEED_APT
-    ok "系统包就绪"
-fi
-if python3 -c "import flask,flask_cors,curl_cffi,psutil,cryptography,apscheduler,PIL,numpy,onnxruntime,requests" 2>/dev/null; then
-    ok "核心 Python 环境已齐, 无需下载环境包"
-else
-    info "核心环境缺失, 下载环境包 $ENV_ASSET ..."
-    TMPD=$(mktemp -d)
-    fetch "$REPO/releases/download/$RELEASE_TAG/$ENV_ASSET" "$TMPD/env.tgz" || fail "环境包下载失败"
-    tar xzf "$TMPD/env.tgz" -C "$TMPD" || fail "环境包解压失败"
-    WHEELS=$(find "$TMPD" -type d -name wheels | head -n1)
-    [ -n "$WHEELS" ] || fail "环境包中未找到 wheels/"
-    info "离线安装核心环境 (wheels)..."
-    if pip_install --no-index --find-links "$WHEELS" $CORE_PIP_PKGS; then
-        ok "核心 Python 环境安装完成 (离线轮子)"
-    else
-        # 轮子与本机 Python 版本不匹配(如旧资产只含 cp311 而本机 3.10) → 在线兜底
-        warn "离线轮子与本机 Python 不匹配, 回退在线安装 (PyPI)..."
-        pip_install $CORE_PIP_PKGS || fail "核心环境安装失败"
-        ok "核心 Python 环境安装完成 (在线)"
-    fi
-    rm -rf "$TMPD"
-fi
-
-# ---------- 步骤 4: 下载面板主体 (不含插件) ----------
-echo
-info "步骤 4/7: 下载面板主体"
+info "步骤 3/5: 下载面板主体 ($BODY_ASSET)"
 TMPD=$(mktemp -d)
 fetch "$REPO/releases/download/$TAG/$BODY_ASSET" "$TMPD/$BODY_ASSET" || fail "面板主体下载失败"
 tar tzf "$TMPD/$BODY_ASSET" >/dev/null 2>&1 || fail "面板主体包损坏"
 ok "面板主体就绪: $BODY_ASSET ($(du -h "$TMPD/$BODY_ASSET" | cut -f1))"
 
-# ---------- 步骤 5: 固定项(不再提问) ----------
-# 安装目录: 锁死; 运行用户: 取当前调用用户; 端口: 自动挑一个空闲的(默认 3900 起)
+# ---------- 步骤 4: 安装(解压 + 建目录 + 写 systemd) ----------
 echo
-info "步骤 5/7: 安装参数(固定)"
+info "步骤 4/5: 安装参数"
 APP_DIR="${RC_APP_DIR:-/opt/raincough}"                 # 目录锁死, 仅留给测试用 RC_APP_DIR 覆盖
 # 谁在调用就以谁的身份跑服务: sudo 调用取 SUDO_USER, 否则取当前登录用户
 RUN_USER="${RC_RUN_USER:-${SUDO_USER:-$(id -un)}}"
@@ -495,6 +458,7 @@ if [ -z "$RUN_USER" ] || ! id "$RUN_USER" >/dev/null 2>&1; then
     warn "无法确定调用用户, 回退 root"
     RUN_USER=root
 fi
+RUN_GROUP="$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")"
 # 端口自填: 从 3900 起找第一个空闲端口(被本面板自己占用时沿用原端口)
 if [ -n "${RC_PORT:-}" ]; then
     PORT="$RC_PORT"
@@ -509,12 +473,7 @@ case "$PORT" in ''|*[!0-9]) fail "端口必须是数字 / port must be a number:
 if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
     fail "端口范围 1-65535 / port out of range: $PORT"
 fi
-if confirm_yes "Install p7zip-full/ffmpeg? / 是否安装常用功能工具(p7zip/ffmpeg)?"; then
-    INSTALL_TOOLS=yes
-else
-    INSTALL_TOOLS=no
-fi
-ok "目录 $APP_DIR · 用户 $RUN_USER · 端口 $PORT · 功能工具 $INSTALL_TOOLS"
+ok "目录 $APP_DIR · 用户 $RUN_USER:$RUN_GROUP · 端口 $PORT"
 
 # 静态 IP 固定(可选): 把当前 DHCP 分配到的地址原样写成静态配置, 免得以后地址漂移
 DO_STATIC=no
@@ -538,45 +497,52 @@ else
     warn "未能识别默认路由网卡, 跳过固定 IP"
 fi
 
-# ---------- 步骤 6: 安装 ----------
-echo
-info "步骤 6/7: 安装"
+info "步骤 4/5: 写入文件系统"
 if [ -f "/etc/systemd/system/$UNIT_NAME" ]; then
     if ! confirm_default "Unit $UNIT_NAME already exists, overwrite it? / 检测到已有单元, 是否覆盖?" "yes"; then
         echo "已取消(保留原服务) / cancelled (kept existing service)."
         exit 0
     fi
 fi
+# 同一 $APP_DIR 已存在二进制时, 先停掉旧服务再换文件(避免 exec 替换导致 systemd 找不到原 PID 句柄)
+if $SUDO systemctl is-active --quiet "$UNIT_NAME" 2>/dev/null; then
+    info "停止当前 $UNIT_NAME 以便更新文件..."
+    $SUDO systemctl stop "$UNIT_NAME" || warn "停止旧服务失败(将强制继续)"
+fi
 $SUDO mkdir -p "$APP_DIR"
 $SUDO tar xzf "$TMPD/$BODY_ASSET" -C "$APP_DIR" --strip-components=1
 $SUDO chmod +x "$APP_DIR/raincough"   # Windows 侧打包可能丢执行位, 防御性补回
-$SUDO chown -R "$RUN_USER:$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")" "$APP_DIR" 2>/dev/null || true
-# 插件目录与扩展本地源目录: 全新机器上不存在会导致"插件市场"接口报错(打开 plugins 失败 -> 502),
-# 且插件装不进去 —— 安装时就建好并交给运行用户。
-$SUDO mkdir -p "$APP_DIR/plugins" "$APP_DIR/extension-src/extensions"
-$SUDO chown -R "$RUN_USER:$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")" "$APP_DIR/plugins" "$APP_DIR/extension-src" 2>/dev/null || true
+$SUDO chown -R "$RUN_USER:$RUN_GROUP" "$APP_DIR" 2>/dev/null || true
+# v6 默认数据/插件目录: data/ 在 APP_DIR 下(对应 RC_DATA_DIR),
+# plugins/ 在 APP_DIR 下(对应 RC_PLUGINS_DIR)。
+# 全新机器上不存在会导致「插件」/设置/工作台接口 502, 且插件装不进去 —— 装好就建并交给运行用户。
+$SUDO mkdir -p "$APP_DIR/data" "$APP_DIR/plugins"
+$SUDO chown -R "$RUN_USER:$RUN_GROUP" "$APP_DIR/data" "$APP_DIR/plugins" 2>/dev/null || true
 [ -f "$APP_DIR/VERSION" ] || printf '%s\n' "$PANEL_VERSION" | $SUDO tee "$APP_DIR/VERSION" >/dev/null
 ok "面板文件解压至 $APP_DIR (版本 $(cat "$APP_DIR/VERSION" 2>/dev/null || echo $PANEL_VERSION))"
-if [ "$INSTALL_TOOLS" = "yes" ]; then
-    $SUDO apt-get install -y p7zip-full ffmpeg && ok "功能工具已安装"
-fi
+
+info "步骤 4/5: 注册 systemd 单元"
 UNIT=/etc/systemd/system/$UNIT_NAME
 $SUDO tee "$UNIT" >/dev/null <<EOF
 [Unit]
-Description=RainCough Core Panel (Go)
+Description=RainCough Core Panel (Go, v6)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=$RUN_USER
-Group=$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")
+Group=$RUN_GROUP
 WorkingDirectory=$APP_DIR
+Environment=RC_DATA_DIR=$APP_DIR/data
+Environment=RC_PLUGINS_DIR=$APP_DIR/plugins
+Environment=RC_UDS_DIR=/run/raincough
 ExecStart=$APP_DIR/raincough -port $PORT
 Restart=always
-RestartSec=5
+RestartSec=3
 RuntimeDirectory=raincough
 RuntimeDirectoryMode=0700
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
@@ -595,14 +561,13 @@ else
     warn "服务未处于 active, 请查看: journalctl -u $UNIT_NAME -n 30 --no-pager"
 fi
 
-# ---------- 步骤 6b: 固定静态 IP(可选) ----------
+# ---------- 步骤 4b: 固定静态 IP(可选) ----------
 if [ "$DO_STATIC" = "yes" ] || [ "$DO_STATIC" = "dry" ]; then
     echo
-    info "步骤 6b/7: 固定静态 IP($DO_STATIC)"
+    info "步骤 4b/5: 固定静态 IP($DO_STATIC)"
     if net_write_static; then
         if [ "$DO_STATIC" = "yes" ]; then
             ok "静态配置已写入(下次重启/重新激活网络后生效, 当前连接不动)"
-            LAN_IP="$(echo "$NET_CIDR" | cut -d/ -f1)"
             net_rollback_hint
         fi
     else
@@ -610,15 +575,15 @@ if [ "$DO_STATIC" = "yes" ] || [ "$DO_STATIC" = "dry" ]; then
     fi
 fi
 
-# ---------- 步骤 7: 完成 ----------
+# ---------- 步骤 5: 验证与完成 ----------
 echo
-info "步骤 7/7: 验证与完成"
+info "步骤 5/5: 验证与完成"
 CODE=""
-for i in 1 2 3 4 5; do
+for i in 1 2 3 4 5 6 7 8; do
     sleep 2
     CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || true)
     [ "$CODE" = "200" ] && break
-    [ "$i" -lt 5 ] && info "等待面板就绪 ($i/5, HTTP ${CODE:-000})"
+    [ $((i % 2)) -eq 1 ] && info "等待面板就绪 ($i/8, HTTP ${CODE:-000})"
 done
 LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 if [ "$CODE" = "200" ]; then
@@ -631,9 +596,11 @@ echo
 echo "${C_G}=======================================================${C_0}"
 echo "${C_G}  安装完成!${C_0}"
 echo "  访问地址:  http://${LAN_IP:-<服务器IP>}:$PORT"
+echo "  安装目录:  $APP_DIR"
+echo "  数据目录:  $APP_DIR/data  (env RC_DATA_DIR)"
+echo "  插件目录:  $APP_DIR/plugins  (env RC_PLUGINS_DIR)"
 echo "  服务管理:  systemctl {status|restart|stop} $UNIT_NAME"
 echo "  日志:      journalctl -u $UNIT_NAME -f"
-echo "  下一步:    面板内【系统扩展】安装媒体中心/任务队列等扩展;"
-echo "             【插件】页安装插件 —— 插件依赖将自动安装;"
-echo "             aigen/mcskin 的 AI 依赖会自动拉取 env-ai 离线轮子。"
+echo "  下一步:    面板内【插件】页安装插件 —— 插件依赖由各插件自行处理;"
+echo "             卸载请执行:  curl -fsSL .../uninstall.sh | bash"
 echo "${C_G}=======================================================${C_0}"
