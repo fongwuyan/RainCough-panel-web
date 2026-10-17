@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"mime"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -408,6 +409,36 @@ func (x *PluginX) ListPlugins() []map[string]interface{} {
 			"alive":       p.Status == StatusOnline,
 		})
 	}
+	// 补上「已安装但没连上来」的插件: 目录里有 v4 清单就列出来。
+	// 否则插件进程起不来时, 前端既看不到它也无法删除(只能登机器手删目录)。
+	seen := map[string]bool{}
+	for _, p := range out {
+		seen[p["name"].(string)] = true
+	}
+	if dir := x.opts.PluginsDir; dir != "" {
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || seen[e.Name()] {
+					continue
+				}
+				m, err := LoadManifestV4(filepath.Join(dir, e.Name()))
+				if err != nil || m == nil || m.Name == "" {
+					continue
+				}
+				out = append(out, map[string]interface{}{
+					"name":        m.Name,
+					"label":       m.Label,
+					"version":     m.Version,
+					"description": m.Description,
+					"lang":        m.Backend.Lang,
+					"v4":          true,
+					"alive":       false,
+					"installed":   true,
+				})
+			}
+		}
+	}
+
 	sort.Slice(out, func(i, j int) bool { return out[i]["name"].(string) < out[j]["name"].(string) })
 	return out
 }
