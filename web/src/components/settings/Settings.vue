@@ -4,8 +4,10 @@ import { useSettings, fmtUptime } from './useSettings'
 
 const st = useSettings()
 const {
-  theme, setTheme, cfg, token, loading, saving, pinging, pingState, pingMsg,
-  panel, sys, status, statusOk, repoSummary, saveRepo, ping, clearDoneTasks,
+  theme, setTheme, cfg, loading, saving, pinging, pingState, pingMsg,
+  gatePW, gateLocked, gateEnabled, gateBusy,
+  panel, sys, status, statusOk, repoSummary,
+  unlockGate, lockGate, saveRepo, ping, clearDoneTasks,
 } = st
 
 const active = ref('appearance')
@@ -76,13 +78,28 @@ const NAV = [
             <label class="st-field"><span>Branch</span><input v-model="cfg.panel_repo.branch" class="input mono" /></label>
           </div>
 
-          <div class="st-group-title" style="margin-top:22px">访问令牌</div>
-          <p class="st-hint">
-            私有仓库需要 GitHub Token（只需 repo 读权限）。已配置时留空表示不修改。
-            当前：<b>{{ cfg.has_token ? '已配置' : '未配置' }}</b>
-          </p>
+          <div class="st-group-title" style="margin-top:22px">密钥</div>
           <div class="st-form">
-            <label class="st-field wide"><span>Token</span><input v-model="token" class="input mono" type="password" placeholder="ghp_… （留空则不修改）" /></label>
+            <label class="st-field wide">
+              <span>密钥</span>
+              <input
+                v-model="gatePW"
+                class="input mono"
+                type="password"
+                autocomplete="off"
+                :disabled="gateBusy"
+                @keydown.enter="unlockGate"
+              />
+            </label>
+          </div>
+          <div class="st-actions">
+            <button class="btn btn-primary" :disabled="gateBusy || !gatePW" @click="unlockGate">
+              {{ gateBusy ? '验证中…' : '解锁' }}
+            </button>
+            <button v-if="gateEnabled && !gateLocked" class="btn" :disabled="gateBusy" @click="lockGate">上锁</button>
+            <span v-if="gateEnabled" class="st-ping" :class="gateLocked ? 'fail' : 'ok'">
+              {{ gateLocked ? '未解锁' : '已解锁' }}
+            </span>
           </div>
 
           <div class="st-actions">

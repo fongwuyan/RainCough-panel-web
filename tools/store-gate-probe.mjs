@@ -84,17 +84,25 @@ await sleep(1600)
 
 const s1 = await ev(`({
   hasGate: !!document.querySelector('.ph-gate'),
-  gateTitle: (document.querySelector('.ph-gate-title') || {}).innerText || '',
   hasInput: !!document.querySelector('.ph-gate-input'),
   inputType: (document.querySelector('.ph-gate-input') || {}).type || '',
   hasList: !!document.querySelector('.ph-list'),
   rowCount: document.querySelectorAll('.ph-row').length,
   relayVisible: !!document.querySelector('.ph-relock'),
+  hasIcon: !!document.querySelector('.ph-gate-lock'),
+  hasTitle: !!document.querySelector('.ph-gate-title'),
+  hasSub: !!document.querySelector('.ph-gate-sub'),
+  hasHint: !!document.querySelector('.ph-gate-hint'),
 })`)
-ok(s1 && s1.hasGate, '未解锁时显示上锁面板', JSON.stringify(s1 && { title: s1.gateTitle }))
-ok(s1 && s1.inputType === 'password', '口令框 type=password')
+ok(s1 && s1.hasGate, '未解锁时显示上锁面板')
+ok(s1 && s1.inputType === 'password', '密钥框 type=password')
 ok(s1 && !s1.hasList, '未解锁时不渲染插件列表')
 ok(s1 && !s1.relayVisible, '未解锁时不显示「重新上锁」')
+// 极简: 不要图标、标题、说明文字、错误提示之外的任何提示
+ok(s1 && !s1.hasIcon, '上锁面板无图标')
+ok(s1 && !s1.hasTitle, '上锁面板无标题文字')
+ok(s1 && !s1.hasSub, '上锁面板无说明文字')
+ok(s1 && !s1.hasHint, '上锁面板无额外提示')
 
 // ---- 输错口令 ----
 await ev(`(() => {

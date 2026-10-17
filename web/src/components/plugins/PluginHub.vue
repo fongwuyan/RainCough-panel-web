@@ -156,14 +156,8 @@ async function submitGate() {
 
     <!-- 市场 -->
     <div v-else class="ph-body">
-      <!-- 插件库上锁: 输口令才能看清单/安装 -->
+      <!-- 插件库上锁: 输密钥才能看清单/安装 -->
       <div v-if="gateLocked" class="ph-gate">
-        <div class="ph-gate-lock">🔒</div>
-        <div class="ph-gate-title">插件库已上锁</div>
-        <div class="ph-gate-sub">
-          插件库为公开仓库，插件内容受口令保护。<br />
-          输入口令后本设备 30 天内免输。
-        </div>
         <form class="ph-gate-form" @submit.prevent="submitGate">
           <input
             ref="gateInput"
@@ -171,7 +165,6 @@ async function submitGate() {
             type="password"
             class="input ph-gate-input"
             :class="{ 'has-err': !!gateErr }"
-            placeholder="插件库口令"
             autocomplete="off"
             autocapitalize="off"
             autocorrect="off"
@@ -184,7 +177,6 @@ async function submitGate() {
           </button>
         </form>
         <div v-if="gateErr" class="ph-gate-err">{{ gateErr }}</div>
-        <div v-else class="ph-gate-hint">连续输错 5 次会锁定 60 秒</div>
       </div>
 
       <template v-else>
@@ -402,23 +394,15 @@ async function submitGate() {
   background: var(--text); color: var(--bg); padding: 8px 16px; font-size: 12px; z-index: 90;
 }
 
-/* ---- 插件库上锁 ---- */
+/* ---- 插件库上锁(极简: 只有输入框+按钮+错误) ---- */
 .ph-gate {
-  max-width: 420px; margin: 48px auto 0; padding: 28px 24px;
-  border: 1px solid var(--border); background: var(--surface);
-  display: flex; flex-direction: column; align-items: center; text-align: center;
+  max-width: 340px; margin: 72px auto 0;
+  display: flex; flex-direction: column;
 }
-.ph-gate-lock { font-size: 26px; line-height: 1; margin-bottom: 12px; opacity: 0.75; }
-.ph-gate-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.ph-gate-sub {
-  font-size: 11.5px; color: var(--text-muted); line-height: 1.6;
-  margin: 8px 0 18px;
-}
-.ph-gate-form { display: flex; gap: 8px; width: 100%; }
-.ph-gate-input { flex: 1; height: 32px; font-size: 13px; }
+.ph-gate-form { display: flex; gap: 6px; width: 100%; }
+.ph-gate-input { flex: 1; height: 30px; font-size: 12.5px; }
 .ph-gate-input.has-err { border-color: var(--danger); }
-.ph-gate-err { font-size: 11.5px; color: var(--danger); margin-top: 10px; }
-.ph-gate-hint { font-size: 11px; color: var(--text-faint); margin-top: 10px; }
+.ph-gate-err { font-size: 11.5px; color: var(--danger); margin-top: 8px; }
 
 .ph-relock { margin-left: auto; }
 .btn-xs { padding: 1px 7px; font-size: 10.5px; height: 20px; }

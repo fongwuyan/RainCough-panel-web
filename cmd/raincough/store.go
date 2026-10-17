@@ -85,6 +85,7 @@ func (s *server) handleStoreGate(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStoreSettings GET/POST /api/store/settings
+// 注: GitHub token 不再由前端提供 —— 插件库改公开后不需要; 保留后端兼容(环境变量/旧数据仍可用)。
 func (s *server) handleStoreSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -92,36 +93,22 @@ func (s *server) handleStoreSettings(w http.ResponseWriter, r *http.Request) {
 			"config": map[string]interface{}{
 				"plugin_repo": globalStore.GetConfig().PluginRepo,
 				"panel_repo":  globalStore.GetConfig().PanelRepo,
-				"has_token":   globalStore.Token() != "",
 			},
 		})
 	case http.MethodPost:
 		var b struct {
-			PluginRepo  core.Repo `json:"plugin_repo"`
-			PanelRepo   core.Repo `json:"panel_repo"`
-			GithubToken string    `json:"github_token"`
-			Token       string    `json:"token"`
+			PluginRepo core.Repo `json:"plugin_repo"`
+			PanelRepo  core.Repo `json:"panel_repo"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad json"})
 			return
 		}
 		globalStore.Config(core.StoreConfig{PluginRepo: b.PluginRepo, PanelRepo: b.PanelRepo})
-		tok := b.Token
-		if tok == "" {
-			tok = b.GithubToken // 兼容旧前端 github_token 键
-		}
-		if tok != "" {
-			if err := globalStore.SetToken(tok); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-				return
-			}
-		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"config": map[string]interface{}{
 				"plugin_repo": globalStore.GetConfig().PluginRepo,
 				"panel_repo":  globalStore.GetConfig().PanelRepo,
-				"has_token":   globalStore.Token() != "",
 			},
 		})
 	default:

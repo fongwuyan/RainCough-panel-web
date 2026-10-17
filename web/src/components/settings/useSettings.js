@@ -6,13 +6,18 @@ import { useUi } from '../../stores/ui'
 export function useSettings() {
   const { theme, setTheme } = useUi()
 
-  const cfg = reactive({ plugin_repo: { owner: '', repo: '', branch: '' }, panel_repo: { owner: '', repo: '', branch: '' }, has_token: false })
-  const token = ref('')
+  const cfg = reactive({ plugin_repo: { owner: '', repo: '', branch: '' }, panel_repo: { owner: '', repo: '', branch: '' } })
   const loading = ref(true)
   const saving = ref(false)
   const pinging = ref(false)
   const pingState = ref('') // '' | ok | fail
   const pingMsg = ref('')
+
+  // 插件库密钥(替换原「访问令牌」): 口令哈希写死在二进制里, 不需要保存, 只做解锁验证
+  const gatePW = ref('')
+  const gateLocked = ref(true)
+  const gateEnabled = ref(false)
+  const gateBusy = ref(false)
 
   const panel = ref(null)
   const sys = ref(null)
@@ -43,12 +48,12 @@ export function useSettings() {
       const c = (d && d.config) || {}
       cfg.plugin_repo = c.plugin_repo || { owner: '', repo: '', branch: 'main' }
       cfg.panel_repo = c.panel_repo || { owner: '', repo: '', branch: 'main' }
-      cfg.has_token = !!c.has_token
     } catch (e) {
       flash('读取仓库配置失败: ' + (e.message || e), false)
     } finally {
       loading.value = false
     }
+    await loadGate()
     try {
       panel.value = await api.panelVersion()
     } catch (e) {
@@ -61,17 +66,56 @@ export function useSettings() {
     }
   }
 
+  // loadGate 读插件库密钥的当前状态(已解锁/未解锁)
+  async function loadGate() {
+    try {
+      const d = await api.storeGateStatus()
+      gateEnabled.value = !!(d && d.enabled)
+      gateLocked.value = !(d && d.locked === false)
+    } catch (e) {
+      gateEnabled.value = false
+      gateLocked.value = true
+    }
+  }
+
+  // unlockGate 提交密钥; 成功则清空输入并提示
+  async function unlockGate() {
+    if (gateBusy.value || !gatePW.value) return
+    gateBusy.value = true
+    try {
+      await api.storeGateUnlock(gatePW.value)
+      gatePW.value = ''
+      gateLocked.value = false
+      flash('密钥已生效')
+    } catch (e) {
+      flash((e && e.message) || '密钥错误', false)
+    } finally {
+      gateBusy.value = false
+    }
+  }
+
+  // lockGate 让密钥失效(下次需重新输入)
+  async function lockGate() {
+    gateBusy.value = true
+    try {
+      await api.storeGateLock()
+      gateLocked.value = true
+      flash('已上锁')
+    } catch (e) {
+      flash((e && e.message) || '操作失败', false)
+    } finally {
+      gateBusy.value = false
+    }
+  }
+
   async function saveRepo() {
     saving.value = true
     try {
       const body = { plugin_repo: cfg.plugin_repo, panel_repo: cfg.panel_repo }
-      if (token.value) body.github_token = token.value
       const d = await api.storeSaveSettings(body)
       const c = (d && d.config) || {}
       cfg.plugin_repo = c.plugin_repo || cfg.plugin_repo
       cfg.panel_repo = c.panel_repo || cfg.panel_repo
-      cfg.has_token = !!c.has_token
-      token.value = ''
       flash('配置已保存')
     } catch (e) {
       flash('保存失败: ' + (e.message || e), false)
@@ -89,12 +133,9 @@ export function useSettings() {
       if (d && d.net === false) {
         pingState.value = 'fail'
         pingMsg.value = '网络不通：连不上 api.github.com'
-      } else if (d && d.auth) {
-        pingState.value = 'ok'
-        pingMsg.value = 'Token 有效'
       } else {
-        pingState.value = 'fail'
-        pingMsg.value = cfg.has_token ? 'Token 无效或已过期' : '未配置 Token'
+        pingState.value = 'ok'
+        pingMsg.value = '连接正常'
       }
     } catch (e) {
       pingState.value = 'fail'
@@ -118,9 +159,10 @@ export function useSettings() {
 
   return {
     theme, setTheme,
-    cfg, token, loading, saving, pinging, pingState, pingMsg,
+    cfg, loading, saving, pinging, pingState, pingMsg,
+    gatePW, gateLocked, gateEnabled, gateBusy,
     panel, sys, status, statusOk, repoSummary,
-    flash, load, saveRepo, ping, clearDoneTasks,
+    flash, load, loadGate, unlockGate, lockGate, saveRepo, ping, clearDoneTasks,
   }
 }
 
