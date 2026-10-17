@@ -39,6 +39,9 @@ export function useWorkspace() {
 
   const disks = computed(() => (sys.value && sys.value.disks) || [])
   const diskPct = computed(() => num(sys.value && sys.value.disk_percent))
+  const diskIO = computed(() => (sys.value && sys.value.disk_io) || [])
+  const diskReadRate = computed(() => num(sys.value && sys.value.disk_read_rate))
+  const diskWriteRate = computed(() => num(sys.value && sys.value.disk_write_rate))
 
   const uptime = computed(() => num(sys.value && sys.value.uptime))
   const bootTime = computed(() => num(sys.value && sys.value.boot_time))
@@ -134,7 +137,7 @@ export function useWorkspace() {
   return {
     sys, err, updatedAt, now, gpus, gpuErr, gpuLoading,
     cpu, cores, load, memTotal, memUsed, memPct, swapTotal, swapUsed, swapPct,
-    upRate, downRate, ifaces, disks, diskPct, uptime, bootTime,
+    upRate, downRate, ifaces, disks, diskPct, diskIO, diskReadRate, diskWriteRate, uptime, bootTime,
     histPoints, histCpu, histMem, histSwap, histUp, histDown, histDisk, histCore,
     histL1, histL5, histL15, ifacesStats, health, plugins, tasks,
     loadSys, loadGpus,

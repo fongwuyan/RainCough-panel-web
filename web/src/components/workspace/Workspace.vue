@@ -9,7 +9,7 @@ const ws = useWorkspace()
 const {
   sys, err, updatedAt, now, gpus, gpuErr, gpuLoading,
   cpu, cores, load, memTotal, memUsed, memPct, swapTotal, swapUsed, swapPct,
-  upRate, downRate, ifaces, disks, diskPct, uptime,
+  upRate, downRate, ifaces, disks, diskPct, diskIO, diskReadRate, diskWriteRate, uptime,
   histCpu, histMem, histSwap, histUp, histDown, histDisk, histCore,
   histL1, histL5, histL15, ifacesStats, health, plugins, tasks,
   loadGpus,
@@ -192,6 +192,18 @@ function coreColor(v) {
               <div class="ws-bar">
                 <i :style="{ width: Math.min(100, num(d.percent)) + '%', background: num(d.percent) > 85 ? 'var(--danger)' : C.disk }"></i>
               </div>
+            </div>
+          </div>
+          <div class="ws-io">
+            <div class="ws-io-head">
+              <span class="ws-row-k">磁盘 IO</span>
+              <span class="mono">读 {{ fmtRate(diskReadRate) }}</span>
+              <span class="mono">写 {{ fmtRate(diskWriteRate) }}</span>
+            </div>
+            <div v-for="d in diskIO.slice(0, 3)" :key="d.name" class="ws-io-row">
+              <span class="ws-io-name mono">{{ d.name }}</span>
+              <div class="ws-bar grow"><i :style="{ width: Math.min(100, d.util) + '%' }"></i></div>
+              <span class="ws-io-rate mono">↓{{ fmtRate(d.read_rate) }} ↑{{ fmtRate(d.write_rate) }}</span>
             </div>
           </div>
           <RealtimeChart :series="[{ name: '磁盘 %', data: histDisk, color: C.disk }]" :max="100" :height="72" />
@@ -391,6 +403,12 @@ function coreColor(v) {
 .ws-chip.off { opacity: 0.45; }
 
 .ws-mounts { display: flex; flex-direction: column; gap: 8px; }
+.ws-io { border-top: 1px dashed var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.ws-io-head { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-muted); }
+.ws-io-head .ws-row-k { width: auto; }
+.ws-io-row { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+.ws-io-name { color: var(--text); width: 52px; }
+.ws-io-rate { color: var(--text-faint); width: 150px; text-align: right; }
 .ws-mount-top { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; }
 .ws-mount-path { color: var(--text); }
 .ws-mount-num { color: var(--text-faint); }

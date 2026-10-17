@@ -23,3 +23,6 @@ func NetStatus() map[string]interface{} {
 		"public_ip": "", "interfaces": []map[string]interface{}{},
 	}
 }
+
+// diskIORates 磁盘 IO(非 Linux 不支持)。
+func diskIORates() ([]DiskIOStat, float64, float64) { return nil, 0, 0 }

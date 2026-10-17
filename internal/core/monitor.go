@@ -44,6 +44,8 @@ func (m *SystemMonitor) Snapshot() *SystemSnapshot {
 		return m.cached
 	}
 
+	diskIO, diskReadRate, diskWriteRate := diskIORates()
+
 	cur := ReadCpuState()
 	curNet := ReadNetCounters()
 	curIfaces := ReadNetIfaces()
@@ -63,7 +65,10 @@ func (m *SystemMonitor) Snapshot() *SystemSnapshot {
 		SwapTotal:       mem.SwapTotal,
 		SwapUsed:        mem.SwapTotal - mem.SwapFree,
 		// 磁盘
-		Disks: disks,
+		Disks:         disks,
+		DiskIO:        diskIO,
+		DiskReadRate:  diskReadRate,
+		DiskWriteRate: diskWriteRate,
 		// 网络(累计)
 		NetSent: curNet.Sent,
 		NetRecv: curNet.Recv,

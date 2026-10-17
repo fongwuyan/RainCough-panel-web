@@ -25,6 +25,10 @@ type SystemSnapshot struct {
 	DiskTotal   uint64     `json:"disk_total"`
 	DiskUsed    uint64     `json:"disk_used"`
 	DiskPercent float64    `json:"disk_percent"`
+	// 磁盘 IO(每次采样与上次的差值, 单位 字节/秒)
+	DiskReadRate  float64      `json:"disk_read_rate"`
+	DiskWriteRate float64      `json:"disk_write_rate"`
+	DiskIO        []DiskIOStat `json:"disk_io"`
 	// 网络(累计字节 + 本次采样速率)
 	NetSent     uint64     `json:"net_sent"`
 	NetRecv     uint64     `json:"net_recv"`
@@ -54,6 +58,14 @@ type DiskInfo struct {
 	Percent    float64 `json:"percent"`
 	FSType     string  `json:"fstype,omitempty"`
 	Device     string  `json:"device,omitempty"`
+}
+
+// DiskIOStat 单块磁盘的实时 IO。
+type DiskIOStat struct {
+	Name      string  `json:"name"`
+	ReadRate  float64 `json:"read_rate"`  // 字节/秒
+	WriteRate float64 `json:"write_rate"` // 字节/秒
+	Util      float64 `json:"util"`       // 设备忙百分比 0-100
 }
 
 // NetIface 网络接口实时状态。

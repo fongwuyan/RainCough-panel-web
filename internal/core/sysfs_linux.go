@@ -389,3 +389,97 @@ func readFileStr(p string) string {
 	}
 	return string(b)
 }
+
+// ---- 磁盘 IO ----
+
+type diskIOSample struct {
+	read  uint64 // 字节
+	write uint64
+	ioMS  uint64 // 设备忙毫秒
+}
+
+var (
+	diskIOMu     sync.Mutex
+	diskIOPrev   map[string]diskIOSample
+	diskIOPrevAt time.Time
+	diskIOCache  []DiskIOStat
+	diskIOTot    [2]float64
+)
+
+// diskIORates 读 /proc/diskstats 并与上次采样做差, 得到每盘读写速率与忙碌度。
+// 返回 (每盘明细, 总读速率, 总写速率)。
+func diskIORates() ([]DiskIOStat, float64, float64) {
+	cur, err := readDiskstats()
+	if err != nil {
+		return diskIOCache, diskIOTot[0], diskIOTot[1]
+	}
+	now := time.Now()
+
+	diskIOMu.Lock()
+	defer diskIOMu.Unlock()
+
+	if diskIOPrev == nil {
+		diskIOPrev, diskIOPrevAt = cur, now
+		return diskIOCache, diskIOTot[0], diskIOTot[1]
+	}
+	dt := now.Sub(diskIOPrevAt).Seconds()
+	if dt < 0.2 { // 采样太密, 差值噪声大, 沿用上次结果
+		return diskIOCache, diskIOTot[0], diskIOTot[1]
+	}
+
+	out := make([]DiskIOStat, 0, len(cur))
+	var tr, tw float64
+	for name, c := range cur {
+		p, ok := diskIOPrev[name]
+		if !ok {
+			continue // 新插的盘, 下一轮再算
+		}
+		r := float64(c.read-p.read) / dt
+		w := float64(c.write-p.write) / dt
+		util := float64(c.ioMS-p.ioMS) / (dt * 1000) * 100
+		if util < 0 {
+			util = 0
+		}
+		if util > 100 {
+			util = 100
+		}
+		out = append(out, DiskIOStat{Name: name, ReadRate: r, WriteRate: w, Util: util})
+		tr += r
+		tw += w
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ReadRate+out[i].WriteRate > out[j].ReadRate+out[j].WriteRate
+	})
+
+	diskIOPrev, diskIOPrevAt = cur, now
+	diskIOCache = out
+	diskIOTot = [2]float64{tr, tw}
+	return out, tr, tw
+}
+
+// readDiskstats 解析 /proc/diskstats, 只保留整盘(跳过分区与 loop/ram)。
+func readDiskstats() (map[string]diskIOSample, error) {
+	f, err := os.Open("/proc/diskstats")
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	out := map[string]diskIOSample{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 14 {
+			continue
+		}
+		name := fields[2]
+		if !isDiskName(name) {
+			continue
+		}
+		readSec, _ := strconv.ParseUint(fields[5], 10, 64)  // sectors read
+		writeSec, _ := strconv.ParseUint(fields[9], 10, 64) // sectors written
+		ioMS, _ := strconv.ParseUint(fields[12], 10, 64)    // time doing I/O
+		out[name] = diskIOSample{read: readSec * 512, write: writeSec * 512, ioMS: ioMS}
+	}
+	return out, sc.Err()
+}
