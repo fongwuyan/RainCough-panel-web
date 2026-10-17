@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"raincough"
+	"raincough/internal/auth"
 	"raincough/internal/config"
 	"raincough/internal/core"
 	"raincough/internal/pluginx"
@@ -41,9 +43,51 @@ var globalSUP *supervisor.Supervisor
 
 func main() {
 	port := flag.Int("port", 3000, "监听端口")
+	setPW := flag.Bool("set-password", false, "设置面板登录密码(从 stdin 读一行), 写入 <data>/secret/admin.pw 后退出")
+	hashPW := flag.Bool("hash-password", false, "把 stdin 的一行密码算成 $6$ 哈希并打印后退出(供安装器使用)")
+	verifyHash := flag.String("verify-hash", "", "诊断: 用 stdin 的一行密码验证给定的 $6$ 哈希, 匹配则退出码 0")
 	flag.Parse()
 
 	cfg := config.Load()
+
+	// ---- 离线 CLI: 密码管理(不启动服务) ----
+	if *verifyHash != "" {
+		pw, err := readPasswordLine()
+		if err != nil {
+			log.Fatalf("读取密码失败: %v", err)
+		}
+		if err := auth.VerifySha512Crypt([]byte(pw), *verifyHash); err != nil {
+			fmt.Fprintln(os.Stderr, "不匹配:", err)
+			os.Exit(1)
+		}
+		fmt.Println("匹配")
+		return
+	}
+	if *hashPW {
+		pw, err := readPasswordLine()
+		if err != nil {
+			log.Fatalf("读取密码失败: %v", err)
+		}
+		h, err := auth.HashPassword(pw)
+		if err != nil {
+			log.Fatalf("生成哈希失败: %v", err)
+		}
+		fmt.Println(h)
+		return
+	}
+	if *setPW {
+		pw, err := readPasswordLine()
+		if err != nil {
+			log.Fatalf("读取密码失败: %v", err)
+		}
+		if err := auth.SetPassword(cfg.DataDir, pw); err != nil {
+			log.Fatalf("设置密码失败: %v", err)
+		}
+		fmt.Printf("已更新面板密码: %s (mode 0600)\n", auth.PasswordPath(cfg.DataDir))
+		fmt.Println("重启服务后生效: systemctl restart raincough.service")
+		return
+	}
+
 	if os.Getenv("RC_PORT") != "" {
 		if p, err := strconv.Atoi(os.Getenv("RC_PORT")); err == nil && p > 0 {
 			*port = p
@@ -156,11 +200,23 @@ func main() {
 
 	s := &server{cfg: cfg, sd: sd, sup: globalSUP}
 	mux := http.NewServeMux()
+
+	// 鉴权: 除登录接口外的所有 /api/ 路由要求 session
+	// session 长期有效(默认 30 天), 用户感知"永久保留"
+	authMgr, err := auth.New(auth.Options{
+		DataDir:       cfg.DataDir,
+		AdminPassword: os.Getenv("RC_ADMIN_PASSWORD"),
+	})
+	if err != nil {
+		log.Fatalf("鉴权模块初始化失败: %v", err)
+	}
+	authMgr.Routes(mux)
+
 	s.routes(mux)
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", *port),
-		Handler:           mux,
+		Handler:           authMgr.Middleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	if cfg.HTTPReadTimeout > 0 {
@@ -396,4 +452,19 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// readPasswordLine 从 stdin 读一行密码(去尾部换行); 空则报错。
+// 供 -set-password / -hash-password 使用(install.sh 通过管道传入, 避免密码出现在进程参数里)。
+func readPasswordLine() (string, error) {
+	r := bufio.NewReader(os.Stdin)
+	line, err := r.ReadString('\n')
+	if err != nil && line == "" {
+		return "", fmt.Errorf("stdin 无输入: %w", err)
+	}
+	pw := strings.TrimRight(line, "\r\n")
+	if pw == "" {
+		return "", fmt.Errorf("密码不能为空")
+	}
+	return pw, nil
 }

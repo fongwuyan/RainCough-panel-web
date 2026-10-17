@@ -20,8 +20,25 @@ async function reqForm(url, fd) {
   return req('POST', url, fd, true)
 }
 
+// authStatus 不抛 401: 该接口专用于「我登录了吗」, 401 = 未登录 = 正常状态
+async function reqAuthNoThrow(url, opts = {}) {
+  const res = await fetch(url, { credentials: 'same-origin', ...opts })
+  let data = null
+  try { data = await res.json() } catch (e) { /* 非 JSON(罕见) */ }
+  return { ok: res.ok, status: res.status, data }
+}
+
 // 与后端路由一一对应。删掉的接口不再保留空壳(历史上"点了没反应"多源于此)。
 export const api = {
+
+  // ---- 鉴权 ----
+  // authStatus 永远不抛(401 = 未登录是合法状态, 给登录页/导航守卫用)
+  authStatus: async () => {
+    const r = await reqAuthNoThrow('/api/auth/status')
+    return r.data || { logged_in: false }
+  },
+  authLogin: (password) => req('POST', '/api/auth/login', { password }),
+  authLogout: () => req('POST', '/api/auth/logout', {}),
 
   // ---- 插件 ----
   listPlugins: () => req('GET', '/api/plugins'),

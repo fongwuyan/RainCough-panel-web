@@ -2,13 +2,20 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
+import { useAuth } from '../stores/auth'
 import PanelUpdate from './panel/PanelUpdate.vue'
 
 const route = useRoute()
 const router = useRouter()
 const { plugins, load } = usePlugins()
+const auth = useAuth()
 
 onMounted(() => { load() })
+
+async function onLogout() {
+  await auth.logout()
+  router.replace('/login')
+}
 
 // 内置功能: 工作台 / 文件管理 / 终端 / 插件 / 设置(共 5 项)
 const PAGES = [
@@ -118,6 +125,7 @@ function isActive(name) {
     </nav>
     <div class="sidebar-footer">
       <span class="version">v1.0.0 · 仅局域网</span>
+      <button v-if="auth.loggedIn()" class="logout-btn" title="注销当前 session" @click="onLogout">登出</button>
     </div>
   </aside>
 </template>
@@ -139,4 +147,16 @@ function isActive(name) {
   line-height: 1;
 }
 .upd-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.logout-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.logout-btn:hover { color: var(--accent); border-color: var(--accent); }
 </style>

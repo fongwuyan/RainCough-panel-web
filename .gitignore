@@ -48,3 +48,6 @@ dist-build/
 
 # 本地部署脚本与临时产物
 /_rel/
+
+# 本地部署产物/凭据(含 SSH askpass 与交叉编译二进制, 绝不入库)
+_deploy/

@@ -23,6 +23,11 @@
 #       (工作台/文件管理/终端/系统扩展/插件/设置/开发文档)。
 #       不含插件: 插件在面板内【插件】页安装; 插件依赖由各插件自行处理。
 #
+# 鉴权: 默认以 root 运行(读 /etc/shadow 验证 SSH 登录密码); 也支持 RC_RUN_USER=xxx 覆盖
+#       (此时 SSH 通道降级, 仅 admin 密码可用, 首次启动自动生成 32 字符随机密码到 journal)。
+#       session 默认 30 天有效期(用户感知"永久保留"), cookie: rc_session, HttpOnly+Strict。
+#       RC_ADMIN_PASSWORD 可覆盖自动生成的 admin 密码(便于自动化/迁移)。
+#
 # 与 v3 (Python/Flask) 的区别:
 #   · 不再装 python3 / pip / 离线 wheels / p7zip-full / ffmpeg — v6 是零依赖 Go 二进制
 #   · 不再有 env-offline Release / CORE_PIP_PKGS
@@ -136,6 +141,19 @@ ask_default() {   # $1 提示 $2 默认值 -> 输出答案; 提示走 stderr(避
     printf '  %s [%s]: ' "$1" "$2" >&2
     a="$(read_tty)"
     printf '%s' "${a:-$2}"
+}
+read_secret() {   # $1 提示 -> 输出密码(不回显); 无 tty 返回空
+    local a=""
+    if [ "$HAVE_TTY" = 0 ]; then
+        return 0
+    fi
+    printf '  %s: ' "$1" >&2
+    case "$HAVE_TTY" in
+        1) IFS= read -r -s -t "${RC_PROMPT_TIMEOUT:-180}" a 2>/dev/null || a="" ;;
+        2) IFS= read -r -s -t "${RC_PROMPT_TIMEOUT:-180}" a < /dev/tty 2>/dev/null || a="" ;;
+    esac
+    echo "" >&2
+    printf '%s' "$a"
 }
 fetch() {         # $1 仓库相对路径 $2 输出文件; 镜像失败回退直连; ?ts 防镜像缓存旧资产
     local rel="$1" out="$2" base
@@ -394,6 +412,7 @@ echo "${C_C}=======================================================${C_0}"
 echo "  将安装: 单二进制 raincough + public/(SPA) + 内置功能"
 echo "  (工作台/文件管理/终端/系统扩展/插件/设置/开发文档)"
 echo "  插件在面板内【插件】页安装, 依赖由各插件自行处理"
+echo "  默认以 root 运行: 可用 SSH 登录密码 或 面板自带 admin 密码登录"
 echo "  下载源: $MIRROR (失败回退 https://github.com; RC_MIRROR 可覆盖)"
 if [ "$HAVE_TTY" = 0 ]; then
     echo "${C_Y}[!!]${C_0} no interactive terminal (no tty): all prompts will use their defaults"
@@ -452,11 +471,11 @@ ok "面板主体就绪: $BODY_ASSET ($(du -h "$TMPD/$BODY_ASSET" | cut -f1))"
 echo
 info "步骤 4/5: 安装参数"
 APP_DIR="${RC_APP_DIR:-/opt/raincough}"                 # 目录锁死, 仅留给测试用 RC_APP_DIR 覆盖
-# 谁在调用就以谁的身份跑服务: sudo 调用取 SUDO_USER, 否则取当前登录用户
-RUN_USER="${RC_RUN_USER:-${SUDO_USER:-$(id -un)}}"
-if [ -z "$RUN_USER" ] || ! id "$RUN_USER" >/dev/null 2>&1; then
-    warn "无法确定调用用户, 回退 root"
-    RUN_USER=root
+# 默认以 root 身份运行(管理面板本来就该有 root 权限, 且需要读 /etc/shadow 验证 SSH 登录密码);
+# RC_RUN_USER 覆盖时仍可指定其它用户, 但此时 SSH 密码通道降级, 仅能用面板自带 admin 密码登录。
+RUN_USER="${RC_RUN_USER:-root}"
+if ! id "$RUN_USER" >/dev/null 2>&1; then
+    fail "指定的运行用户 $RUN_USER 不存在(默认 root; 设 RC_RUN_USER=xxx 指定其它用户时该用户必须存在)"
 fi
 RUN_GROUP="$(id -gn "$RUN_USER" 2>/dev/null || echo "$RUN_USER")"
 # 端口自填: 从 3900 起找第一个空闲端口(被本面板自己占用时沿用原端口)
@@ -474,6 +493,8 @@ if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
     fail "端口范围 1-65535 / port out of range: $PORT"
 fi
 ok "目录 $APP_DIR · 用户 $RUN_USER:$RUN_GROUP · 端口 $PORT"
+[ "$RUN_USER" = "root" ] && info "以 root 运行: 可用 SSH 登录密码 + admin 密码两种方式登录面板" \
+                         || warn "以非 root ($RUN_USER) 运行: 仅能用 admin 密码登录(SSH 密码通道不可用, 需 root/shadow 组才能读 /etc/shadow)"
 
 # 静态 IP 固定(可选): 把当前 DHCP 分配到的地址原样写成静态配置, 免得以后地址漂移
 DO_STATIC=no
@@ -521,6 +542,75 @@ $SUDO chown -R "$RUN_USER:$RUN_GROUP" "$APP_DIR/data" "$APP_DIR/plugins" 2>/dev/
 [ -f "$APP_DIR/VERSION" ] || printf '%s\n' "$PANEL_VERSION" | $SUDO tee "$APP_DIR/VERSION" >/dev/null
 ok "面板文件解压至 $APP_DIR (版本 $(cat "$APP_DIR/VERSION" 2>/dev/null || echo $PANEL_VERSION))"
 
+# ---------- 步骤 4b: 登录密码 ----------
+# 面板支持两条登录通道:
+#   ① 系统密码(/etc/shadow 里该用户的哈希) —— 面板直接离线校验, 真正的"用 SSH 密码登录"
+#      但仅当哈希是 $6$ SHA-512 时才可行(v6 零依赖, 不实现 yescrypt/bcrypt)
+#   ② 面板密码(<data>/secret/admin.pw, 存 $6$ 哈希) —— 任何系统都可用
+#
+# Debian 12 / Ubuntu 24.04+ 默认 yescrypt($y$), ①不可用 → 这里引导用户把②设成同一个 SSH 密码,
+# 用户感知完全一致(以后仍然用 SSH 密码登录), 且不用记第二个密码。
+echo
+info "步骤 4b/5: 登录密码"
+SHADOW_OK=no
+SHADOW_WHY="未知"
+SHADOW_HASH=""
+if [ -r /etc/shadow ] || [ -n "$SUDO" ]; then
+    SHADOW_HASH=$($SUDO grep "^${RUN_USER}:" /etc/shadow 2>/dev/null | head -1 | cut -d: -f2)
+fi
+case "$SHADOW_HASH" in
+    '$6$'*) SHADOW_OK=yes ;;
+    '$y$'*) SHADOW_WHY="yescrypt(\$y\$) — Debian 12/Ubuntu 24.04+ 默认" ;;
+    '$2'*)  SHADOW_WHY="bcrypt(\$2*) — 部分发行版/BSD 默认" ;;
+    '')     SHADOW_WHY="读不到哈希(账户锁定或权限不足)" ;;
+    *)      SHADOW_WHY="其它算法(如 \$1\$/\$5\$)" ;;
+esac
+
+PANEL_PW_SET=no
+if [ -n "${RC_PANEL_PASSWORD:-}" ]; then
+    printf '%s\n' "$RC_PANEL_PASSWORD" | RC_DATA_DIR="$APP_DIR/data" $SUDO "$APP_DIR/raincough" -set-password \
+        && { PANEL_PW_SET=yes; ok "已按 RC_PANEL_PASSWORD 设置面板密码 ($6\$ 哈希)"; }
+elif [ "$SHADOW_OK" = "yes" ]; then
+    ok "系统密码可直接校验 ($RUN_USER 的 /etc/shadow 是 \$6\$ SHA-512)"
+    echo "     登录面板 → 直接输入你 SSH 登录本机的密码即可"
+elif [ "${RC_SKIP_PANEL_PASSWORD:-0}" = "1" ]; then
+    warn "系统密码不可校验($SHADOW_WHY), 且已跳过面板密码设置 → 首次启动自动生成随机密码"
+    echo "     启动后查看: journalctl -u $UNIT_NAME -n 30 --no-pager"
+else
+    warn "系统密码不可离线校验: $SHADOW_WHY"
+    echo "     面板为单二进制零依赖, 不实现 yescrypt/bcrypt 算法, 因此读不了你的系统密码哈希。"
+    echo "     解决办法(推荐): 现在把【面板密码设成你 SSH 登录本机的密码】—— 以后体验完全一样,"
+    echo "                     仍然是 SSH 密码登录, 不用再记一个新密码。"
+    echo "     (面板密码以 \$6\$ SHA-512 哈希存到 $APP_DIR/data/secret/admin.pw, mode 0600)"
+    if [ "$HAVE_TTY" = 0 ]; then
+        warn "无交互终端, 跳过 → 首次启动自动生成随机密码(journalctl 查)"
+    elif confirm_default "把面板密码设成你的 SSH 登录密码? / Set panel password to your SSH password?" "yes"; then
+        PW1="$(read_secret "输入 SSH 登录密码(不显示)")"
+        if [ -z "$PW1" ]; then
+            warn "密码为空, 跳过 → 首次启动自动生成随机密码"
+        else
+            PW2="$(read_secret "再输入一次确认")"
+            if [ "$PW1" != "$PW2" ]; then
+                warn "两次输入不一致, 跳过 → 首次启动自动生成随机密码"
+            else
+                if printf '%s\n' "$PW1" | RC_DATA_DIR="$APP_DIR/data" $SUDO "$APP_DIR/raincough" -set-password; then
+                    PANEL_PW_SET=yes
+                    ok "面板密码已设置(存为 \$6\$ 哈希, 内容与你的 SSH 密码相同)"
+                else
+                    warn "面板密码设置失败 → 首次启动自动生成随机密码"
+                fi
+            fi
+            unset PW1 PW2
+        fi
+    else
+        info "已跳过 → 首次启动自动生成随机密码(journalctl 查)"
+    fi
+fi
+if [ "$PANEL_PW_SET" = "yes" ]; then
+    # 已经手写过 admin.pw, 确保运行用户能读
+    $SUDO chown -R "$RUN_USER:$RUN_GROUP" "$APP_DIR/data/secret" 2>/dev/null || true
+fi
+
 info "步骤 4/5: 注册 systemd 单元"
 UNIT=/etc/systemd/system/$UNIT_NAME
 $SUDO tee "$UNIT" >/dev/null <<EOF
@@ -561,10 +651,10 @@ else
     warn "服务未处于 active, 请查看: journalctl -u $UNIT_NAME -n 30 --no-pager"
 fi
 
-# ---------- 步骤 4b: 固定静态 IP(可选) ----------
+# ---------- 步骤 4c: 固定静态 IP(可选) ----------
 if [ "$DO_STATIC" = "yes" ] || [ "$DO_STATIC" = "dry" ]; then
     echo
-    info "步骤 4b/5: 固定静态 IP($DO_STATIC)"
+    info "步骤 4c/5: 固定静态 IP($DO_STATIC)"
     if net_write_static; then
         if [ "$DO_STATIC" = "yes" ]; then
             ok "静态配置已写入(下次重启/重新激活网络后生效, 当前连接不动)"
@@ -581,7 +671,7 @@ info "步骤 5/5: 验证与完成"
 CODE=""
 for i in 1 2 3 4 5 6 7 8; do
     sleep 2
-    CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || true)
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/auth/status" || true)
     [ "$CODE" = "200" ] && break
     [ $((i % 2)) -eq 1 ] && info "等待面板就绪 ($i/8, HTTP ${CODE:-000})"
 done
@@ -591,6 +681,18 @@ if [ "$CODE" = "200" ]; then
 else
     warn "面板暂未响应 (HTTP $CODE), 请查看: journalctl -u raincough -f"
 fi
+# 登录提示: 说清这次到底该用哪个密码
+echo
+echo "${C_Y}  登录提示:${C_0}"
+if [ "$PANEL_PW_SET" = "yes" ]; then
+    echo "    · 面板密码 = 你刚设置的密码(与 SSH 登录密码相同) —— 直接在登录页输入即可"
+elif [ "$SHADOW_OK" = "yes" ]; then
+    echo "    · 直接用你 SSH 登录本机($RUN_USER)的密码登录"
+else
+    echo "    · 首次启动自动生成了随机密码, 查看: journalctl -u $UNIT_NAME -n 30 --no-pager"
+    echo "    · 想换成自己的密码: echo '新密码' | sudo -E RC_DATA_DIR=$APP_DIR/data $APP_DIR/raincough -set-password"
+fi
+echo "    · session 30 天有效, 关闭浏览器再打开无需重新登录"
 rm -rf "$TMPD"
 echo
 echo "${C_G}=======================================================${C_0}"
@@ -601,6 +703,7 @@ echo "  数据目录:  $APP_DIR/data  (env RC_DATA_DIR)"
 echo "  插件目录:  $APP_DIR/plugins  (env RC_PLUGINS_DIR)"
 echo "  服务管理:  systemctl {status|restart|stop} $UNIT_NAME"
 echo "  日志:      journalctl -u $UNIT_NAME -f"
+echo "  改面板密码: echo '新密码' | sudo -E RC_DATA_DIR=$APP_DIR/data $APP_DIR/raincough -set-password"
 echo "  下一步:    面板内【插件】页安装插件 —— 插件依赖由各插件自行处理;"
 echo "             卸载请执行:  curl -fsSL .../uninstall.sh | bash"
 echo "${C_G}=======================================================${C_0}"

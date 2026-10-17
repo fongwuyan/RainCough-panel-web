@@ -4,6 +4,30 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## 未发布 — 登录鉴权
+- **新增登录鉴权**（此前全站无鉴权，任何能访问端口的人都能改设置、开终端、装插件）
+  - 后端 `internal/auth`：session 生命周期 + 中间件 + `/api/auth/{login,logout,status}`
+  - 除登录接口外，全部 `/api/*` 未登录返回 401；前端路由守卫未登录一律跳 `/login`
+  - 登录页：单密码框，错误统一提示「密码错误」（不区分账号是否存在），失败固定延迟 500ms 防爆破
+- **纯标准库手写 SHA-512 crypt(3)**（`internal/auth/crypt.go`，约 300 行）
+  - 与 libxcrypt 逐位一致，已用 `openssl passwd -6` 与 Python `crypt` 双向对拍：
+    覆盖 rounds=1000/5000/10000/50000、UTF-8 中文密码、100 字节长密码、1 字节密码、含 `$ \ *` 特殊字符
+  - 支持 `$6$salt$hash` 与 `$6$rounds=N$salt$hash` 两种存储格式
+- **两条登录通道**
+  - ① 系统密码：读 `/etc/shadow` 当前用户的哈希离线校验 —— 真正的「用 SSH 密码登录」
+  - ② 面板密码：`<data>/secret/admin.pw` 存 `$6$` 哈希（不再存明文）；未设置时首次启动随机生成 32 字符并打印到 journal
+- **yescrypt(`$y$`) 说明**：Debian 12 / Ubuntu 24.04+ 默认 yescrypt，算法复杂（C 参考实现约 1500 行），
+  零依赖红线内不实现。此场景由安装器引导「把面板密码设成同一个 SSH 密码」，
+  用户感知一致（仍用 SSH 密码登录），实测可用
+- 新增 CLI：`raincough -set-password`（从 stdin 读密码，写 `$6$` 哈希）、`-hash-password`、
+  `-verify-hash <hash>`（诊断用）
+- **session 持久化**：`<data>/sessions/<id>.json`（mode 0600），默认 30 天有效，
+  进程重启/整机重启后仍有效（用户感知「永久保留登录状态」）；cookie `rc_session`，HttpOnly + SameSite=Strict
+- 侧栏底部新增「登出」按钮
+- install.sh：`User` 改为默认 `root`（读 `/etc/shadow` 需要），新增步骤 4b 登录密码引导，
+  支持 `RC_PANEL_PASSWORD` / `RC_SKIP_PANEL_PASSWORD=1` / `RC_ADMIN_PASSWORD`
+- 新增探针工具：`tools/auth-probe.mjs`（登录流程 11 项）、`tools/login-layout-check.mjs`（亮/暗色布局与对比度 22 项）
+
 ## v1.0.0 — 2026-10-01
 - 面板功能分层成型：内置仅 工作台/文件管理/终端/系统扩展/插件/设置/开发文档 七项
 - 新增「系统扩展」系统功能：扩展包格式 + 构建工具 + 安装/卸载/更新 API + 加载器

@@ -1,5 +1,6 @@
 <script setup>
-import { onMounted, onUnmounted, ref, onErrorCaptured } from 'vue'
+import { onMounted, onUnmounted, ref, onErrorCaptured, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
 import Lightbox from './components/Lightbox.vue'
 import { usePreview } from './stores/preview'
@@ -7,8 +8,11 @@ import { useUi } from './stores/ui'
 
 const preview = usePreview()
 const ui = useUi()
+const route = useRoute()
 const errGlobal = ref('')
 const blankHint = ref('')
+// 登录页不要侧栏(免得用户看到自己跳不出去)
+const isLogin = computed(() => route.name === 'login')
 function startBlankProbe() {
   setTimeout(() => {
     try {
@@ -52,15 +56,15 @@ onUnmounted(() => {
 <template>
   <div v-if="blankHint" style="position:fixed;top:60px;left:0;right:0;z-index:99998;background:#e65100;color:#fff;padding:8px 14px;font-size:12px;font-family:monospace">探测: {{ blankHint }}</div>
 <div v-if="errGlobal" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#c62828;color:#fff;padding:10px 14px;font-size:12px;font-family:monospace;max-height:120px;overflow:auto">全局错误: {{ errGlobal }}</div>
-<div class="layout">
-    <Sidebar />
-    <main class="content">
-      <div class="content-inner">
+<div class="layout" :class="{ 'layout-login': isLogin }">
+    <Sidebar v-if="!isLogin" />
+    <main class="content" :class="{ 'content-login': isLogin }">
+      <div class="content-inner" :class="{ 'content-inner-login': isLogin }">
         <router-view v-slot="{ Component }">
         <component :is="Component" :key="$route.fullPath" />
       </router-view>
       </div>
     </main>
-    <Lightbox />
+    <Lightbox v-if="!isLogin" />
   </div>
 </template>
