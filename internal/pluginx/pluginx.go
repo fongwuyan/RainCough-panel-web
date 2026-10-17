@@ -117,6 +117,7 @@ type PluginX struct {
 	ns   *shared.Namespace // 持久化(可为 nil => 内存模式)
 
 	mu        sync.Mutex
+	onConnSeen func(name string) // 握手成功回调(供 supervisor 标记 ConnSeen; nil 跳过)
 	plugins   map[string]*Plugin
 	ifaces    map[string]*Iface
 	listeners map[string]net.Listener
@@ -329,9 +330,28 @@ func (x *PluginX) acceptLoop(name string, l net.Listener) {
 			old.close()
 		}
 		x.setConnLocked(name, conn)
+		cb := x.onConnSeen
 		x.mu.Unlock()
+		if cb != nil {
+			cb(name)
+		}
 		go conn.readLoop()
 	}
+}
+
+// SetOnConnSeen 注册握手成功回调(线程安全; 用于 supervisor.ConnSeen 桥接)。
+// 仅接受第一个 callback; 重复设置返回 false 不变。
+func (x *PluginX) SetOnConnSeen(cb func(name string)) bool {
+	if cb == nil {
+		return false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.onConnSeen != nil {
+		return false
+	}
+	x.onConnSeen = cb
+	return true
 }
 
 // Stop 关闭全部端点与连接(幂等: 防重复调用二次 close 触发 panic)。

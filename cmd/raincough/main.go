@@ -25,15 +25,19 @@ import (
 	"raincough/internal/core"
 	"raincough/internal/pluginx"
 	"raincough/internal/shared"
+	"raincough/internal/supervisor"
 )
 
 type server struct {
-	cfg *config.Config
-	sd  *shared.Shared
+	cfg     *config.Config
+	sd      *shared.Shared
+	sup     *supervisor.Supervisor
 }
 
 // globalPX 接口库 v4 运行时(插件自注册/接口总线/健康诊断)。
 var globalPX *pluginx.PluginX
+// globalSUP 插件进程 supervisor(纯 Go 标准库, fork/exec + backoff + 日志轮转)。
+var globalSUP *supervisor.Supervisor
 
 func main() {
 	port := flag.Int("port", 3000, "监听端口")
@@ -115,7 +119,30 @@ func main() {
 	}
 	globalStore = core.NewStore(storeNS, cfg.PluginsDir, func() {
 		globalPX.Reload()
+		if globalSUP != nil {
+			globalSUP.Rescan()
+		}
 	})
+
+	// 插件 supervisor(接管所有 v4 后端进程: fork/exec + backoff + 日志)
+	globalSUP = supervisor.New(supervisor.Options{
+		PluginsDir:  cfg.PluginsDir,
+		LogDir:      filepath.Join(cfg.DataDir, "log", "plugins"),
+		RestartMax:  cfg.PluginRestartMax,
+		BackoffBase: time.Second,
+		BackoffMax:  30 * time.Second,
+		StartGrace:  5 * time.Second,
+		UDSDir:      os.Getenv("RC_UDS_DIR"),
+	}, sd)
+	if err := globalSUP.Start(); err != nil {
+		log.Printf("[supervisor] 启动失败(继续运行): %v", err)
+	}
+	defer globalSUP.Shutdown()
+
+	// 握手桥接: PluginX.acceptLoop 接受到连接 → supervisor.ConnSeen(name)
+	if globalPX != nil && globalSUP != nil {
+		globalPX.SetOnConnSeen(func(name string) { globalSUP.ConnSeen(name) })
+	}
 
 	// 终端主机/常用命令存储
 	initTermNS(sd)
@@ -127,7 +154,7 @@ func main() {
 	globalWSH = core.NewWSHistory(filepath.Join(cfg.DataDir, "workspace-history.ndjson"))
 	globalWSH.Start(sysMon)
 
-	s := &server{cfg: cfg, sd: sd}
+	s := &server{cfg: cfg, sd: sd, sup: globalSUP}
 	mux := http.NewServeMux()
 	s.routes(mux)
 
@@ -232,6 +259,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/services/health/log", globalPX.HandleServiceLog)
 	mux.HandleFunc("/api/services/list", s.handleServicesList)
 	mux.HandleFunc("/api/services/action", s.handleServicesAction)
+	mux.HandleFunc("/api/services/log", s.handleServicesLog)
+	mux.HandleFunc("/api/services/autostart", s.handleServicesAutostart)
 
 	// ---- 静态前端(public/) ----
 	webDir := filepath.Join(s.cfg.BaseDir, "public")
