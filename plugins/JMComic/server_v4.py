@@ -198,6 +198,17 @@ def _make_thumb(src_path, aid):
     except Exception:
         return None
 
+def _cover_busy(aid):
+    """该 aid 此刻是否正被别的线程生成中。
+
+    用于区分「还没好」和「确实拿不到」——
+    `_ensure_cover` 两者都返回 ''，但语义完全不同：
+    前者要继续轮询，后者才能告诉前端放弃。
+    """
+    with _COVER_INFLIGHT_LOCK:
+        return aid in _COVER_INFLIGHT
+
+
 def _mark_cover_failed(aid):
     if len(_COVER_FAILED) > _COVER_FAILED_MAX:
         _COVER_FAILED.clear()
@@ -601,8 +612,12 @@ def jm_cover(params):
 # 列表页 20 个未缓存封面要等十几秒，前端只能一直转圈。
 COVER_BATCH_TIMEOUT = 4.0
 
-# 每块并发数。小一点顺序感更强（前 4 个先出来），太大就回到"乱序"观感。
-COVER_CHUNK = 4
+# 线上并发生成的线程数。
+#
+# ★ 必须与 _SERVE_LOCK 匹配：锁给 12 但线程池只有 4，实际并发就是 4。
+#   单张 41 秒 TTFB 下，75 张需要 75/4*41 ≈ 12.8 分钟（实测 60 秒只多 4 张）；
+#   提到 12 后约 4.3 分钟。
+COVER_CHUNK = 12
 
 
 @rc.interface("jmcomic.covers")
@@ -694,11 +709,31 @@ def jm_covers(params):
                 if u:
                     covers[a] = u
                     generated += 1
-                else:
-                    # 确认拿不到（本子没图/取图失败）→ 记下来，让裁剪时跳过这个位置，
-                    # 否则它会成为顺序门控上永远过不去的坎，把后面全堵住
-                    failed_aids.append(a)
-                    _mark_cover_failed(a)
+                    continue
+
+                # ★ u 为空有三种可能，必须区分开：
+                #   1) 这一刻刚好被别的线程生成完了 → 直接读结果
+                #   2) 正在被别的线程生成中（_ensure_cover 抢占失败返回 ''）
+                #      → 什么都不做，留给下次轮询。**绝不能记成失败**
+                #   3) 确实拿不到（本子无图 / 取图失败）→ 才标记失败
+                #
+                #   原来不加区分，一律 failed_aids.append —— 前端收到 failed 就把
+                #   该 aid 从重试队列删除并永久放弃。并发触发时大量"正在生成"的
+                #   封面被判死刑，表现为"只有十几个位置有封面，其余永远空着"。
+                hit = _thumb_url_if_exists(a)
+                if hit:
+                    covers[a] = hit
+                    generated += 1
+                    continue
+                if _cover_busy(a):
+                    continue                      # 还在生成，不算失败
+                hit = _thumb_url_if_exists(a)     # 再查一次，避开竞态
+                if hit:
+                    covers[a] = hit
+                    generated += 1
+                    continue
+                failed_aids.append(a)
+                _mark_cover_failed(a)
         finally:
             ex.shutdown(wait=False, cancel_futures=False)
 

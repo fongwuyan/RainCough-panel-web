@@ -41,7 +41,7 @@ function mount(container, ctx) {
         chapter: null, pages: [], pageArr: [], pageIdx: 0, view: 'flow', coverMap: {},
         dlTimer: null, searchTimer: null, loading: false, loadingMore: false, dlBusy: false,
         descOpen: false, err: '', okMsg: '', page: 1, pageCount: 1, recent: [],
-        coverQueueStop: false, coverLoaded: 0, coverLoadedLib: 0, searchMs: 0, keyHandler: null, scrollRaf: null,
+        coverQueueStop: false, coverLoaded: 0, coverLoadedLib: 0, searchMs: 0, keyHandler: null, scrollRaf: null, scrollHandler: null,
         // 封面重试状态：
         // coverPending  —— 本轮请求过但没拿到封面的 aid（服务端是渐进生成的，可能只是还没生成好）
         // coverErrCount —— <img> 加载失败次数（用于绕过浏览器缓存重试）
@@ -187,10 +187,48 @@ function mount(container, ctx) {
         } catch (e) { /* 批取失败：全部进重试队列 */ }
         for (const a of list) {
           if (this.coverMap[a]) { delete this.coverPending[a]; continue }
+          // 已判定拿不到的不再重试（否则删了又被加回来，白耗请求）
+          if (this.coverGiveUp[a]) { delete this.coverPending[a]; continue }
           const n = (this.coverPending[a] || 0) + 1
           // 最多轮询 MAX_COVER_POLL 次（每次 2s ≈ 30s），避免真的没封面的本子无限重试
           if (n <= MAX_COVER_POLL) this.coverPending[a] = n
           else delete this.coverPending[a]
+        }
+      },
+      /**
+       * 一次性把界面上**所有**位置的封面都请求掉。
+       *
+       * ★ 不做任何"滚动检测 / 分批延迟"：
+       *   用户要求「不需要滚动检测加载封面，直接加载界面的所有封面图片资源」。
+       *
+       *   服务端单次最多收 60 个 aid，所以按 60 分组、**并发**发出（不等待）。
+       *   每组内部：先 cached_only 查（毫秒级，已缓存的立即显示），
+       *   再触发生成（fire-and-forget）。
+       */
+      loadAllCovers() {
+        this.stopCoverPrefetch()
+        const items = this.tab === 'search' ? this.results : this.lib
+        if (!items || !items.length) return
+        const aids = items.map((it) => String(it.id ?? it.aid ?? ''))
+        const groups = []
+        for (let i = 0; i < aids.length; i += 60) groups.push(aids.slice(i, i + 60))
+
+        // 第一步：并发查所有组「现在就能显示的」——把已缓存的全列出来
+        groups.forEach((g) => { this.fetchCovers(g, true) })
+        // 第二步：触发服务端生成缺的那些（不等结果）
+        //
+        // ★ 不要在客户端判断"是否有下载在跑"：
+        //   `this.dl` 是**详情页**的状态，在列表页它可能是上次残留的 downloading，
+        //   导致这里被永久跳过 —— 表现为"只有前 12 个位置有封面，其余全是骨架"。
+        //   是否让路由服务端统一判断（jm_covers 里查 Downloader.is_busy()）。
+        groups.forEach((g) => {
+          ctx.invoke('jmcomic.covers', { aids: g }).catch(() => {})
+        })
+      },
+      stopCoverPrefetch() {
+        if (this.coverPrefetchTimer !== null) {
+          clearInterval(this.coverPrefetchTimer)
+          this.coverPrefetchTimer = null
         }
       },
       async retryPendingCovers() {
