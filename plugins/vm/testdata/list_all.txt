@@ -1,0 +1,6 @@
+ Id   Name        State
+----------------------------
+ -    rc-deploy   shut off
+ -    rc-ref      shut off
+ -    ubuntu24    shut off
+

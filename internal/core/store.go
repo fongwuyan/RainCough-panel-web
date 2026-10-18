@@ -449,28 +449,9 @@ func (s *Store) Changelog() (StoreChangelog, error) {
 	return StoreChangelog{Version: strings.TrimSpace(ver), Changelog: text, Source: "github"}, nil
 }
 
-// ghGet 带 token(若有)请求 GitHub API。
-//
-// ★ token 失效时自动降级为匿名请求(2026-10-18):
-// 仓库从私有切成公开后, 面板里往往还留着当时配的 token。如果那个 token 被撤销/
-// 过期, GitHub 返回 401 Bad credentials, 于是"清单拉取失败 → 回退本地扫描",
-// 表现为市场里只剩已装插件、装不了新插件 —— 而实际上匿名访问完全可用。
-// 公开仓库根本不需要 token, 所以认证类错误(401/403)时去掉 token 重试一次。
-// 注意只对认证错误重试: 404/限流(403 secondary rate limit)等情况语义不同,
-// 盲目重试会掩盖真实原因。
+// ghGet 请求 GitHub API(凭证回落逻辑见 ghDo)。
 func (s *Store) ghGet(path string) (*http.Response, error) {
-	token := s.Token()
-	resp, err := s.ghGetWithToken(path, token)
-	if err != nil {
-		return resp, err
-	}
-	if token == "" || !isGitHubAuthFailure(resp) {
-		return resp, nil
-	}
-	// token 不被接受 → 关掉这次响应, 匿名重试
-	resp.Body.Close()
-	log.Printf("[store] GitHub token 无效, 改用匿名请求(公开仓库无需 token)")
-	return s.ghGetWithToken(path, "")
+	return s.ghDo("https://api.github.com"+path, "application/vnd.github+json")
 }
 
 // isGitHubAuthFailure 判断响应是否是"token 不被接受"(而不是限流/不存在)。
@@ -489,23 +470,58 @@ func isGitHubAuthFailure(resp *http.Response) bool {
 	}
 }
 
-// ghGetWithToken 指定 token 的请求(空串 = 匿名)。供 ghGet 的重试逻辑复用。
+// ghGetWithToken 指定 token 的请求(空串 = 匿名)。
+// 只给需要显式控制凭证的场景用(Ping 要用空 token 探测匿名可达性);
+// 普通请求走 ghDo。
 func (s *Store) ghGetWithToken(path, token string) (*http.Response, error) {
-	req, _ := http.NewRequest("GET", "https://api.github.com"+path, nil)
+	return s.doGitHub("https://api.github.com"+path, "application/vnd.github+json", token)
+}
+
+// doGitHub 发一次 GET, 用指定 token(空串=匿名)。
+func (s *Store) doGitHub(url, accept, token string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
 	return s.client.Do(req)
 }
 
-func (s *Store) ghDownload(url string) ([]byte, error) {
-	req, _ := http.NewRequest("GET", url, nil)
+// ghDo 向 GitHub 发 GET, token 不被接受时自动降级为匿名重试。
+//
+// ★ 这是全仓唯一给 GitHub 请求挂凭证的地方(2026-10-18 收敛)。
+//
+//	在此之前, "带 token 请求"散落成三份独立实现:
+//	  · ghGet        拉插件清单
+//	  · ghDownload   下载 zipball / Release 资产
+//	  · panel.go 的 ghTry  面板更新检查
+//	仓库从私有转公开后旧 token 失效, 三处先后报 HTTP 401 ——
+//	每发现一次就改一处, 结果改完两个还剩一个(插件市场点安装失败, 而市场列表正常,
+//	现象不一致反而更难查)。收敛到这里后, 新增 GitHub 调用只需传 URL。
+func (s *Store) ghDo(url, accept string) (*http.Response, error) {
 	token := s.Token()
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := s.doGitHub(url, accept, token)
+	if err != nil {
+		return nil, err
 	}
-	resp, err := s.client.Do(req)
+	if token == "" || !isGitHubAuthFailure(resp) {
+		return resp, nil
+	}
+
+	// token 不被接受 → 关掉这次响应, 匿名重试
+	resp.Body.Close()
+	log.Printf("[store] GitHub token 无效, 改用匿名请求(公开仓库无需 token)")
+	return s.doGitHub(url, accept, "")
+}
+
+func (s *Store) ghDownload(url string) ([]byte, error) {
+	resp, err := s.ghDo(url, "")
 	if err != nil {
 		return nil, err
 	}

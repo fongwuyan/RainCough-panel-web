@@ -1,0 +1,14 @@
+Id:             -
+Name:           rc-deploy
+UUID:           61e27780-2cfd-4e9d-ae97-42cf10d9aad4
+OS Type:        hvm
+State:          shut off
+CPU(s):         2
+Max memory:     3145728 KiB
+Used memory:    3145728 KiB
+Persistent:     yes
+Autostart:      disable
+Managed save:   no
+Security model: apparmor
+Security DOI:   0
+

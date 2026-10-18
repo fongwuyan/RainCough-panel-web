@@ -1,0 +1,39 @@
+{
+  "name": "vm",
+  "label": "虚拟机",
+  "version": "1.0.0",
+  "description": "KVM/QEMU 虚拟机管理：列表、启停、实时监控、创建、快照、VNC 控制台",
+  "author": "RainCough",
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "虚拟机" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python3", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"]
+  },
+  "interfaces": [
+    { "id": "vm.info", "visibility": "all", "version": "1", "description": "libvirt/QEMU 环境信息与能力探测" },
+    { "id": "vm.list", "visibility": "all", "version": "1", "description": "虚拟机列表(状态/配置/备注)" },
+    { "id": "vm.detail", "visibility": "all", "version": "1", "description": "虚拟机详情(磁盘/网卡/显示)" },
+    { "id": "vm.stats", "visibility": "all", "version": "1", "description": "实时统计(CPU/内存/网络/磁盘IO)" },
+    { "id": "vm.action", "visibility": "main", "version": "1", "description": "开机/关机/重启/强制断电/挂起/恢复" },
+    { "id": "vm.autostart", "visibility": "main", "version": "1", "description": "设置开机自启" },
+    { "id": "vm.note.get", "visibility": "all", "version": "1", "description": "读取备注" },
+    { "id": "vm.note.save", "visibility": "main", "version": "1", "description": "保存备注" },
+    { "id": "vm.images.list", "visibility": "all", "version": "1", "description": "可用镜像列表" },
+    { "id": "vm.pools.list", "visibility": "all", "version": "1", "description": "存储池列表" },
+    { "id": "vm.create", "visibility": "main", "version": "1", "description": "从镜像创建虚拟机" },
+    { "id": "vm.delete", "visibility": "main", "version": "1", "description": "删除虚拟机(可选删磁盘)" },
+    { "id": "vm.console", "visibility": "main", "version": "1", "description": "VNC 控制台信息" },
+    { "id": "vm.snapshot.list", "visibility": "all", "version": "1", "description": "快照列表" },
+    { "id": "vm.snapshot.create", "visibility": "main", "version": "1", "description": "创建快照" },
+    { "id": "vm.snapshot.revert", "visibility": "main", "version": "1", "description": "回滚到快照" },
+    { "id": "vm.snapshot.delete", "visibility": "main", "version": "1", "description": "删除快照" }
+  ]
+}

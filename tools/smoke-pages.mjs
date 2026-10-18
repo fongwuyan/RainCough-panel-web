@@ -28,6 +28,7 @@ const PAGES = [
   ['/#/plugins', '插件'],
   ['/#/settings', '设置'],
   ['/#/plugin/JMComic', 'JMComic 插件页'],
+  ['/#/plugin/vm', '虚拟机插件页'],
 ]
 
 const fails = []

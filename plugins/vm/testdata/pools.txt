@@ -1,0 +1,6 @@
+ Name     State     Autostart   Persistent   Capacity     Allocation   Available
+----------------------------------------------------------------------------------
+ boot     running   yes         yes          115.38 GiB   52.23 GiB    63.15 GiB
+ images   running   yes         yes          115.38 GiB   52.23 GiB    63.15 GiB
+ rcvm     running   yes         yes          115.38 GiB   52.23 GiB    63.15 GiB
+
