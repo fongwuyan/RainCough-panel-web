@@ -4,6 +4,24 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## v1.0.0-beta — 安装器与文档收口
+- **install.sh 第 2 步要 root 密码**：输入 `yes` 后明确询问一次，用 `sudo -A` + 0600
+  askpass 助手完成后续全部特权操作；密码只存内存与临时文件，退出即删，输错重试 3 次
+  - 不用 `echo pw | sudo -S`：sudo 时间戳仅 15 分钟，装 java/go 容易超时后再次索密
+  - 修掉一个自己引入的泄漏：重试时旧临时目录（含密码文件）无人引用会残留
+  - 免交互：`RC_ROOT_PASSWORD=<密码>`；已是 root 或免密 sudo 时不询问
+- **环境包修正 6 处**（此前新机器上插件跑不起来）
+  - 补 `apt-get update`（全新镜像索引为空 → `Unable to locate package`）
+  - 补 `python3-pip`（JMComic 的 requirements 装不上，插件启动即 ImportError）
+  - 补 `DEBIAN_FRONTEND=noninteractive`（否则 apt 可能弹配置界面卡住无 tty 安装）
+  - Java 改装 `default-jdk-headless`（纯 JRE 跑不了 `java Foo.java` 源码形式）
+  - 每个分支装完复验；非 apt 发行版打印对应安装命令而非 `command not found`
+- **版本回退**：内嵌版本尚未发 Release 时自动回退 latest 并提示，不再硬失败
+- **健康检查**改查根路径 `/`（原来查 `/api/auth/status`，装旧 Release 时会误报未响应）
+- 新增 `.gitattributes`：`*.sh` / `*.py` / `*.json` 固定 LF
+  （`core.autocrlf=true` 下工作区变 CRLF，传上 Linux 会因 `#!/usr/bin/env bash\r` 退化成 dash）
+- 文档重写：`docs/README.md` 删除过时的「现状速览」，`docs/install.md` 整篇重写
+
 ## v1.0.0-beta — 版本号体系与两条更新链路
 - 版本号：面板 **1.0.0-beta**（tag `v1.0.0-beta`）、JMComic **1.00.1**
 - 版本号带 beta/前导零后，暴露并修掉 4 处"只认 x.y.z"的硬编码
