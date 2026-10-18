@@ -16,3 +16,6 @@
 *.webp   binary
 *.db     binary
 *.db-wal binary
+
+# .gitattributes 自身也保持 LF
+.gitattributes text eol=lf
