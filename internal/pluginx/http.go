@@ -463,6 +463,15 @@ func (x *PluginX) ServeAsset(w http.ResponseWriter, r *http.Request, name, file 
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 }
 
+// isImageExt 判断是否是内容不会变的图片扩展名。
+func isImageExt(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp":
+		return true
+	}
+	return false
+}
+
 // ServePluginFile 提供插件目录内指定子目录的文件(如 cache/ 图片), 防穿越。
 func (x *PluginX) ServePluginFile(w http.ResponseWriter, r *http.Request, name, subdir, file string) {
 	if x.opts.PluginsDir == "" {
@@ -479,7 +488,14 @@ func (x *PluginX) ServePluginFile(w http.ResponseWriter, r *http.Request, name, 
 		w.Header().Set("Content-Type", ct)
 	}
 	if w.Header().Get("Cache-Control") == "" {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		// 图片类（封面/章节页）内容生成后不会变，给长缓存 + immutable，
+		// 让客户端磁盘缓存和中间层都敢长期持有。
+		// 原来统一 3600s，冷启动后仍要重新下载，是"封面加载慢"的一环。
+		if isImageExt(clean) {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
 	}
 	http.ServeFile(w, r, filepath.Join(base, clean))
 }

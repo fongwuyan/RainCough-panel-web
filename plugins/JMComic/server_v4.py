@@ -20,7 +20,11 @@ def _err(msg):
 
 _PAGES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', 'pages')
 import threading as _th
-_SERVE_LOCK = _th.BoundedSemaphore(2)   # 阅读/封面解码窗口(与下载 M._cdn_lock 分离)
+# 阅读/封面解码窗口(与下载 M._cdn_lock 分离)。
+# 原来是 2 —— 列表页一次要出 20+ 个封面，每个未命中的封面要 3 次串行网络请求
+# (album detail / photo detail / 图片下载)，只有 2 个并发时整页封面要等十几秒。
+# 提到 6：实际并发仍受 server.py 的 _cdn_lock(4) 约束，不会把站点打爆。
+_SERVE_LOCK = _th.BoundedSemaphore(6)
 
 # 性能统计
 _PERF = {'covers_hit': 0, 'covers_miss': 0, 'page_hit': 0, 'page_miss': 0, 'recent_ms': []}
@@ -94,16 +98,84 @@ def _chapter_files(aid, cid):
     return []
 
 
-def _ensure_cover(aid):
-    """封面缓存(本地 cache/ 优先, 缺失在线取第1章第1页解码), 返回主系统 URL 或 ''。"""
-    _CACHE = os.path.join(M.PLUGIN_DIR, 'cache')
+# 封面缩略图尺寸：卡片最宽也就 120dp，360px 已经足够（3x 屏也清晰）
+COVER_THUMB_W = 360
+COVER_THUMB_H = 540
+
+
+def _cover_cache_dir():
+    return os.path.join(M.PLUGIN_DIR, 'cache')
+
+
+def _cover_url(name):
+    return '/api/plugins/JMComic/cache/%s' % name
+
+
+def _thumb_path(aid):
+    return os.path.join(_cover_cache_dir(), '%s_t.webp' % aid)
+
+
+def _make_thumb(src_path, aid):
+    """把封面原图裁成 2:3 缩略图。
+
+    ★ 为什么要这步：JM 的"封面"其实是漫画第一页 —— 实测一张 960x3840 的
+      长条图，217KB。卡片只有 72~120dp 宽，等于为了显示一个缩略图
+      下载并解码了十几倍的像素。这是"封面加载缓慢"的主因。
+      裁成 360x540 后约 15~30KB，解码也快一个数量级。
+    """
+    try:
+        from PIL import Image
+        thumb = _thumb_path(aid)
+        if os.path.isfile(thumb) and os.path.getsize(thumb) > 0:
+            return thumb
+        with Image.open(src_path) as im:
+            w, h = im.size
+            if w <= 0 or h <= 0:
+                return None
+            # 从顶部裁 2:3（漫画第一页顶部一般是标题/封面区）
+            target_h = int(w * 3 / 2)
+            if h > target_h:
+                im = im.crop((0, 0, w, target_h))
+            im = im.convert('RGB')
+            im.thumbnail((COVER_THUMB_W, COVER_THUMB_H), Image.LANCZOS)
+            tmp = thumb + '.tmp'
+            im.save(tmp, 'WEBP', quality=82, method=4)
+            os.replace(tmp, thumb)
+        return thumb
+    except Exception:
+        return None
+
+
+def _cached_cover(aid):
+    """只看磁盘缓存，不发起网络请求。有原图但没缩略图时顺手生成。"""
     if not aid or not aid.isdigit():
         return ''
+    cache = _cover_cache_dir()
+    thumb = _thumb_path(aid)
+    if os.path.isfile(thumb) and os.path.getsize(thumb) > 0:
+        _perf('cover', True, 0.0)
+        return _cover_url('%s_t.webp' % aid)
     for ext in ('jpg', 'jpeg', 'webp', 'png', 'gif'):
-        p = os.path.join(_CACHE, '%s.%s' % (aid, ext))
+        p = os.path.join(cache, '%s.%s' % (aid, ext))
         if os.path.isfile(p):
+            t = _make_thumb(p, aid)
             _perf('cover', True, 0.0)
-            return '/api/plugins/JMComic/cache/%s.%s' % (aid, ext)
+            if t:
+                return _cover_url('%s_t.webp' % aid)
+            # 缩略图生成失败（Pillow 缺失/图片损坏）就退回原图，别让封面消失
+            return _cover_url('%s.%s' % (aid, ext))
+    return ''
+
+
+def _ensure_cover(aid):
+    """封面: 缩略图 > 原图 > 在线取第一页并生成。返回 URL 或 ''。"""
+    if not aid or not aid.isdigit():
+        return ''
+    hit = _cached_cover(aid)
+    if hit:
+        return hit
+
+    cache = _cover_cache_dir()
     try:
         client = M.jm()
         album = client.get_album_detail(aid)
@@ -115,18 +187,22 @@ def _ensure_cover(aid):
             return ''
         filename = photo.page_arr[0]
         ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else 'jpg'
-        save_path = os.path.join(_CACHE, '%s.%s' % (aid, ext))
-        os.makedirs(_CACHE, exist_ok=True)
+        save_path = os.path.join(cache, '%s.%s' % (aid, ext))
+        os.makedirs(cache, exist_ok=True)
         with _SERVE_LOCK:
-            if os.path.isfile(save_path):
-                _perf('cover', True, 0.0)
-                return '/api/plugins/JMComic/cache/%s.%s' % (aid, ext)
+            # 双检：等锁期间别的线程可能已经下好了
+            hit = _cached_cover(aid)
+            if hit:
+                return hit
             data = M._download_image(aid, photo_id, filename, save_path)
             if not data:
                 return ''
             M.decode_jm_image(data, photo.scramble_id, photo_id, filename, save_path)
+            t = _make_thumb(save_path, aid)
         _perf('cover', False, 0.0)
-        return '/api/plugins/JMComic/cache/%s.%s' % (aid, ext)
+        if t:
+            return _cover_url('%s_t.webp' % aid)
+        return _cover_url('%s.%s' % (aid, ext))
     except Exception:
         return ''
 
@@ -388,25 +464,54 @@ def jm_cover(params):
     return {'ok': True, 'cover': url}
 
 
+# 批量封面最多让调用方等这么久(秒)。超过就先返回已有的，
+# 剩下的在后台继续生成并落盘，下次请求就是缓存命中。
+# 原来用 `with ThreadPoolExecutor` 会等全部任务结束才返回 ——
+# 列表页 20 个未缓存封面要等十几秒，前端只能一直转圈。
+COVER_BATCH_TIMEOUT = 4.0
+
+
 @rc.interface("jmcomic.covers")
 def jm_covers(params):
-    """批量封面: {aids:[...]} → {aid: url} (并发≤4, 已缓存短路)。"""
+    """批量封面: {aids:[...]} → {aid: url}。
+
+    策略: 已缓存的立刻返回；未缓存的并发生成，最多等 COVER_BATCH_TIMEOUT 秒，
+    超时的部分不阻塞响应（后台继续跑，下次请求命中磁盘缓存）。
+    """
     import concurrent.futures as _cf
     aids = [str(x) for x in (_p(params).get('aids') or []) if str(x).isdigit()]
     if not aids:
         return {'ok': True, 'covers': {}}
+
     covers = {}
-    with _cf.ThreadPoolExecutor(max_workers=4) as ex:
-        futs = {ex.submit(_ensure_cover, a): a for a in aids[:60]}
-        for f in _cf.as_completed(futs):
-            a = futs[f]
-            try:
-                u = f.result()
-                if u:
-                    covers[a] = u
-            except Exception:
-                pass
-    return {'ok': True, 'covers': covers, 'total': len(aids)}
+    pending = []
+    # 第一遍: 只取已缓存的，零网络开销
+    for a in aids[:60]:
+        u = _cached_cover(a)
+        if u:
+            covers[a] = u
+        else:
+            pending.append(a)
+
+    if pending:
+        ex = _cf.ThreadPoolExecutor(max_workers=4)
+        try:
+            futs = {ex.submit(_ensure_cover, a): a for a in pending}
+            done, not_done = _cf.wait(futs, timeout=COVER_BATCH_TIMEOUT)
+            for f in done:
+                a = futs[f]
+                try:
+                    u = f.result()
+                    if u:
+                        covers[a] = u
+                except Exception:
+                    pass
+        finally:
+            # 不等剩余任务：它们会继续生成并写入 cache/，下次请求直接命中
+            ex.shutdown(wait=False, cancel_futures=False)
+
+    return {'ok': True, 'covers': covers, 'total': len(aids),
+            'pending': len(pending) - len(covers)}
 
 
 @rc.interface("jmcomic.prefetch")

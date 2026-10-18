@@ -398,7 +398,13 @@ func (x *PluginX) serveFromPanelURL(w http.ResponseWriter, r *http.Request, name
 	if ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(clean))); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	// 图片（封面/章节页）内容生成后不会变，给长缓存 + immutable。
+	// 其余文件保持 1 天：它们可能是导出/临时产物，有余地更新。
+	if isImageExt(clean) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	}
 	http.ServeFile(w, r, full)
 }
 
