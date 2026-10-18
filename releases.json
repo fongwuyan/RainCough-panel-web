@@ -3,25 +3,11 @@
     {
       "version": "1.0.0-beta",
       "tag": "v1.0.0-beta",
-      "size_bytes": 3956351,
-      "md5": "1310ffd950ea87528deb2b388bac5258",
-      "sha256": "aa2d9fa83caa6667184c7ba46be3b4ac1dc7b2d2db90e253564f5163bd021702",
+      "size_bytes": 3956189,
+      "md5": "33f9258429940e4fe0e7aa54f518fa2d",
+      "sha256": "fb735dbd368e79ae8207d33c24d3f09c31bbbc43c84ad542886adfb881dedfd5",
       "asset": "raincough-linux-x86_64-1.0.0-beta.tar.gz",
       "install_command": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/v1.0.0-beta/install.sh | bash"
-    },
-    {
-      "version": "1.0.0",
-      "tag": "v1.0.0",
-      "commit": "11b84a0",
-      "asset": "raincough-linux-x86_64-1.0.0.tar.gz",
-      "size_bytes": 3876652,
-      "md5": "ff0df9bfee05a95f540f3e13556b7f11",
-      "sha256": "72ccd4acfc756cb6915b85b4a43c1060269ad38e36da2c86ee9727a72a009945",
-      "release_id": 400689319,
-      "date": "2026-10-01",
-      "changelog": "CHANGELOG.md",
-      "install": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/v1.0.0/install.sh | bash",
-      "install_latest": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/main/install.sh | bash"
     }
   ],
   "rules": {

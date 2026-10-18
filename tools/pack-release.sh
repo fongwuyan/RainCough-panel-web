@@ -132,7 +132,26 @@ json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 open(p, "a", encoding="utf-8").write("\n")
 PY
 # releases.json 变了, 包内的那份也要同步(它会被解包到安装目录)
-cp releases.json "$BUILD/releases.json"
+#
+# ★ 但包内那份**不能带本版本自身的 size/md5/sha256** —— 那是自指矛盾:
+#   把哈希写进包内文件 → 包内容变 → 包哈希变 → 写进去的又是旧值。
+#   实测差 4 字节(gzip 压缩率随内容浮动), 迭代也收敛不了。
+#   所以包内条目只保留"有哪些版本 + 安装命令", 校验值以仓库根 releases.json /
+#   Release 页面为准(这两处是包外的, 可以记录真实值)。
+python3 - "$VER" <<'PY'
+import json, sys
+ver = sys.argv[1]
+src = json.load(open("releases.json", encoding="utf-8"))
+for e in src.get("panel", []):
+    if e.get("tag") == "v" + ver:
+        for k in ("size_bytes", "md5", "sha256"):
+            e.pop(k, None)
+        e["checksum_note"] = "校验值见仓库根 releases.json 或 Release 页面（包内无法记录自身哈希）"
+json.dump(src, open("dist-build/_inner_releases.json", "w", encoding="utf-8"),
+          ensure_ascii=False, indent=2)
+PY
+cp dist-build/_inner_releases.json "$BUILD/releases.json"
+rm -f dist-build/_inner_releases.json
 rm -f "$OUT"
 ( cd dist-build && tar czf "../$OUT" "$PKG" )
 SZ=$(stat -c '%s' "$OUT" 2>/dev/null || stat -f '%z' "$OUT")
@@ -148,6 +167,15 @@ for e in d.get("panel", []):
         e.update({"size_bytes": int(sz), "md5": md5, "sha256": sha})
 json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 open(p, "a", encoding="utf-8").write("\n")
+PY
+
+# 收尾一致性校验: 仓库根那份必须等于最终包
+python3 - "$SZ" "$SHA" "$VER" <<'PY'
+import json, sys
+sz, sha, ver = sys.argv[1], sys.argv[2], sys.argv[3]
+d = json.load(open("releases.json", encoding="utf-8"))
+e = [x for x in d.get("panel", []) if x.get("tag") == "v" + ver][0]
+assert e["size_bytes"] == int(sz) and e["sha256"] == sha, "releases.json 与最终包不一致"
 PY
 
 echo
