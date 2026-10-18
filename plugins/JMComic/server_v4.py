@@ -72,8 +72,20 @@ def _ensure_page(aid, cid, filename):
     cache = _page_cache_path(aid, cid, filename)
     if os.path.isfile(cache):
         return _page_url(aid, cid, filename)
-    src = os.path.join(M.album_dir(aid), cid, os.path.basename(filename))
-    if os.path.isfile(src):
+    # ★ 下载产物的目录层级有两种：
+    #     downloads/<aid>/<cid>/<file>          ← 旧下载器(jmcomic Bd_Aid 移动后)
+    #     downloads/<aid>/<aid>/<cid>/<file>    ← 内置下载器(downloader.py)
+    #   原来只认第一种，于是"用内置下载器下完"的本子，阅读时永远找不到源文件，
+    #   只能回退到在线下载 —— 而 CDN TTFB 41 秒，表现为"打不开 / 极慢"。
+    base_dir = M.album_dir(aid)
+    fn = os.path.basename(filename)
+    src = None
+    for cand in (os.path.join(base_dir, cid, fn),
+                 os.path.join(base_dir, aid, cid, fn)):
+        if os.path.isfile(cand):
+            src = cand
+            break
+    if src and os.path.isfile(src):
         try:
             os.makedirs(os.path.dirname(cache), exist_ok=True)
             try:
@@ -610,6 +622,16 @@ def jm_covers(params):
     # 前端轮询用（生成要 1~2 秒/个，首批 4s 必然拿不全；轮询能廉价地"等到就显示"）。
     cached_only = str(pp.get('cached_only') or '').lower() in ('1', 'true', 'yes')
 
+    # ★ 有整本下载在跑时，封面请求自动降级为「只查不生成」。
+    #   两者共用同一条被限速的 CDN 链路：边下整本边生成封面会让两边都变慢，
+    #   而下载是用户明确等待的操作，优先级更高。
+    if not cached_only:
+        try:
+            if _dl().is_busy():
+                cached_only = True
+        except Exception:
+            pass
+
     covers = {}
     pending = []
     # 第一遍: 只查缩略图是否已存在。
@@ -820,10 +842,23 @@ def jm_library_list(params):
 def jm_library_delete(params):
     import shutil
     aid = _s(params, 'aid')
+
+    # ★ 先停掉下载任务并移除它的记录。
+    #   原来只删了文件和 library 条目，**下载任务记录还留在 dl_tasks.json 里**，
+    #   于是界面上这个本子仍然出现（带"已下载 N 页"），用户以为"删不掉"。
+    try:
+        _dl().remove(aid, delete_files=False)
+    except Exception:
+        pass
+
     for base in M.storage_paths():
         d = os.path.join(base, aid)
         if os.path.isdir(d):
             shutil.rmtree(d, ignore_errors=True)
+        # 下载器的临时目录
+        tmp = os.path.join(base, '_tmp_%s' % aid)
+        if os.path.isdir(tmp):
+            shutil.rmtree(tmp, ignore_errors=True)
         zip_path = os.path.join(base, '%s.zip' % aid)
         if os.path.isfile(zip_path):
             os.remove(zip_path)

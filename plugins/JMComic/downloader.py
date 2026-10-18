@@ -26,13 +26,30 @@ import traceback
 
 import requests
 
+# 复用连接：每次请求都新建 TCP+TLS 要 0.5~1 秒，
+# 一本几百页的本子累计能省一两分钟。
+_SESSION = requests.Session()
+_SESSION.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    'Referer': 'https://18comic.vip/',
+    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+})
+_adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+_SESSION.mount('https://', _adapter)
+
 # 单页请求超时。★ 不能用 30s —— 实测 CDN TTFB 约 41s，30s 必然超时，
 # 表现为"每页都失败"（旧实现就是这样，3 个域名全部 timeout）。
 CONNECT_TIMEOUT = 15
 READ_TIMEOUT = 120
 
-# 并发页数。太高会触发 CDN 限流，太低则被 TTFB 拖死。6 是实测比较稳的值。
-DEFAULT_WORKERS = 6
+# 并发页数。
+#
+# 单页 TTFB 实测 ~41 秒，所以并发数直接决定总时长：
+#   34 页 @ 6  → 232 秒（实测 198 秒）
+#   34 页 @ 10 → 139 秒
+# 太高会触发 CDN 限流（表现为大量超时，反而更慢），10 是折中值。
+DEFAULT_WORKERS = 10
 
 # 单页最多重试次数（含换域名）
 MAX_RETRY_PER_PAGE = 4
@@ -174,6 +191,15 @@ class Downloader(object):
             t = self._tasks.get(str(aid))
             return bool(t and t.status in ('queued', 'downloading'))
 
+    def is_busy(self):
+        """是否有相册正在下载。
+
+        封面生成和下载共用同一条（被限速的）CDN 链路，
+        边下整本边生成封面会让两边都变慢。调用方据此让封面让路。
+        """
+        with self._lock:
+            return any(t.status in ('queued', 'downloading') for t in self._tasks.values())
+
     # ------------------------------------------------------------------ 控制
 
     def start(self, aid, name='', author='', workers=DEFAULT_WORKERS):
@@ -199,7 +225,13 @@ class Downloader(object):
                 self._tasks[aid] = t
             t.status = 'queued'
             t.error = ''
+            # ★ 计数必须归零：续传时是"重新跑一遍并跳过已有文件"，
+            #   如果沿用上次的 done_pages 就会累加（实测 19 页显示成 38 页）。
+            t.done_pages = 0
+            t.done_chapters = 0
+            t.failed_pages = 0
             t.failed = []
+            t.bytes = 0
             t.workers = max(1, min(int(workers or DEFAULT_WORKERS), 12))
             t.started_at = _now()
             self._cancel.discard(aid)
@@ -346,6 +378,19 @@ class Downloader(object):
                 if not pages:
                     t.failed.append({'cid': cid, 'file': '', 'reason': '章节无图片'})
                     continue
+                # 去重：page_arr 偶尔会给出重复文件名（实测 19 项里 1 对重复），
+                # 不去重会写成同一个文件，导致「进度 19 页但磁盘只有 18 张」。
+                seen_fn = set()
+                uniq = []
+                for fn in pages:
+                    if fn in seen_fn:
+                        continue
+                    seen_fn.add(fn)
+                    uniq.append(fn)
+                if len(uniq) != len(pages):
+                    _log_throttled('章节 %s 的 page_arr 有重复，已去重 %d -> %d'
+                                   % (cid, len(pages), len(uniq)))
+                pages = uniq
 
                 ch = {
                     'cid': cid, 'name': cname or cid,
@@ -399,8 +444,15 @@ class Downloader(object):
         pages = ch['pages']
         scramble = ch['scramble']
 
-        # 目标目录：<base>/<aid>/<aid>/<cid>/
-        album_dir = os.path.join(base, aid, aid)
+        # 目标目录：<base>/<aid>/<cid>/
+        #
+        # ★ 必须与旧下载器(jmcomic Bd_Aid)的布局一致，否则：
+        #   · 阅读接口 _ensure_page 找不到源文件 → 回退在线下载（41s TTFB）→ "打不开"
+        #   · 已用旧下载器下好的本子无法复用，会重复下载
+        #   旧布局实测是 <base>/<aid>/<aid>/*.webp（单章节时 cid == aid，
+        #   jmcomic 会把 photo_id 归一成 album_id），因此 <base>/<aid>/<cid>/ 在
+        #   cid == aid 时与旧布局**完全相同**，多章节时则是自然的 cid 分层。
+        album_dir = os.path.join(base, aid)
         cid_dir = os.path.join(album_dir, cid)
         os.makedirs(cid_dir, exist_ok=True)
 
@@ -471,8 +523,7 @@ class Downloader(object):
             domain = self._domains[attempt % len(self._domains)]
             url = 'https://%s/media/photos/%s/%s' % (domain, cid, filename)
             try:
-                r = requests.get(url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
-                                 headers=UA, stream=True)
+                r = _SESSION.get(url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT), stream=True)
                 if r.status_code != 200:
                     last = 'HTTP %s' % r.status_code
                     r.close()
