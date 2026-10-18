@@ -1,0 +1,18 @@
+# 强制 shell 脚本用 LF —— install.sh 是通过 curl | bash 直接执行的,
+# 一旦带 CRLF, 首行 `#!/usr/bin/env bash\r` 会让解释器路径变成 "bash\r",
+# 系统找不到就把脚本交给 sh(dash) 执行, 于是 `set -euo pipefail` 直接报
+# "pipefail: 无效的选项名", 安装当场失败(2026-10-18 实测踩到)。
+*.sh     text eol=lf
+*.bash   text eol=lf
+
+# Python/JSON 同理(插件后端脚本在 Linux 上跑)
+*.py     text eol=lf
+*.json   text eol=lf
+
+# 二进制资产不要做行尾转换
+*.tar.gz binary
+*.png    binary
+*.jpg    binary
+*.webp   binary
+*.db     binary
+*.db-wal binary

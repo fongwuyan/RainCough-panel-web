@@ -9,8 +9,14 @@
 # (gh-proxy 不可用时可去掉前缀直连 raw.githubusercontent.com;
 #  资产下载默认走 gh-proxy 镜像, 可用 RC_MIRROR=https://github.com 覆盖)
 #
-# 流程: 1 确认 -> 2 环境检查 -> 3 下载面板主体 -> 4 安装(解压+建目录+写 systemd)
-#       -> 5 验证 HTTP 200 + 完成
+# 流程: 1 确认(输入 yes) -> 2 环境检查 + 输入 root 密码 -> 2b 插件运行时
+#       -> 3 下载面板主体 -> 4 安装(解压+建目录+写 systemd) -> 5 验证 HTTP 200
+#
+# root 密码: 第 2 步会在你输入 yes 之后明确要一次 root 密码, 用来完成后续所有
+#   特权操作(建目录/注册 systemd/装插件运行时)。密码只存在内存与一个 0600 临时
+#   文件里, 退出即删, 不写日志、不写 /opt、不进命令行参数。
+#   免交互场景(批量部署/CI)用 RC_ROOT_PASSWORD=<密码> 传入;
+#   已是 root 或 sudo 免密时不会询问。
 #
 # 固定静态 IP(一步到位, 避免面板地址漂移): 安装时读默认路由网卡的当前地址/网关/上游 DNS,
 #   原样写成静态配置(NetworkManager / netplan / ifupdown 自动识别, 只动这块网卡),
@@ -54,7 +60,7 @@ warn() { echo "${C_Y}[!!]${C_0} $*"; }
 fail() {
     echo "${C_R}[X] FAILED${C_0} $*" >&2
     echo "    [X] install aborted. If the text above looks garbled (non-UTF-8 terminal), re-run with:" >&2
-    echo "        curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/v1.0.0/install.sh | LANG=C.UTF-8 bash" >&2
+    echo "        curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/main/install.sh | LANG=C.UTF-8 bash" >&2
     exit 1
 }
 
@@ -409,6 +415,32 @@ else
 fi
 BODY_ASSET="raincough-linux-x86_64-${PANEL_VERSION}.tar.gz"
 
+# ---------- 版本可用性校验: 内嵌版本可能还没发布 ----------
+# 场景: 开发树/尚未发 Release 的分支上, 内嵌版本(如 1.0.0-beta)是"将要发布"的版本,
+#   对应 tag 的 Release 还不存在 → 步骤 3 下载 404 → 安装硬失败。
+#   用户拿到这种脚本只会看到"面板主体下载失败", 完全不知道原因是版本没发布。
+# 处理: 探测该 tag 的资产能否访问, 不能就回退到 latest Release, 并明确提示。
+#   探测用 HEAD(不下载正文), 走镜像失败再直连, 与 fetch() 保持同一套源。
+asset_reachable() {   # $1 = 完整 URL
+    curl -fsIL --connect-timeout 10 --max-time 20 -o /dev/null "$1" 2>/dev/null
+}
+if [ -n "$REPO" ]; then
+    REL_PATH="$REPO/releases/download/$TAG/$BODY_ASSET"
+    if ! asset_reachable "$MIRROR/$REL_PATH" && ! asset_reachable "https://github.com/$REL_PATH"; then
+        warn "版本 $PANEL_VERSION 的 Release 资产不可用(可能尚未发布), 尝试回退到 latest Release..."
+        LATEST_TAG=$(curl -fsSL -m 15 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+                     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+        if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$TAG" ]; then
+            TAG="$LATEST_TAG"
+            PANEL_VERSION="${TAG#v}"
+            BODY_ASSET="raincough-linux-x86_64-${PANEL_VERSION}.tar.gz"
+            warn "已回退到 $PANEL_VERSION(如需指定版本请用 RC_VERSION=<版本>)"
+        else
+            fail "找不到可用的 Release(内嵌版本 $PANEL_VERSION 未发布, 且 latest 也不可用)。请用 RC_VERSION=<已发布版本> 重试。"
+        fi
+    fi
+fi
+
 # 只跑"固定静态 IP"这一步(便于脚本化/自测): RC_ONLY_NET=1 [RC_NET_DRYRUN=1]
 if [ "${RC_ONLY_NET:-0}" = "1" ]; then
     SUDO=""
@@ -456,14 +488,98 @@ AVAIL_K=$(df -Pk . | awk 'NR==2{print $4}')
 [ "$AVAIL_K" -ge 102400 ] || fail "磁盘可用不足 100M (当前 $((AVAIL_K/1024))M)"
 ok "磁盘可用 $((AVAIL_K/1024))M"
 SUDO=""
-if [ "$(id -u)" -ne 0 ]; then
-    command -v sudo >/dev/null 2>&1 || fail "需要 root 或 sudo 权限"
+# ---- 特权获取: 步骤 1 确认后, 这里一次性拿到 root 权限 ----
+# 后续每一步(写 $APP_DIR、注册 systemd、apt 装插件运行时)都需要 root, 与其在各个
+# 命令处反复弹密码, 不如在开头明确要一次。
+#
+# 密码处理原则:
+#   · 只存在内存/一个 0600 的临时文件里, 退出时(trap)立即删除
+#   · 不写入 journal、不写入 /opt、不出现在任何命令行参数里
+#   · 用 sudo -A + askpass 而不是"每次 echo 密码 | sudo -S":
+#     后者的 sudo 时间戳只有 15 分钟, 装 java/go 很可能超时, 中途会再次索密,
+#     在 curl|bash 场景(无 tty)直接失败
+RC_ASK_DIR=""
+cleanup_askpass() {
+    if [ -n "${RC_ASK_DIR:-}" ] && [ -d "$RC_ASK_DIR" ]; then
+        rm -rf "$RC_ASK_DIR" 2>/dev/null || true
+    fi
+    RC_ASK_DIR=""
+    unset RC_ASKPASS_PW_FILE SUDO_ASKPASS 2>/dev/null || true
+}
+trap cleanup_askpass EXIT INT TERM
+
+# setup_sudo_askpass <密码>: 生成 askpass 助手, 成功后把 SUDO 设为 "sudo -A"
+setup_sudo_askpass() {
+    local pw="$1"
+    # ★ 先清上一轮再建新的(2026-10-18 实测踩到):
+    #   RC_ASK_DIR 是全局的, 密码输错重试时第二次会覆盖它, 于是第一次那个
+    #   含密码文件的临时目录再也没人引用 —— trap 只清最后一个, 前面的残留下来。
+    #   虽然残留的是"错密码", 但含密码的文件不该留在 /tmp。
+    cleanup_askpass
+    RC_ASK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rc-ask.XXXXXX")" || return 1
+    chmod 700 "$RC_ASK_DIR"
+    # 密码单独放一个文件: askpass 脚本里不出现密码本体, 免得 sed/ps 之类看到
+    printf '%s' "$pw" > "$RC_ASK_DIR/pw" || return 1
+    chmod 600 "$RC_ASK_DIR/pw"
+    cat > "$RC_ASK_DIR/askpass.sh" <<'ASKEOS'
+#!/bin/sh
+cat "$RC_ASKPASS_PW_FILE"
+ASKEOS
+    chmod 700 "$RC_ASK_DIR/askpass.sh"
+    export RC_ASKPASS_PW_FILE="$RC_ASK_DIR/pw"
+    export SUDO_ASKPASS="$RC_ASK_DIR/askpass.sh"
+    # 自检: 真能提权才算数(密码错时这里就会失败, 不会拖到后面某个命令才炸)
+    sudo -A true 2>/dev/null || return 1
+    SUDO="sudo -A"
+    return 0
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+    ok "已是 root, 无需输入密码"
+else
+    command -v sudo >/dev/null 2>&1 \
+        || fail "需要 root 权限, 但系统里没有 sudo。请直接用 root 运行: su -c 'bash install.sh'"
     if sudo -n true 2>/dev/null; then
-        SUDO="sudo"   # 免密可用: 绝不弹提示(避免 pty 下 sudo -v 异常索密)
-    else
-        info "需要特权操作, 请输入 sudo 密码:"
-        sudo -v || fail "sudo 验证失败"
         SUDO="sudo"
+        ok "sudo 免密可用, 无需输入密码"
+    elif [ -n "${RC_ROOT_PASSWORD:-}" ]; then
+        # 非交互场景(批量部署/CI): 用环境变量传入
+        if setup_sudo_askpass "$RC_ROOT_PASSWORD"; then
+            ok "已用 RC_ROOT_PASSWORD 通过 sudo 验证"
+        else
+            fail "RC_ROOT_PASSWORD 不正确(或该用户没有 sudo 权限)"
+        fi
+    elif [ "$HAVE_TTY" = 0 ]; then
+        fail "需要 root 权限, 但当前没有可交互终端, 无法询问密码。
+   请任选一种方式:
+     · 以 root 运行:    su -c 'bash install.sh'
+     · 传环境变量:      RC_ROOT_PASSWORD='<root密码>' bash install.sh
+     · 先手动授权:      sudo -v   然后在同一个 shell 里再运行本脚本"
+    else
+        echo
+        info "步骤 2/5: 需要 root 权限"
+        echo "  下一步需要 root 密码来完成安装:"
+        echo "    · 创建目录 ${RC_APP_DIR:-/opt/raincough} 并解压面板"
+        echo "    · 注册并启用 systemd 服务"
+        echo "    · 按需安装插件运行时 (python/php/java/node/go)"
+        echo "  密码只用于本次安装, 不写入任何文件, 安装结束后即丢弃。"
+        RC_PW_TRIES=0
+        while [ "$RC_PW_TRIES" -lt 3 ]; do
+            RC_PW_TRIES=$((RC_PW_TRIES + 1))
+            RC_PW_IN="$(read_secret "请输入 root 密码")"
+            if [ -z "$RC_PW_IN" ]; then
+                warn "没有读到密码(为空或输入超时), 请重试 ($RC_PW_TRIES/3)"
+                continue
+            fi
+            if setup_sudo_askpass "$RC_PW_IN"; then
+                RC_PW_IN=""
+                ok "root 密码验证通过"
+                break
+            fi
+            RC_PW_IN=""
+            warn "密码不正确 ($RC_PW_TRIES/3)"
+        done
+        [ "$SUDO" = "sudo -A" ] || fail "连续 3 次密码错误, 已中止安装"
     fi
 fi
 ok "权限就绪 (root${SUDO:+ via sudo})"
@@ -475,12 +591,20 @@ command -v ss >/dev/null 2>&1 || command -v netstat >/dev/null 2>&1 \
     || warn "缺少 ss/netstat(端口探测将退化为不可用, 仍可继续)"
 
 # ---------- 步骤 2b: 插件运行时环境(可选) ----------
-# 面板自身零依赖, 但插件可以是 py/php/go/java/node/bash。这里把常用解释器补齐,
-# 让"装上就能跑任意语言插件"成立。
+# 面板自身零依赖(单 Go 二进制), 但**插件后端**可以是 py/php/java/node/go/bash。
+# 这里把常用解释器补齐, 让"装上就能跑任意语言插件"成立。
 #
-# 为什么要补 python 别名: Debian 12 / Ubuntu 24.04+ **只有 python3, 没有 python**,
-#   而老插件(含 JMComic)的 plugin.json 写的是 exec:["python", ...] → fork 直接失败。
-#   面板侧已有解释器别名回退(见 internal/pluginrt), 这里再补一个系统级别名双保险。
+# 这一块踩过的坑(2026-10-18 全面审计, 6 处):
+#  1. 从不 apt-get update —— 全新镜像的包索引可能为空/过期, apt-get install 直接
+#     "Unable to locate package", php/java 静默装不上(只留一句 warn)
+#  2. 不装 python3-pip —— JMComic 的 requirements 是 jmcomic/requests, 没有 pip
+#     就装不上, 插件启动即 ImportError; 面板预检提示的"请执行 pip install"也无解
+#  3. 不设 DEBIAN_FRONTEND=noninteractive —— apt 可能弹 tzdata/keyboard 配置界面,
+#     curl|bash(无 tty) 场景会一直等输入
+#  4. java 只装 default-jre-headless —— 插件若直接跑 .java 源码(java Foo.java),
+#     需要 jdk.compiler, JRE 里没有 → 启动失败。改装 default-jdk-headless
+#  5. 装完不复验 —— apt 返回 0 但命令仍可能不在 PATH(例如被 alternatives 藏起来)
+#  6. 非 apt 发行版直接 $SUDO apt-get → command not found, 提示信息毫无帮助
 echo
 if [ "${RC_SKIP_RUNTIMES:-0}" = "1" ]; then
     info "步骤 2b/5: 插件运行时检查(RC_SKIP_RUNTIMES=1, 已跳过)"
@@ -490,21 +614,53 @@ else
 
     has() { command -v "$1" >/dev/null 2>&1; }
 
-    # --- python: 保证 python3 + python 别名都存在 ---
-    case ",$PLUGIN_LANGS," in *,python,*)
-        if has python3; then
-            ok "python3 $(python3 --version 2>&1 | awk '{print $2}')"
-        elif has python; then
-            ok "python $(python --version 2>&1 | awk '{print $2}')"
-        else
-            warn "缺少 python3; 尝试安装..."
-            if $SUDO apt-get install -y -q python3 >/dev/null 2>&1; then
-                ok "已安装 python3"
+    # 包管理器: 自动安装只覆盖 apt 系。其它发行版不硬失败 ——
+    # 面板本身不需要这些, 只是对应语言的插件跑不起来, 给出可复制的命令更实用。
+    APT=0
+    command -v apt-get >/dev/null 2>&1 && APT=1
+    APT_UPDATED=0
+    apt_install() {   # $@ = 包名; 返回 0 表示装成功
+        [ "$APT" = 1 ] || return 1
+        if [ "$APT_UPDATED" = 0 ]; then
+            info "apt-get update(首次安装前刷新包索引)..."
+            if DEBIAN_FRONTEND=noninteractive $SUDO apt-get update -q >/dev/null 2>&1; then
+                APT_UPDATED=1
             else
-                warn "python3 安装失败(插件若依赖 Python 将无法启动)"
+                warn "apt-get update 失败(无外网或源不可用), 仍尝试安装"
+                APT_UPDATED=1   # 不要每条都重试一次, 那会拖很久
             fi
         fi
-        # 别名: 老插件 exec 写 "python"
+        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -q "$@" >/dev/null 2>&1
+    }
+    # 非 apt 系统: 打印该发行版的等价命令
+    hint_pkg() {   # $1 = 用途说明; $2 = Debian 包名
+        [ "$APT" = 1 ] && return 0
+        warn "$1: 本机不是 apt 系, 请手动安装 $2"
+        if command -v dnf >/dev/null 2>&1; then echo "       sudo dnf install -y $2"
+        elif command -v pacman >/dev/null 2>&1; then echo "       sudo pacman -S $2"
+        elif command -v apk >/dev/null 2>&1; then echo "       sudo apk add $2"
+        fi
+    }
+
+    # --- python: python3 + pip(装插件依赖必需) + python 别名 ---
+    case ",$PLUGIN_LANGS," in *,python,*)
+        if has python3 || has python; then
+            ok "python3 $( (python3 --version 2>&1 || python --version 2>&1) | awk '{print $2}')"
+        else
+            warn "缺少 python3; 尝试安装..."
+            apt_install python3 && ok "已安装 python3" \
+                || { hint_pkg "Python 插件" python3; warn "python3 未就绪(Python 插件将无法启动)"; }
+        fi
+        # pip: 插件 requirements 靠它。Debian 12 起 pip 对系统环境有 PEP 668 保护,
+        # 装包需 --break-system-packages, 这里只保证 pip 可用, 装依赖时面板会提示。
+        if python3 -m pip --version >/dev/null 2>&1; then
+            ok "pip $(python3 -m pip --version 2>/dev/null | awk '{print $2}')"
+        else
+            warn "缺少 pip; 尝试安装 python3-pip..."
+            apt_install python3-pip && ok "已安装 python3-pip" \
+                || { hint_pkg "插件 Python 依赖" python3-pip; warn "pip 未就绪(插件依赖无法自动安装)"; }
+        fi
+        # 别名: 老插件的 exec 写 "python"(Debian 12 / Ubuntu 24.04 只有 python3)
         if ! has python; then
             PY3=$(command -v python3 2>/dev/null || true)
             if [ -n "$PY3" ]; then
@@ -516,34 +672,48 @@ else
 
     # --- php ---
     case ",$PLUGIN_LANGS," in *,php,*)
-        if has php; then ok "php $(php -r 'echo PHP_VERSION;' 2>/dev/null)"; else
-            warn "缺少 php; 尝试安装..."
-            $SUDO apt-get install -y -q php-cli >/dev/null 2>&1 && ok "已安装 php-cli" \
-                || warn "php 安装失败(可用 RC_PLUGIN_LANGS 去掉 php)"
+        if has php; then
+            ok "php $(php -r 'echo PHP_VERSION;' 2>/dev/null)"
+        else
+            warn "缺少 php; 尝试安装 php-cli..."
+            apt_install php-cli && has php && ok "已安装 php-cli" \
+                || { hint_pkg "PHP 插件" php-cli; warn "php 未就绪(PHP 插件将无法启动)"; }
         fi
     ;; esac
 
-    # --- java ---
+    # --- java: 装 JDK 而非 JRE ---
+    # 插件可能是 .jar(只要 JRE) 也可能是裸 .java 源码(`java Foo.java`, 需 jdk.compiler)。
+    # 只装 JRE 时后者会报 "error: can't find source file" / 缺 java.compiler 模块,
+    # 表现为插件一启动就退出。多占约 40MB, 换两种形态都能跑, 值得。
     case ",$PLUGIN_LANGS," in *,java,*)
         if has java; then
             ok "java $(java -version 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            if ! has javac; then
+                info "有 java 但缺 javac: .java 源码形式的插件将无法运行, 尝试补装 JDK..."
+                apt_install default-jdk-headless >/dev/null 2>&1 || true
+                has javac && ok "已补 javac($(javac -version 2>&1 | awk '{print $2}'))" \
+                    || warn "javac 仍不可用(仅影响源码形式的 Java 插件; .jar 不受影响)"
+            fi
         else
-            warn "缺少 java; 尝试安装 default-jre-headless..."
-            $SUDO apt-get install -y -q default-jre-headless >/dev/null 2>&1 && ok "已安装 JRE" \
-                || warn "java 安装失败(Java 插件将无法启动)"
+            warn "缺少 java; 尝试安装 default-jdk-headless..."
+            apt_install default-jdk-headless && has java \
+                && ok "已安装 JDK $(java -version 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')" \
+                || { hint_pkg "Java 插件" default-jdk-headless; warn "java 未就绪(Java 插件将无法启动)"; }
         fi
     ;; esac
 
     # --- node ---
     case ",$PLUGIN_LANGS," in *,node,*)
-        if has node; then ok "node $(node --version 2>/dev/null)"; else
-            warn "缺少 node; 尝试安装..."
-            $SUDO apt-get install -y -q nodejs >/dev/null 2>&1 && ok "已安装 nodejs" \
-                || warn "node 安装失败(Node 插件将无法启动)"
+        if has node; then
+            ok "node $(node --version 2>/dev/null)"
+        else
+            warn "缺少 node; 尝试安装 nodejs..."
+            apt_install nodejs && has node && ok "已安装 nodejs $(node --version 2>/dev/null)" \
+                || { hint_pkg "Node 插件" nodejs; warn "node 未就绪(Node 插件将无法启动)"; }
         fi
     ;; esac
 
-    # --- go: 官方二进制(apt 源版本往往过旧, 且不影响面板运行, 仅编译插件用) ---
+    # --- go: 官方二进制(apt 源版本往往过旧; 仅编译 Go 插件用, 不装也能跑面板) ---
     case ",$PLUGIN_LANGS," in *,go,*)
         if has go; then
             ok "go $(go version 2>/dev/null | awk '{print $3}')"
@@ -552,28 +722,51 @@ else
             $SUDO ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt 2>/dev/null || true
             ok "已链接 /usr/local/go/bin/go"
         else
-            # Go 只用于开发/编译 Go 插件, 装不上不算失败
             GOVER="${RC_GO_VERSION:-1.23.4}"
-            GARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)
-            case "$GARCH" in amd64|arm64) : ;; *) GARCH=amd64 ;; esac
+            GARCH=$(dpkg --print-architecture 2>/dev/null || uname -m)
+            case "$GARCH" in amd64|x86_64) GARCH=amd64 ;; arm64|aarch64) GARCH=arm64 ;; *) GARCH=amd64 ;; esac
             info "安装 Go $GOVER($GARCH)..."
-            GOURL="https://go.dev/dl/go${GOVER}.linux-${GARCH}.tar.gz"
-            if curl -fsSL --max-time 180 -o /tmp/rc-go.tgz "$GOURL" 2>/dev/null \
-               || curl -fsSL --max-time 240 -o /tmp/rc-go.tgz "https://golang.google.cn/dl/go${GOVER}.linux-${GARCH}.tar.gz" 2>/dev/null; then
-                $SUDO rm -rf /usr/local/go
-                $SUDO tar -C /usr/local -xzf /tmp/rc-go.tgz && rm -f /tmp/rc-go.tgz
-                $SUDO ln -sf /usr/local/go/bin/go /usr/local/bin/go 2>/dev/null || true
-                $SUDO ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt 2>/dev/null || true
-                ok "已安装 Go $(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')"
+            GOTMP="$(mktemp -d)"; GOURL="https://go.dev/dl/go${GOVER}.linux-${GARCH}.tar.gz"
+            if curl -fsSL --connect-timeout 20 --max-time 240 -o "$GOTMP/go.tgz" "$GOURL" 2>/dev/null \
+               || curl -fsSL --connect-timeout 20 --max-time 300 -o "$GOTMP/go.tgz" \
+                      "https://golang.google.cn/dl/go${GOVER}.linux-${GARCH}.tar.gz" 2>/dev/null; then
+                # 校验压缩包完整(下载被截断时 tar 会报错, 先显式验一次更早暴露)
+                if tar tzf "$GOTMP/go.tgz" >/dev/null 2>&1; then
+                    $SUDO rm -rf /usr/local/go
+                    $SUDO tar -C /usr/local -xzf "$GOTMP/go.tgz" \
+                        && $SUDO ln -sf /usr/local/go/bin/go /usr/local/bin/go 2>/dev/null || true
+                    $SUDO ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt 2>/dev/null || true
+                    if [ -x /usr/local/go/bin/go ]; then
+                        ok "已安装 Go $(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')"
+                    else
+                        warn "Go 解压后不可执行(不影响面板)"
+                    fi
+                else
+                    warn "Go 压缩包损坏(不影响面板; 需要编译 Go 插件时再手动装)"
+                fi
             else
-                warn "Go 下载失败(不影响面板; 需要编译 Go 插件时再手动安装)"
+                warn "Go 下载失败(不影响面板; 需要编译 Go 插件时再手动装)"
             fi
+            rm -rf "$GOTMP"
         fi
     ;; esac
 
-    info "插件运行时: py / php / java / node / go 已按需就绪(可用 RC_PLUGIN_LANGS 调整)"
+    # --- 汇总: 只报"想用但没就绪"的项, 避免一长串 OK 淹没问题 ---
+    MISSING=""
+    case ",$PLUGIN_LANGS," in *,python,*) has python3 || has python || MISSING="$MISSING python" ;; esac
+    case ",$PLUGIN_LANGS," in *,php,*)    has php || MISSING="$MISSING php" ;; esac
+    case ",$PLUGIN_LANGS," in *,java,*)   has java || MISSING="$MISSING java" ;; esac
+    case ",$PLUGIN_LANGS," in *,node,*)   has node || MISSING="$MISSING node" ;; esac
+    case ",$PLUGIN_LANGS," in *,go,*)     has go || [ -x /usr/local/go/bin/go ] || MISSING="$MISSING go" ;; esac
+    if [ -n "$MISSING" ]; then
+        warn "插件运行时未全部就绪:$MISSING"
+        echo "     面板可以正常安装和运行, 但对应语言的插件启动会失败。"
+        echo "     装好后再重跑本脚本, 或手动安装后重启面板即可:"
+        echo "       sudo systemctl restart $UNIT_NAME"
+    else
+        ok "插件运行时: $(echo "$PLUGIN_LANGS" | tr ',' '/') 全部就绪(可用 RC_PLUGIN_LANGS 裁剪)"
+    fi
 fi
-
 # ---------- 步骤 3: 下载面板主体 ----------
 echo
 info "步骤 3/5: 下载面板主体 ($BODY_ASSET)"
@@ -786,7 +979,10 @@ info "步骤 5/5: 验证与完成"
 CODE=""
 for i in 1 2 3 4 5 6 7 8; do
     sleep 2
-    CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/auth/status" || true)
+    # 探测根路径 "/" 而不是某个具体 API —— 根路径任何版本都有。
+    # 旧实现查 /api/auth/status: 若装的是更早的 Release(该接口还没实现),
+    # 会返回 404, 于是服务明明起来了却报"面板暂未响应", 白白让人以为装失败。
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || true)
     [ "$CODE" = "200" ] && break
     [ $((i % 2)) -eq 1 ] && info "等待面板就绪 ($i/8, HTTP ${CODE:-000})"
 done
@@ -794,7 +990,7 @@ LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 if [ "$CODE" = "200" ]; then
     ok "面板响应 HTTP 200"
 else
-    warn "面板暂未响应 (HTTP $CODE), 请查看: journalctl -u raincough -f"
+    warn "面板暂未响应 (HTTP $CODE), 请查看: journalctl -u $UNIT_NAME -f"
 fi
 # 登录提示: 说清这次到底该用哪个密码
 echo
