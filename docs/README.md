@@ -77,7 +77,6 @@ curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/Rain
 | [系统功能接口](系统功能接口.md) | `system.*` 内置接口清单与调用方式 |
 | [插件v4迁移指南](插件v4迁移指南.md) | 插件 v4 化记录与迁移方法 |
 | [前端开发指南](前端开发指南.md) | `web/` 结构、系统页、PluginView v4、构建 |
-| [部署档案-防错手册](部署档案-防错手册.md) | 宿主部署流程、备份、验证清单、Git 要点 |
 | [功能清单](功能清单.md) | 面板已实现功能一览 |
 | [install.md](install.md) | 安装细节与故障排查 |
 

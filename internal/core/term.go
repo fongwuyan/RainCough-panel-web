@@ -64,9 +64,8 @@ func (m *TermManager) Open(rows, cols int) (*TermSession, error) {
 	}
 	cmd := exec.Command(shell)
 	// 启动目录 = 用户家目录。
-	// 原实现不设 cmd.Dir → 子 shell 继承面板进程 cwd(服务 WorkingDirectory=
-	// /home/f/raincough-dev), 提示符恒为 f@f:~/raincough-dev$; 改为 $HOME 后
-	// 与常规终端一致(f@f:~$)。家目录不存在时退回继承(不阻断会话)。
+	// 原实现不设 cmd.Dir → 子 shell 继承面板进程 cwd(即服务的 WorkingDirectory,
+	// 通常是安装目录), 提示符会停在那里; 改为 $HOME 后与常规终端一致(~/)。
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		if st, err := os.Stat(home); err == nil && st.IsDir() {
 			cmd.Dir = home
@@ -88,7 +87,7 @@ func (m *TermManager) Open(rows, cols int) (*TermSession, error) {
 		ID: sid, Rows: rows, Cols: cols,
 		Created: time.Now(), LastSeen: time.Now(),
 		ptmx: ptmx, cmd: cmd,
-		cond:  sync.NewCond(&sync.Mutex{}),
+		cond:   sync.NewCond(&sync.Mutex{}),
 		notify: make(chan struct{}, 1),
 	}
 	m.sessions[sid] = s
