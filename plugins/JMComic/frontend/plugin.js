@@ -3,6 +3,9 @@
 import { createApp, h } from 'vue'
 
 const NAME = 'JMComic'
+/** 封面最多轮询多少次（2s 一次 ≈ 30s）。真没封面的本子不该无限重试。 */
+const MAX_COVER_POLL = 15
+
 const STYLE_ID = 'rc-jmcomic-style'
 const RECENT_KEY = 'rc_jmcomic_recent'
 
@@ -32,6 +35,11 @@ function mount(container, ctx) {
         dlTimer: null, searchTimer: null, loading: false, loadingMore: false, dlBusy: false,
         descOpen: false, err: '', okMsg: '', page: 1, pageCount: 1, recent: [],
         coverQueueStop: false, coverLoaded: 0, coverLoadedLib: 0, searchMs: 0, keyHandler: null, scrollRaf: null,
+        // 封面重试状态：
+        // coverPending  —— 本轮请求过但没拿到封面的 aid（服务端是渐进生成的，可能只是还没生成好）
+        // coverErrCount —— <img> 加载失败次数（用于绕过浏览器缓存重试）
+        // coverTimer    —— 定时重试 pending 的计时器
+        coverPending: {}, coverErrCount: {}, coverTimer: null, coverLoading: false,
         prefetchIdx: 0 }
     },
     mounted() {
@@ -52,22 +60,32 @@ function mount(container, ctx) {
           this.scrollRaf = null
           if (this.tab === 'read' && this.view === 'flow') {
             const total = this.pageArr.length
-            if (this.prefetchIdx < total && !this.loadingMore &&
-                window.innerHeight + window.scrollY >= document.body.scrollHeight - 700) this.prefetchNext()
+            if (this.prefetchIdx < total && !this.loadingMore && this.nearBottom(700)) this.prefetchNext()
           } else if (this.tab === 'search' && this.results.length && this.coverLoaded < Math.min(this.results.length, 60)) {
-            if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 600) this.loadNextCoverBatch()
+            if (this.nearBottom(600)) this.loadNextCoverBatch()
           } else if (this.tab === 'lib' && this.lib.length && (this.coverLoadedLib || 0) < Math.min(this.lib.length, 60)) {
-            if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 600) this.loadNextCoverBatchLib()
+            if (this.nearBottom(600)) this.loadNextCoverBatchLib()
           }
         })
       }
-      window.addEventListener('scroll', this.scrollHandler, { passive: true })
+      // ★ 必须 capture：面板的内容区是 <main class="content" style="overflow-y:auto">，
+      //   滚动发生在它身上而不是 window。scroll 事件不冒泡，只有捕获阶段能拿到。
+      window.addEventListener('scroll', this.scrollHandler, { passive: true, capture: true })
+
+      // 封面是服务端按需生成的，一个要 1~2 秒（3 次网络请求）。
+      // 首批 4s 必然拿不全，所以每 2 秒轮询一次（cached_only，纯读文件），
+      // 哪张生成好了就显示哪张。最多轮询 30 秒。
+      this.coverTimer = setInterval(() => {
+        if (this.loading) return
+        if (this.tab !== 'search' && this.tab !== 'lib') return
+        if (Object.keys(this.coverPending).length) this.retryPendingCovers()
+      }, 2000)
     },
     unmounted() {
-      clearInterval(this.dlTimer); clearTimeout(this.searchTimer)
+      clearInterval(this.dlTimer); clearTimeout(this.searchTimer); clearInterval(this.coverTimer)
       this.coverQueueStop = true
       if (this.keyHandler) window.removeEventListener('keydown', this.keyHandler)
-      if (this.scrollHandler) window.removeEventListener('scroll', this.scrollHandler)
+      if (this.scrollHandler) window.removeEventListener('scroll', this.scrollHandler, { capture: true })
       if (this.scrollRaf) cancelAnimationFrame(this.scrollRaf)
       const st = document.getElementById(STYLE_ID)
       if (st) st.remove()
@@ -104,6 +122,8 @@ function mount(container, ctx) {
           this.searchMs = Date.now() - t0
           this.saveRecent()
           this.coverQueueStop = false; this.coverLoaded = 0
+          // 换了一批结果，旧的重试队列作废（coverMap 保留，已取到的不用重取）
+          this.coverPending = {}
           this.loadNextCoverBatch()
         } catch (e) { this.err = (e && e.message) || e }
         this.loading = false
@@ -113,15 +133,82 @@ function mount(container, ctx) {
         this.search(p)
       },
       // 封面: 批量 covers(首屏1批开取, 滚动续补)
+      //
+      // ★ 修掉一个会让封面永久不显示的 bug：
+      //   原来只把 coverLoaded 往前推，**没拿到封面的 aid 就此被跳过**，
+      //   之后无论是滚动还是重新搜索都不会再为它请求。
+      //   服务端改成渐进返回（最多等 4s）之后，这个漏洞被放大 ——
+      //   首屏 12 个里只生成了 5 个，另外 7 个就永远空着。
+      //   现在把没拿到的记进 coverPending，由定时器重试。
+      // 找到真正的滚动容器（面板布局是 <main class="content"> overflow-y:auto）
+      findScroller() {
+        let el = this.$el ? this.$el.parentElement : null
+        while (el && el !== document.body) {
+          const oy = getComputedStyle(el).overflowY
+          if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 10) return el
+          el = el.parentElement
+        }
+        return null
+      },
+      // 是否接近底部（兼容「内容区自己滚」和「整页滚」两种布局）
+      nearBottom(threshold) {
+        const sc = this.findScroller()
+        if (sc) return sc.scrollTop + sc.clientHeight >= sc.scrollHeight - threshold
+        return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - threshold
+      },
+      async fetchCovers(aids, cachedOnly) {
+        const list = aids.map(String)
+        try {
+          // cachedOnly=true: 只查已生成的，不触发生成也不等 —— 轮询用
+          const r = await ctx.invoke('jmcomic.covers', { aids: list, cached_only: !!cachedOnly })
+          const covers = (r && r.covers) || {}
+          for (const k in covers) {
+            if (!this.coverMap[k]) this.coverMap[k] = covers[k]
+            delete this.coverPending[k]
+          }
+        } catch (e) { /* 批取失败：全部进重试队列 */ }
+        for (const a of list) {
+          if (this.coverMap[a]) { delete this.coverPending[a]; continue }
+          const n = (this.coverPending[a] || 0) + 1
+          // 最多轮询 MAX_COVER_POLL 次（每次 2s ≈ 30s），避免真的没封面的本子无限重试
+          if (n <= MAX_COVER_POLL) this.coverPending[a] = n
+          else delete this.coverPending[a]
+        }
+      },
       async loadNextCoverBatch() {
+        // 防并发：一次请求要等最多 4s，滚动期间会反复触发；
+        // 不加这个标志会同时发出多个批次，coverLoaded 瞬间冲到 60 但请求都还在飞。
+        if (this.coverLoading) return
         const queue = this.results.slice(this.coverLoaded, this.coverLoaded + 12).map((it) => String(it.id))
         if (!queue.length) return
         this.coverLoaded += queue.length
+        this.coverLoading = true
         try {
-          const r = await ctx.invoke('jmcomic.covers', { aids: queue })
-          const covers = (r && r.covers) || {}
-          for (const k in covers) { if (!this.coverMap[k]) this.coverMap[k] = covers[k] }
-        } catch (e) { /* 批取失败静默, 单张兜底 */ }
+          // 触发式：允许服务端现场生成，最多等 4s（拿不全没关系，后面轮询补）
+          await this.fetchCovers(queue, false)
+        } finally {
+          this.coverLoading = false
+        }
+      },
+      async retryPendingCovers() {
+        // 已经拿到或超过重试次数的先清掉
+        for (const a in this.coverPending) {
+          if (this.coverMap[a] || this.coverPending[a] > MAX_COVER_POLL) delete this.coverPending[a]
+        }
+        const aids = Object.keys(this.coverPending).slice(0, 24)
+        if (!aids.length) return
+        // 只查不生成：服务端后台还在跑，这里纯读文件，几乎不耗时
+        await this.fetchCovers(aids, true)
+      },
+      // 图片加载失败兜底：可能是浏览器缓存了之前的 404（图片长缓存 + immutable）。
+      // 加一个一次性参数强制回源，最多试两次。
+      onCoverErr(e, id) {
+        const url = this.coverMap[id]
+        if (!url) return
+        const n = (this.coverErrCount[id] || 0) + 1
+        this.coverErrCount[id] = n
+        if (n > 2) { if (e && e.target) e.target.style.visibility = 'hidden'; return }
+        if (e && e.target) e.target.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'r=' + Date.now()
       },
       // ---------- 详情 ----------
       async openAlbum(aid) {
@@ -212,10 +299,12 @@ function mount(container, ctx) {
         } catch (e) { this.err = (e && e.message) || e }
       },
       loadNextCoverBatchLib() {
+        if (this.coverLoading) return
         const queue = this.lib.slice(this.coverLoadedLib || 0, (this.coverLoadedLib || 0) + 12).map((it) => String(it.id))
-        this.coverLoadedLib = (this.coverLoadedLib || 0) + queue.length
         if (!queue.length) return
-        ctx.invoke('jmcomic.covers', { aids: queue }).then((r) => { const c = (r && r.covers) || {}; for (const k in c) if (!this.coverMap[k]) this.coverMap[k] = c[k] }).catch(() => {})
+        this.coverLoadedLib = (this.coverLoadedLib || 0) + queue.length
+        this.coverLoading = true
+        this.fetchCovers(queue, false).finally(() => { this.coverLoading = false })
       },
       async rm(aid) {
         try {
@@ -247,7 +336,9 @@ function mount(container, ctx) {
               const id = String(it.id ?? it.aid ?? '')
               const cover = this.coverMap[id]
               return h('div', { key: id, class: 'card rcjm-card', style: 'padding:6px;', onclick: () => this.openAlbum(id) }, [
-                cover ? h('img', { src: cover, loading: 'lazy', class: 'rcjm-thumb' }) : h('div', { class: 'rcjm-skel' }),
+                cover
+                  ? h('img', { src: cover, loading: 'lazy', class: 'rcjm-thumb', onerror: (e) => this.onCoverErr(e, id) })
+                  : h('div', { class: 'rcjm-skel' }),
                 h('div', { style: 'font-size:12px;margin-top:4px;height:32px;overflow:hidden;line-height:16px;color:var(--text);' }, it.name || ('ID ' + id)),
                 h('div', { class: 'faint', style: 'font-size:11px;margin-top:2px;' }, (it.author || '-') + ' · ' + id),
                 h('div', { class: 'flex', style: 'gap:4px;margin-top:5px;', onclick: (e) => e.stopPropagation() }, [
@@ -315,7 +406,9 @@ function mount(container, ctx) {
           ]),
           h('div', { class: 'section', style: 'padding:14px;' }, [
             h('div', { class: 'flex', style: 'gap:14px;align-items:flex-start;' }, [
-              cover ? h('img', { src: cover, style: 'width:134px;height:200px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);' }) : h('div', { class: 'rcjm-skel', style: 'width:134px;height:200px;border-radius:8px;' }),
+              cover
+                ? h('img', { src: cover, onerror: (e) => this.onCoverErr(e, a.id), style: 'width:134px;height:200px;object-fit:cover;border-radius:8px;background:#222;box-shadow:0 4px 14px rgba(0,0,0,.4);' })
+                : h('div', { class: 'rcjm-skel', style: 'width:134px;height:200px;border-radius:8px;' }),
               h('div', { style: 'flex:1;min-width:0;' }, [
                 h('h3', { style: 'margin:0;font-size:17px;line-height:1.45;' }, a.name),
                 h('p', { class: 'faint', style: 'font-size:12px;margin:6px 0;' }, '作者 ' + (a.author || '未知') + ' · ID ' + a.id + ' · ' + (a.chapters || []).length + ' 话'),

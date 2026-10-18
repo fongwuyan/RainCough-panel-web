@@ -98,6 +98,17 @@ def _chapter_files(aid, cid):
     return []
 
 
+# 正在生成封面的 aid 集合。
+#
+# ★ 为什么需要：生成一个封面要 3 次网络请求（album detail / photo detail / 图片下载），
+#   实测 1~2 秒。列表一次请求 12 个，4 秒超时内只能完成一部分。
+#   前端会重试，如果每次重试都重新提交任务，同一个 aid 会被反复生成 ——
+#   既浪费带宽，又因为 _SERVE_LOCK 竞争把批次拖得更慢。
+#   用这张表保证：同一 aid 同时只有一个生成任务，其余请求直接返回"还没好"。
+_COVER_INFLIGHT = set()
+_COVER_INFLIGHT_LOCK = _th.Lock()
+
+
 # 封面缩略图尺寸：卡片最宽也就 120dp，360px 已经足够（3x 屏也清晰）
 COVER_THUMB_W = 360
 COVER_THUMB_H = 540
@@ -146,6 +157,18 @@ def _make_thumb(src_path, aid):
         return None
 
 
+def _thumb_url_if_exists(aid):
+    """只查缩略图是否存在，不做任何图像处理、不发网络请求。
+    批量接口第一遍用它，保证快速返回已就绪的那部分。"""
+    if not aid or not aid.isdigit():
+        return ''
+    t = _thumb_path(aid)
+    if os.path.isfile(t) and os.path.getsize(t) > 0:
+        _perf('cover', True, 0.0)
+        return _cover_url('%s_t.webp' % aid)
+    return ''
+
+
 def _cached_cover(aid):
     """只看磁盘缓存，不发起网络请求。有原图但没缩略图时顺手生成。"""
     if not aid or not aid.isdigit():
@@ -167,13 +190,27 @@ def _cached_cover(aid):
     return ''
 
 
-def _ensure_cover(aid):
-    """封面: 缩略图 > 原图 > 在线取第一页并生成。返回 URL 或 ''。"""
+def _ensure_cover(aid, claim=True):
+    """封面: 缩略图 > 原图 > 在线取第一页并生成。返回 URL 或 ''。
+
+    [claim] True  —— 占用 inflight 名额；若该 aid 正在生成中，直接返回 ''，
+                     本次拿不到，等下一次查询（避免重复生成）。
+             False —— 只查缓存，不触发生成、不占名额（前端轮询用）。
+    """
     if not aid or not aid.isdigit():
         return ''
+
     hit = _cached_cover(aid)
     if hit:
         return hit
+    if not claim:
+        return ''
+
+    # 抢占：同一 aid 同时只允许一个生成任务
+    with _COVER_INFLIGHT_LOCK:
+        if aid in _COVER_INFLIGHT:
+            return ''
+        _COVER_INFLIGHT.add(aid)
 
     cache = _cover_cache_dir()
     try:
@@ -205,6 +242,9 @@ def _ensure_cover(aid):
         return _cover_url('%s.%s' % (aid, ext))
     except Exception:
         return ''
+    finally:
+        with _COVER_INFLIGHT_LOCK:
+            _COVER_INFLIGHT.discard(aid)
 
 
 def _s(params, key, defv=''):
@@ -479,39 +519,56 @@ def jm_covers(params):
     超时的部分不阻塞响应（后台继续跑，下次请求命中磁盘缓存）。
     """
     import concurrent.futures as _cf
-    aids = [str(x) for x in (_p(params).get('aids') or []) if str(x).isdigit()]
+    pp = _p(params)
+    aids = [str(x) for x in (pp.get('aids') or []) if str(x).isdigit()]
     if not aids:
         return {'ok': True, 'covers': {}}
 
+    # cached_only=true: 只查已生成的，绝不触发生成、也不等待。
+    # 前端轮询用（生成要 1~2 秒/个，首批 4s 必然拿不全；轮询能廉价地"等到就显示"）。
+    cached_only = str(pp.get('cached_only') or '').lower() in ('1', 'true', 'yes')
+
     covers = {}
     pending = []
-    # 第一遍: 只取已缓存的，零网络开销
+    # 第一遍: 只查缩略图是否已存在。
+    #
+    # 这里**不能**调 _cached_cover：它会在「有原图但没缩略图」时同步生成缩略图，
+    # 12 个 aid 串行做图像处理要好几秒，整批请求就卡在这一步。
+    # 一律交给下面的线程池并发处理。
     for a in aids[:60]:
-        u = _cached_cover(a)
+        u = _thumb_url_if_exists(a)
         if u:
             covers[a] = u
         else:
             pending.append(a)
 
+    if cached_only:
+        return {'ok': True, 'covers': covers, 'total': len(aids),
+                'pending': len(pending), 'cached_only': True}
+
+    generated = 0
     if pending:
-        ex = _cf.ThreadPoolExecutor(max_workers=4)
+        ex = _cf.ThreadPoolExecutor(max_workers=6)
         try:
             futs = {ex.submit(_ensure_cover, a): a for a in pending}
-            done, not_done = _cf.wait(futs, timeout=COVER_BATCH_TIMEOUT)
+            done, _ = _cf.wait(futs, timeout=COVER_BATCH_TIMEOUT)
             for f in done:
                 a = futs[f]
                 try:
                     u = f.result()
                     if u:
                         covers[a] = u
+                        generated += 1
                 except Exception:
                     pass
         finally:
             # 不等剩余任务：它们会继续生成并写入 cache/，下次请求直接命中
             ex.shutdown(wait=False, cancel_futures=False)
 
+    # pending 是「本次没给出来的」数量。注意不能写成 len(pending)-len(covers)，
+    # 因为 covers 里还含第一遍命中的，那样会算出负数。
     return {'ok': True, 'covers': covers, 'total': len(aids),
-            'pending': len(pending) - len(covers)}
+            'pending': len(pending) - generated}
 
 
 @rc.interface("jmcomic.prefetch")
