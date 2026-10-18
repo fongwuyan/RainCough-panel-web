@@ -6,7 +6,7 @@
 //   4) 刷新页面 → 应保持解锁(cookie)
 //   5) 点「重新上锁」→ 回到上锁面板
 //
-// 用法: node tools/store-gate-probe.mjs http://192.168.2.200:3910/ --port 9444 --pw 1 --gate REDACTED-GATE-PW
+// 用法: node tools/store-gate-probe.mjs http://192.168.2.200:3910/ --port 9444 --pw 1 --gate '<插件库口令>'
 
 const argv = process.argv.slice(2)
 const base = (argv.find((a) => a.startsWith('http')) || 'http://127.0.0.1:3900/').replace(/\/$/, '')

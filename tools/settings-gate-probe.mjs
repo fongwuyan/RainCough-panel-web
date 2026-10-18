@@ -11,7 +11,7 @@
 //     5) 只有输入框 + 解锁按钮
 //     6) 无图标 / 无标题 / 无说明文字 / 无额外提示
 //
-// 用法: node tools/settings-gate-probe.mjs http://192.168.2.200:3910/ --port 9444 --pw 1 --gate REDACTED-GATE-PW
+// 用法: node tools/settings-gate-probe.mjs http://192.168.2.200:3910/ --port 9444 --pw 1 --gate '<插件库口令>'
 
 const argv = process.argv.slice(2)
 const base = (argv.find((a) => a.startsWith('http')) || 'http://127.0.0.1:3900/').replace(/\/$/, '')

@@ -38,8 +38,9 @@ import (
 const (
 	// StoreGateCookie 解锁状态 cookie 名
 	StoreGateCookie = "rc_store_gate"
-	// storeGateHash 写死的口令哈希: SHA-512 crypt("REDACTED-GATE-PW")
-	// 生成方式: raincough -hash-password  (随机盐已内嵌在字符串里)
+	// storeGateHash 写死的口令哈希: SHA-512 crypt, 5000 轮 + 随机盐(盐已内嵌在字符串里)。
+	// 仓库里只有哈希, 不含明文 —— 明文口令不外传、不写注释、不进测试。
+	// 生成方式: raincough -hash-password 后把结果替换到这里。
 	storeGateHash = "$6$rBkCCZu1w/KZIo8e$mBaTOIE0gSbYtQICvTuO.3j83r..75UllKBgxzqQh0DYKrNIL.Dren8qhnu6DhJjk7iDI9brTKer3g5ZVvMIR."
 
 	gateKVKey       = "gate_hmac_key"
@@ -59,6 +60,7 @@ type GateKV interface {
 type StoreGate struct {
 	mu    sync.Mutex
 	key   []byte               // HMAC 签名密钥
+	hash  string               // 口令哈希($6$); 生产用 storeGateHash, 测试可注入
 	fails map[string]*failInfo // 按 IP 记录失败次数
 }
 
@@ -69,7 +71,15 @@ type failInfo struct {
 
 // NewStoreGate 创建闸门, 密钥从 KV 读取; 不存在则随机生成并落库(重启后旧 cookie 仍有效)。
 func NewStoreGate(kv GateKV) (*StoreGate, error) {
-	g := &StoreGate{fails: make(map[string]*failInfo)}
+	return NewStoreGateWithHash(kv, storeGateHash)
+}
+
+// NewStoreGateWithHash 用指定哈希创建闸门。
+//
+// 存在的意义: 测试要验证"正确口令能解锁 / 错误口令被拒", 但仓库里不能出现明文口令。
+// 让测试自己造一对(哈希, 口令)即可覆盖全部逻辑, 完全不需要知道生产口令。
+func NewStoreGateWithHash(kv GateKV, hash string) (*StoreGate, error) {
+	g := &StoreGate{fails: make(map[string]*failInfo), hash: hash}
 	raw, ok, err := kv.Get(gateKVKey)
 	if err == nil && ok {
 		if s, isStr := raw.(string); isStr && s != "" {
@@ -122,7 +132,7 @@ func (g *StoreGate) Unlock(r *http.Request, w http.ResponseWriter, password stri
 
 	// 固定延迟: 让在线爆破无法通过耗时区分对错/加快速度
 	start := time.Now()
-	err := VerifySha512Crypt([]byte(password), storeGateHash)
+	err := VerifySha512Crypt([]byte(password), g.hash)
 	if d := gateFailDelay - time.Since(start); d > 0 {
 		time.Sleep(d)
 	}
