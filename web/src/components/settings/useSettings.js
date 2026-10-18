@@ -133,9 +133,17 @@ export function useSettings() {
       if (d && d.net === false) {
         pingState.value = 'fail'
         pingMsg.value = '网络不通：连不上 api.github.com'
-      } else {
+      } else if (d && d.public) {
+        // 公开仓库靠匿名就够: 即便面板里残留了失效的旧 token 也不影响使用
+        pingState.value = 'ok'
+        pingMsg.value = d.auth ? '连接正常' : '连接正常（公开仓库，无需密钥）'
+      } else if (d && d.auth) {
+        // 私有仓库 + 有效 token
         pingState.value = 'ok'
         pingMsg.value = '连接正常'
+      } else {
+        pingState.value = 'fail'
+        pingMsg.value = '读不到插件库清单：仓库可能是私有的，且未配置有效密钥'
       }
     } catch (e) {
       pingState.value = 'fail'
