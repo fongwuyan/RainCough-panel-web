@@ -24,7 +24,13 @@ import threading as _th
 # 原来是 2 —— 列表页一次要出 20+ 个封面，每个未命中的封面要 3 次串行网络请求
 # (album detail / photo detail / 图片下载)，只有 2 个并发时整页封面要等十几秒。
 # 提到 6：实际并发仍受 server.py 的 _cdn_lock(4) 约束，不会把站点打爆。
-_SERVE_LOCK = _th.BoundedSemaphore(6)
+# 封面/阅读解码窗口。
+#
+# ★ 这个值直接决定"整页封面要等多久"：实测单张封面生成 ~41 秒（CDN TTFB），
+#   80 个位置在并发 6 时要 80/6*41 ≈ 9 分钟 —— 用户会觉得"最下面几排永远不出来"。
+#   提到 12：80/12*41 ≈ 4.5 分钟，明显好转。
+#   再高容易触发 CDN 限流（表现为大量超时反而更慢），12 是折中值。
+_SERVE_LOCK = _th.BoundedSemaphore(12)
 
 # 内置下载器：自己按页并发下载（见 downloader.py 顶部说明）。
 # 延迟到首次使用时初始化，避免插件启动就去读状态文件。
@@ -179,28 +185,6 @@ def _make_thumb(src_path, aid):
         return thumb
     except Exception:
         return None
-
-
-def _prefix_filter(aids, covers):
-    """只保留「从列表头开始连续就绪」的那部分。
-
-    ★ 这是「按顺序加载」的关键：批量接口无论走哪条路径（首次触发生成 /
-      后续只查缓存），返回给前端的 covers 都必须是列表前缀。
-      否则前端会出现「第 3 个有图、第 2 个还空着」的乱序观感。
-
-    跳过规则：确认拿不到的（_COVER_FAILED）直接跳过，不算断点 ——
-    否则一个没有封面的本子会让后面全部不显示。
-    """
-    out = {}
-    for a in aids:
-        if a in covers:
-            out[a] = covers[a]
-        elif a in _COVER_FAILED:
-            continue
-        else:
-            break
-    return out
-
 
 def _mark_cover_failed(aid):
     if len(_COVER_FAILED) > _COVER_FAILED_MAX:
@@ -664,15 +648,24 @@ def jm_covers(params):
         ex = _cf.ThreadPoolExecutor(max_workers=COVER_CHUNK)
         try:
             futures = [(a, ex.submit(_ensure_cover, a)) for a in pending]
+            blocked = False
             for a, f in futures:
-                remain = deadline - _time.time()
-                if remain <= 0.05:
-                    break
+                # 一旦某个任务超时，后面**不再等**，但仍把「已经完成」的捡回来。
+                # 原来直接 break，导致「第一个慢」时整批返回 0 ——
+                # 明明后面 11 个都生成好了也不返回，界面就一直空着。
+                if blocked:
+                    remain = 0
+                else:
+                    remain = deadline - _time.time()
+                    if remain <= 0.05:
+                        blocked = True
+                        remain = 0
                 try:
                     u = f.result(timeout=remain)
                 except _cf.TimeoutError:
-                    # 只是还没轮到它完成，不是"没有" —— 留给下次请求
-                    break
+                    # 还没完成，不是"没有" —— 留给下次请求
+                    blocked = True
+                    continue
                 except Exception:
                     failed_aids.append(a)
                     continue
@@ -687,8 +680,9 @@ def jm_covers(params):
         finally:
             ex.shutdown(wait=False, cancel_futures=False)
 
-    pref = _prefix_filter(aids, covers)
-    return {'ok': True, 'covers': pref, 'total': len(aids),
+    # 不裁剪成前缀：目标是"处理完一个就显示一个"。
+    # 裁剪会让「第 2 个已就绪但第 1 个还在生成」时第 2 个也不显示。
+    return {'ok': True, 'covers': covers, 'total': len(aids),
             'pending': len(pending) - generated - len(failed_aids),
             'failed': failed_aids}
 

@@ -48,7 +48,8 @@ function mount(container, ctx) {
         // coverTimer    —— 定时重试 pending 的计时器
         coverPending: {}, coverErrCount: {}, coverTimer: null, coverLoading: false,
         // coverGiveUp：服务端确认拿不到封面的 aid，UI 跳过它们不再重试
-        coverGiveUp: {},
+        coverGiveUp: {}, coverRetryCursor: 0, coverDrainWanted: false, coverDrainWantedLib: false, coverLoadingLib: false,
+        coverPrefetchTimer: null,
         prefetchIdx: 0 }
     },
     mounted() {
@@ -70,10 +71,11 @@ function mount(container, ctx) {
           if (this.tab === 'read' && this.view === 'flow') {
             const total = this.pageArr.length
             if (this.prefetchIdx < total && !this.loadingMore && this.nearBottom(700)) this.prefetchNext()
-          } else if (this.tab === 'search' && this.results.length && this.coverLoaded < Math.min(this.results.length, 60)) {
-            if (this.nearBottom(600)) this.loadNextCoverBatch()
-          } else if (this.tab === 'lib' && this.lib.length && (this.coverLoadedLib || 0) < Math.min(this.lib.length, 60)) {
-            if (this.nearBottom(600)) this.loadNextCoverBatchLib()
+          } else if (this.tab === 'search' && this.results.length && this.coverLoaded < this.results.length) {
+            // 只打标记；剩余批次由 700ms 心跳推进（不依赖后续 scroll 事件）
+            if (this.nearBottom(600)) this.markCoverScrollBottom()
+          } else if (this.tab === 'lib' && this.lib.length && (this.coverLoadedLib || 0) < this.lib.length) {
+            if (this.nearBottom(600)) this.coverDrainWantedLib = true
           }
         })
       }
@@ -90,11 +92,34 @@ function mount(container, ctx) {
       this.coverTimer = setInterval(() => {
         if (this.loading) return
         if (this.tab !== 'search' && this.tab !== 'lib') return
+
+        // 1) 补齐「已请求但还没拿到」的（轮转，防饥饿）
         if (Object.keys(this.coverPending).length) this.retryPendingCovers()
+
+        // 2) 用户已滚到底 → 持续把剩余批次推完。
+        //    放在心跳里而不是 scroll 回调里：滚到底后不会再有 scroll 事件，
+        //    而且这里不受 await 链时序影响，一定会推进到最后一批。
+        if (this.tab === 'search' && this.coverDrainWanted &&
+            this.coverLoaded < this.results.length && !this.coverLoading) {
+          this.coverLoading = true
+          this.loadOneCoverBatch().finally(() => { this.coverLoading = false })
+        }
+        if (this.tab === 'lib' && this.coverDrainWantedLib &&
+            (this.coverLoadedLib || 0) < this.lib.length && !this.coverLoadingLib) {
+          const before = this.coverLoadedLib || 0
+          const queue = this.lib.slice(before, before + 12).map((it) => String(it.id))
+          if (queue.length) {
+            this.coverLoadedLib = before + queue.length
+            this.coverLoadingLib = true
+            this.fetchCovers(queue, true)
+              .then(() => this.fetchCovers(queue, false))
+              .finally(() => { this.coverLoadingLib = false })
+          }
+        }
       }, 700)
     },
     unmounted() {
-      clearInterval(this.dlTimer); clearTimeout(this.searchTimer); clearInterval(this.coverTimer)
+      clearInterval(this.dlTimer); clearTimeout(this.searchTimer); clearInterval(this.coverTimer); this.stopCoverPrefetch()
       this.coverQueueStop = true
       if (this.keyHandler) window.removeEventListener('keydown', this.keyHandler)
       if (this.scrollHandler) window.removeEventListener('scroll', this.scrollHandler, { capture: true })
@@ -133,7 +158,9 @@ function mount(container, ctx) {
           this.page = p; this.pageCount = (r && r.page_count) || 1
           this.searchMs = Date.now() - t0
           this.saveRecent()
-          this.coverQueueStop = false; this.coverLoaded = 0
+          this.coverQueueStop = false
+          this.coverDrainWanted = false
+          this.coverLoaded = 0
           // 换了一批结果，旧的重试队列作废（coverMap 保留，已取到的不用重取）
           this.coverPending = {}
           this.coverGiveUp = {}
@@ -194,21 +221,77 @@ function mount(container, ctx) {
           else delete this.coverPending[a]
         }
       },
+      /** 加载一批（12 个）的封面。不做排队，由心跳按批推进。 */
+      async loadOneCoverBatch() {
+        const before = this.coverLoaded
+        const queue = this.results.slice(before, before + 12).map((it) => String(it.id))
+        if (!queue.length) return 0
+        // 先推进指针，避免同一批被重复入队
+        this.coverLoaded = before + queue.length
+        // 先立刻问一次「现在就能拿的」，不等生成（毫秒级）
+        await this.fetchCovers(queue, true)
+        // 再触发式请求，让服务端现场生成（最多等 4s，拿不全靠轮询补）
+        await this.fetchCovers(queue, false)
+        return queue.length
+      },
+
+      /**
+       * 标记「用户已滚到底」，剩余批次由 700ms 心跳推进。
+       *
+       * ★ 为什么不用 while + await 循环排空：实测跑 3 批就停
+       *   （80 条只加载到 36 个）。原因是它和搜索后的首批加载并发写
+       *   `coverLoaded`，又被 `coverQueueStop` 的时序干扰。
+       *   心跳是独立定时器，不受 await 链和事件时序影响，最稳。
+       */
+      markCoverScrollBottom() {
+        if (this.coverLoaded < this.results.length) this.coverDrainWanted = true
+      },
+      /**
+       * 后台把整页所有位置的封面都"请求一遍"。
+       *
+       * ★ 这是解决"最下面两排长时间不加载"的根本办法。
+       *
+       *   之前的所有方案都是"等用户滚到底再请求下一批"，但它们都依赖
+       *   scroll 事件、nearBottom 判断、以及 await 链的时序 —— 实测三种
+       *   写法各有各的失败模式（不再触发 / 状态被覆盖 / 跑几批就停）。
+       *   而"最后两排"恰恰是最晚才被请求的，任何一环出问题它们就永远空着。
+       *
+       *   换成：搜索成功后，立刻按批把所有位置都触发一次。
+       *   服务端收到请求就会排队生成；用户滚到哪里，那里大概率已经好了。
+       *   每批之间隔一点时间，避免瞬时打满。
+       */
+      startCoverPrefetch() {
+        this.stopCoverPrefetch()
+        let cursor = 12          // 首批已由 search() 触发
+        const total = this.results.length
+        const step = () => {
+          if (this.coverPrefetchTimer === null) return
+          if (cursor >= total) { this.stopCoverPrefetch(); return }
+          const queue = this.results.slice(cursor, cursor + 12).map((it) => String(it.id))
+          cursor += queue.length
+          if (!queue.length) { this.stopCoverPrefetch(); return }
+          // 只查已就绪的（毫秒级，立刻能显示）
+          this.fetchCovers(queue, true)
+          // 再触发服务端生成：不等结果（fire-and-forget），避免阻塞后续批次
+          ctx.invoke('jmcomic.covers', { aids: queue }).catch(() => {})
+        }
+        // 1.2s 一批：80 条 ≈ 7 批 ≈ 8 秒内全部请求过一遍
+        this.coverPrefetchTimer = setInterval(step, 1200)
+        step()
+      },
+      stopCoverPrefetch() {
+        if (this.coverPrefetchTimer !== null) {
+          clearInterval(this.coverPrefetchTimer)
+          this.coverPrefetchTimer = null
+        }
+      },
+
+      /** 兼容旧调用点：进入搜索/库时先拉第一批。 */
       async loadNextCoverBatch() {
-        // 防并发：一次请求要等最多 4s，滚动期间会反复触发；
-        // 不加这个标志会同时发出多个批次，coverLoaded 瞬间冲到 60 但请求都还在飞。
         if (this.coverLoading) return
-        const queue = this.results.slice(this.coverLoaded, this.coverLoaded + 12).map((it) => String(it.id))
-        if (!queue.length) return
-        this.coverLoaded += queue.length
         this.coverLoading = true
         try {
-          // ★ 先立刻问一次「现在就能拿的」，不等生成。
-          //   服务器上已有原图/缩略图的，这一步就全显示出来了（毫秒级）。
-          //   没有的再走下面触发式请求，让服务端现场去生成。
-          await this.fetchCovers(queue, true)
-          // 触发式：允许现场生成，最多等 4s（拿不全没关系，700ms 轮询会补）
-          await this.fetchCovers(queue, false)
+          await this.loadOneCoverBatch()
         } finally {
           this.coverLoading = false
         }
@@ -218,8 +301,21 @@ function mount(container, ctx) {
         for (const a in this.coverPending) {
           if (this.coverMap[a] || this.coverPending[a] > MAX_COVER_POLL) delete this.coverPending[a]
         }
-        const aids = Object.keys(this.coverPending).slice(0, 24)
-        if (!aids.length) return
+        const all = Object.keys(this.coverPending)
+        if (!all.length) { this.coverRetryCursor = 0; return }
+
+        // ★ 必须轮转，不能每次都取「前 N 个」。
+        //   原来固定 slice(0, 24)：待处理超过 24 个时（快速滚动很容易攒到 36+），
+        //   排在后面的**永远轮不到**——表现就是"最下面两排长时间不加载"。
+        //   现在用游标环形推进，任何一项最多等 pending 总数/批大小 轮就会轮到。
+        const BATCH = 60              // 与服务端 aids[:60] 上限一致
+        const start = (this.coverRetryCursor || 0) % Math.max(all.length, 1)
+        const aids = []
+        for (let i = 0; i < Math.min(BATCH, all.length); i++) {
+          aids.push(all[(start + i) % all.length])
+        }
+        this.coverRetryCursor = (start + aids.length) % Math.max(all.length, 1)
+
         // 只查不生成：服务端后台还在跑，这里纯读文件，几乎不耗时
         await this.fetchCovers(aids, true)
       },
@@ -362,14 +458,16 @@ function mount(container, ctx) {
         } catch (e) { this.err = (e && e.message) || e }
       },
       loadNextCoverBatchLib() {
-        if (this.coverLoading) return
-        const queue = this.lib.slice(this.coverLoadedLib || 0, (this.coverLoadedLib || 0) + 12).map((it) => String(it.id))
+        // 首批：只加载 12 个；继续加载交给心跳（滚到底后置 coverDrainWantedLib）
+        if (this.coverLoadingLib) return
+        const before = this.coverLoadedLib || 0
+        const queue = this.lib.slice(before, before + 12).map((it) => String(it.id))
         if (!queue.length) return
-        this.coverLoadedLib = (this.coverLoadedLib || 0) + queue.length
-        this.coverLoading = true
+        this.coverLoadedLib = before + queue.length
+        this.coverLoadingLib = true
         this.fetchCovers(queue, true)
           .then(() => this.fetchCovers(queue, false))
-          .finally(() => { this.coverLoading = false })
+          .finally(() => { this.coverLoadingLib = false })
       },
       async rm(aid) {
         try {
@@ -384,7 +482,7 @@ function mount(container, ctx) {
       async dlStatus(aid) { try { const r = await ctx.invoke('jmcomic.download.status', { aid }); this.okMsg = '完成 ' + (r.downloaded || 0) + '/' + (r.total || '?') + ' (' + r.status + ')'; setTimeout(() => (this.okMsg = ''), 2500) } catch (e) { this.err = (e && e.message) || e } },
     },
     render() {
-      const t = (k, l) => h('button', { class: 'btn btn-sm' + (this.tab === k ? ' btn-primary' : ''), onclick: () => { clearInterval(this.dlTimer); this.coverQueueStop = true; this.tab = k; if (k === 'lib') this.loadLib() } }, l)
+      const t = (k, l) => h('button', { class: 'btn btn-sm' + (this.tab === k ? ' btn-primary' : ''), onclick: () => { clearInterval(this.dlTimer); this.coverQueueStop = true; this.stopCoverPrefetch(); this.tab = k; if (k === 'lib') this.loadLib() } }, l)
       // ---- 搜索/本子库宫格 ----
       const gridItems = this.tab === 'search' ? this.results : this.lib
       let grid
