@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -239,36 +240,70 @@ type ghAttempt struct {
 	token   bool
 }
 
-// ghTry 按顺序尝试各来源; 4xx 视为确定答案立即返回, 传输层错误/5xx 才换下一个。
+// ghTry 按顺序尝试各来源。
+//
+// 错误分三类处理:
+//   - 传输层错误 / 5xx → 换下一个源(可能只是这个源不稳定)
+//   - ★ 401 / 非限流的 403 → 该源的 token 不被接受。先**就地匿名重试同一个 URL**
+//     (公开仓库匿名即可), 匿名仍不行才继续下一个源。
+//     不能像以前那样"4xx 一律立即返回": 仓库从私有转公开后, 面板里常留着已失效的
+//     旧 token, 401 直接中断会让更新检查报 HTTP 401 —— 而匿名访问其实完全正常。
+//     (2026-10-18 实测: 面板更新检查 latest=None, error=HTTP 401)
+//   - 其他 4xx(404 等) → 确定答案, 立即返回
 func ghTry(atts []ghAttempt) ([]byte, string, error) {
 	var lastErr error
+	cl := &http.Client{}
 	for _, a := range atts {
-		req, err := http.NewRequest("GET", a.url, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		req.Header.Set("Accept", "application/vnd.github+json")
+		tok := ""
 		if a.token && globalStore != nil {
-			if tok := globalStore.Token(); tok != "" {
-				req.Header.Set("Authorization", "Bearer "+tok)
-			}
+			tok = globalStore.Token()
 		}
-		cl := &http.Client{Timeout: a.timeout}
-		resp, err := cl.Do(req)
+
+		// do 发一次请求; 返回 body / HTTP 状态码 / 剩余配额 / 错误
+		do := func(withTok string) ([]byte, int, string, error) {
+			req, err := http.NewRequest("GET", a.url, nil)
+			if err != nil {
+				return nil, 0, "", err
+			}
+			req.Header.Set("Accept", "application/vnd.github+json")
+			if withTok != "" {
+				req.Header.Set("Authorization", "Bearer "+withTok)
+			}
+			c := *cl
+			c.Timeout = a.timeout
+			resp, err := c.Do(req)
+			if err != nil {
+				return nil, 0, "", err
+			}
+			remain := resp.Header.Get("X-RateLimit-Remaining")
+			body, rerr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if rerr != nil {
+				return nil, resp.StatusCode, remain, rerr
+			}
+			return body, resp.StatusCode, remain, nil
+		}
+
+		body, code, remain, err := do(tok)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		body, rerr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if rerr != nil {
-			lastErr = rerr
-			continue
+		// token 不被接受 → 匿名重试同一个源
+		rejected := isGHAuthRejected(code, remain)
+		if tok != "" && rejected {
+			log.Printf("[panel] GitHub token 无效(HTTP %d), 改用匿名请求", code)
+			body, code, remain, err = do("")
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			rejected = isGHAuthRejected(code, remain)
 		}
-		if resp.StatusCode != 200 {
-			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-			if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		if code != 200 {
+			lastErr = fmt.Errorf("HTTP %d", code)
+			// 认证类错误已试过匿名, 不再视为"确定的答案"; 其他 4xx 立即返回
+			if code >= 400 && code < 500 && !rejected {
 				return nil, "", lastErr
 			}
 			continue
@@ -279,6 +314,22 @@ func ghTry(atts []ghAttempt) ([]byte, string, error) {
 		lastErr = fmt.Errorf("无可用下载源")
 	}
 	return nil, "", lastErr
+}
+
+// isGHAuthRejected 该响应是否表示"凭证不被接受"(而非资源不存在/限流)。
+//
+// 401 = Bad credentials / token 过期或撤销 —— 一定是凭证问题。
+// 403 要区分: X-RateLimit-Remaining=0 是触发限流(换匿名请求只会更差, 别重试),
+// 其余 403(如 token 权限不足)才算凭证问题。
+func isGHAuthRejected(code int, rateRemaining string) bool {
+	switch code {
+	case http.StatusUnauthorized:
+		return true
+	case http.StatusForbidden:
+		return rateRemaining != "0"
+	default:
+		return false
+	}
 }
 
 // panelGHDownload 下载 Release 资产。
