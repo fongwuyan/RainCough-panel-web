@@ -279,15 +279,35 @@ def album_from_local(aid):
     author = lib.get('author') or meta.get('author') or ''
     chapters = []
     base = album_dir(aid)
-    if os.path.isdir(base):
-        for d in sorted(os.listdir(base)):
-            sub = os.path.join(base, d)
-            if not os.path.isdir(sub) or d.startswith('.'):
+    IMG_EXT = ('.webp', '.jpg', '.jpeg', '.png', '.gif')
+
+    def _has_images(path):
+        try:
+            return any(f.lower().endswith(IMG_EXT) for f in os.listdir(path))
+        except Exception:
+            return False
+
+    # ★ 下载产物有两层 aid：<base>/<aid>/<aid>/<cid>/*.webp
+    #   （jmcomic 的 Bd_Aid 规则 + 本模块的目录布局）
+    #   原来只往下一层找图片，于是两层结构永远扫不到章节 → 返回 None，
+    #   表现是"明明下好了却打不开"。这里多下潜一层，新旧布局都能识别。
+    def _collect(path, depth=0):
+        out = []
+        if not os.path.isdir(path) or depth > 1:
+            return out
+        for d in sorted(os.listdir(path)):
+            sub = os.path.join(path, d)
+            if not os.path.isdir(sub) or d.startswith('.') or d.startswith('_tmp_'):
                 continue
-            files = [f for f in os.listdir(sub)
-                     if f.lower().endswith(('.webp', '.jpg', '.jpeg', '.png', '.gif'))]
-            if files:
-                chapters.append({'aid': aid, 'cid': d, 'name': name or f'章节 {d}'})
+            if _has_images(sub):
+                out.append({'aid': aid, 'cid': d, 'name': name or f'章节 {d}'})
+            elif depth == 0:
+                # 多一层 aid 目录：再往里找
+                out.extend(_collect(sub, depth + 1))
+        return out
+
+    if os.path.isdir(base):
+        chapters = _collect(base)
     if not chapters:
         return None
     if len(chapters) > 1:

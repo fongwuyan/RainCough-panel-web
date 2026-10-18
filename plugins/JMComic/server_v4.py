@@ -26,6 +26,25 @@ import threading as _th
 # 提到 6：实际并发仍受 server.py 的 _cdn_lock(4) 约束，不会把站点打爆。
 _SERVE_LOCK = _th.BoundedSemaphore(6)
 
+# 内置下载器：自己按页并发下载（见 downloader.py 顶部说明）。
+# 延迟到首次使用时初始化，避免插件启动就去读状态文件。
+_DL = None
+_DL_LOCK = _th.Lock()
+
+
+def _dl():
+    global _DL
+    if _DL is None:
+        with _DL_LOCK:
+            if _DL is None:
+                import downloader as _dlm
+                _DL = _dlm.Downloader(
+                    plugin_dir=M.PLUGIN_DIR,
+                    server_module=M,
+                )
+    return _DL
+
+
 # 性能统计
 _PERF = {'covers_hit': 0, 'covers_miss': 0, 'page_hit': 0, 'page_miss': 0, 'recent_ms': []}
 import time as _time
@@ -628,6 +647,76 @@ def jm_covers(params):
             'failed': failed_aids}
 
 
+# ---------------------------------------------------------------- 内置下载器
+#
+# 与旧的 jmcomic.download 的区别：旧的是 jmcomic 库的黑盒 download_album，
+# 只有"在跑/完成"两个状态，失败就整本重来；且单页 timeout=30s ——
+# 而本机到 CDN 的 TTFB 实测约 41s，必然超时。
+# 新实现按页并发下载、按页重试、断点续传、进度可观测。
+
+@rc.interface("jmcomic.dl.start")
+def jm_dl_start(params):
+    """开始下载。{aid, name?, author?, workers?}"""
+    aid = _s(params, 'aid')
+    if not aid or not aid.isdigit():
+        _err('缺少漫画ID')
+    try:
+        workers = int(_p(params).get('workers') or 6)
+    except (TypeError, ValueError):
+        workers = 6
+    r = _dl().start(aid, _s(params, 'name'), _s(params, 'author'), workers)
+    return {'ok': True, 'result': r, 'task': _dl().status(aid)}
+
+
+@rc.interface("jmcomic.dl.status")
+def jm_dl_status(params):
+    """单个任务的进度。{aid}"""
+    aid = _s(params, 'aid')
+    t = _dl().status(aid)
+    if not t:
+        return {'ok': True, 'task': None}
+    return {'ok': True, 'task': t}
+
+
+@rc.interface("jmcomic.dl.list")
+def jm_dl_list(params):
+    """所有下载任务（按更新时间倒序）。"""
+    return {'ok': True, 'tasks': _dl().list_all()}
+
+
+@rc.interface("jmcomic.dl.pause")
+def jm_dl_pause(params):
+    aid = _s(params, 'aid')
+    return {'ok': True, 'result': _dl().pause(aid)}
+
+
+@rc.interface("jmcomic.dl.resume")
+def jm_dl_resume(params):
+    aid = _s(params, 'aid')
+    return {'ok': True, 'result': _dl().resume(aid), 'task': _dl().status(aid)}
+
+
+@rc.interface("jmcomic.dl.cancel")
+def jm_dl_cancel(params):
+    aid = _s(params, 'aid')
+    return {'ok': True, 'result': _dl().cancel(aid)}
+
+
+@rc.interface("jmcomic.dl.remove")
+def jm_dl_remove(params):
+    """移除任务；delete_files=true 时连同已下文件一起删。"""
+    aid = _s(params, 'aid')
+    delete = str(_p(params).get('delete_files') or '').lower() in ('1', 'true', 'yes')
+    return {'ok': True, 'result': _dl().remove(aid, delete)}
+
+
+@rc.interface("jmcomic.dl.retry_failed")
+def jm_dl_retry_failed(params):
+    """只补下失败的页（不用整本重来）。"""
+    aid = _s(params, 'aid')
+    return {'ok': True, 'result': _dl().retry_failed(aid), 'task': _dl().status(aid)}
+
+
 @rc.interface("jmcomic.prefetch")
 def jm_prefetch(params):
     """章节图片批量预取: {aid,cid,start,count} → 已缓存页 URL 列表(后台并发解码)。"""
@@ -907,11 +996,11 @@ if __name__ == "__main__":
         version=_META["version"],
         manifest={"label": "JMComic", "description": "禁漫搜索/阅读/库"},
         frontend={"pages": [{"path": "", "title": "JMComic"}]},
-        iface_ids=["jmcomic.search", "jmcomic.meta", "jmcomic.album", "jmcomic.chapter",
-                   "jmcomic.cover", "jmcomic.covers", "jmcomic.prefetch", "jmcomic.image",
-                   "jmcomic.perf.stats", "jmcomic.download", "jmcomic.download.status",
-                   "jmcomic.download.cancel", "jmcomic.library.list", "jmcomic.library.delete",
-                   "jmcomic.config.get", "jmcomic.config.save", "jmcomic.info",
-                   "jmcomic.batch.start", "jmcomic.batch.status", "jmcomic.batch.stop"],
+        # ★ 不要在这里硬编码接口清单。
+        #   原来写死了 20 个 ID，新增的 @rc.interface 虽然注册了 handler，
+        #   但 rc.serve 的 iface_ids 参数会覆盖 _handlers.keys() ——
+        #   面板侧就看不到新接口，调用时报"接口不属于该插件"。
+        #   传 None 让 rcplugin 自动取全部已注册接口。
+        iface_ids=None,
         plugin_dir=os.path.dirname(os.path.abspath(__file__)),
     )

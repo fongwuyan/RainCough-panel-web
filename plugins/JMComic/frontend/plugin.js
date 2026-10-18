@@ -265,10 +265,12 @@ function mount(container, ctx) {
         try {
           const [a, st, cv] = await Promise.all([
             ctx.invoke('jmcomic.album', { aid: aid }),
-            ctx.invoke('jmcomic.download.status', { aid: aid }),
+            ctx.invoke('jmcomic.dl.status', { aid: aid }),
             ctx.invoke('jmcomic.cover', { aid: aid }).catch(() => null),
           ])
-          this.album = a; this.dl = st || {}
+          this.album = a
+          // 新下载器的 task 结构；没有任务时给个空壳，渲染不用到处判空
+          this.dl = (st && st.task) || { status: 'none', done_pages: 0, total_pages: 0 }
           if (cv && cv.cover) this.coverMap[String(aid)] = cv.cover
           this.tab = 'album'; this.chapter = null; this.pages = []; this.pageIdx = 0; this.view = 'flow'
           if (this.dl.status !== 'completed' && this.dl.status !== 'failed' && this.dl.status !== 'cancelled') this.pollDl(aid, false)
@@ -278,27 +280,64 @@ function mount(container, ctx) {
         clearInterval(this.dlTimer)
         const tick = async () => {
           try {
-            const r = await ctx.invoke('jmcomic.download.status', { aid })
-            this.dl = r || {}
-            if (['completed', 'failed', 'cancelled'].includes(this.dl.status)) clearInterval(this.dlTimer)
+            const r = await ctx.invoke('jmcomic.dl.status', { aid })
+            if (r && r.task) this.dl = r.task
+            // 终态才停轮询：paused 也要停（继续时手动重启轮询），否则白耗请求
+            if (['completed', 'failed', 'cancelled', 'paused'].includes(this.dl.status)) {
+              clearInterval(this.dlTimer)
+            }
           } catch (e) { clearInterval(this.dlTimer) }
         }
         await tick()
-        if (!once && !['completed', 'failed', 'cancelled'].includes(this.dl.status)) this.dlTimer = setInterval(tick, 3000)
+        if (!once && !['completed', 'failed', 'cancelled', 'paused'].includes(this.dl.status)) {
+          this.dlTimer = setInterval(tick, 2000)
+        }
       },
       async startDownload(aid) {
         if (this.dlBusy) return
         this.dlBusy = true; this.err = ''
-        try { await ctx.invoke('jmcomic.download', { aid }); this.okMsg = '已加入下载队列'; this.pollDl(aid, false) }
-        catch (e) { this.err = (e && e.message) || e }
-        setTimeout(() => { this.dlBusy = false; this.okMsg = '' }, 1500)
+        try {
+          const r = await ctx.invoke('jmcomic.dl.start', {
+            aid, name: (this.album && this.album.name) || '', workers: 6,
+          })
+          if (r && r.task) this.dl = r.task
+          this.okMsg = '开始下载'
+          this.pollDl(aid, false)
+        } catch (e) { this.err = (e && e.message) || e }
+        setTimeout(() => { this.dlBusy = false; this.okMsg = '' }, 1200)
+      },
+      async pauseDownload(aid) {
+        try {
+          await ctx.invoke('jmcomic.dl.pause', { aid })
+          this.okMsg = '已暂停，可随时继续'
+          this.pollDl(aid, true)
+        } catch (e) { this.err = (e && e.message) || e }
+        setTimeout(() => { this.okMsg = '' }, 1500)
+      },
+      async resumeDownload(aid) {
+        try {
+          const r = await ctx.invoke('jmcomic.dl.resume', { aid })
+          if (r && r.task) this.dl = r.task
+          this.okMsg = '继续下载（已完成的页会跳过）'
+          this.pollDl(aid, false)
+        } catch (e) { this.err = (e && e.message) || e }
+        setTimeout(() => { this.okMsg = '' }, 1500)
+      },
+      async retryFailed(aid) {
+        try {
+          const r = await ctx.invoke('jmcomic.dl.retry_failed', { aid })
+          if (r && r.task) this.dl = r.task
+          this.okMsg = '正在补下失败的页'
+          this.pollDl(aid, false)
+        } catch (e) { this.err = (e && e.message) || e }
+        setTimeout(() => { this.okMsg = '' }, 1500)
       },
       async cancelDownload(aid) {
         this.err = ''
         try {
-          const r = await ctx.invoke('jmcomic.download.cancel', { aid })
-          this.dl = { ...(this.dl || {}), status: r && r.status === 'cancelling' ? 'cancelling' : 'cancelled' }
-          this.pollDl(aid, false)
+          await ctx.invoke('jmcomic.dl.cancel', { aid })
+          this.dl = { ...(this.dl || {}), status: 'cancelled' }
+          this.pollDl(aid, true)
         } catch (e) { this.err = (e && e.message) || e }
       },
       // ---------- 阅读 ----------
@@ -408,7 +447,7 @@ function mount(container, ctx) {
       let v = null
       // ---- 详情 ----
       if (this.tab === 'album' && this.album) {
-        const a = this.album, dl = this.dl, done = dl.status === 'completed'
+        const a = this.album, dl = this.dl, done = (dl.status === 'completed')
         const cancelling = dl.status === 'cancelling' || (dl.status === 'downloading' && dl.cancel)
         const cancelled = dl.status === 'cancelled'
         const cover = this.coverMap[a.id]
@@ -427,28 +466,96 @@ function mount(container, ctx) {
         const descShort = desc.length > 220
         const showDesc = descShort && !this.descOpen ? desc.slice(0, 220) + '…' : desc
         let dlBlock
-        if (done) {
-          dlBlock = h('div', { style: 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(46,158,91,.08);border:1px solid rgba(46,158,91,.35);border-radius:8px;flex-wrap:wrap;' }, [
-            h('span', { style: 'color:var(--success);font-size:13px;font-weight:600;' }, '已下载'),
-            h('span', { class: 'faint', style: 'font-size:12px;' }, (dl.cached || dl.total || 0) + ' 页'),
-            first ? h('button', { class: 'btn btn-primary btn-sm', onclick: () => this.openChapter(first.cid, first.aid) }, '开始阅读（第 1 话）') : null,
-          ])
-        } else if (dl.total) {
-          dlBlock = h('div', { style: 'padding:10px 12px;background:rgba(58,120,168,.08);border:1px solid rgba(58,120,168,.35);border-radius:8px;' }, [
+        // 统一从新下载器的 task 取字段
+        const st = dl.status || 'none'
+        const dPages = dl.done_pages || 0
+        const tPages = dl.total_pages || 0
+        const pct2 = dl.progress != null ? dl.progress : (tPages ? Math.round(dPages / tPages * 100) : 0)
+        const spKB = Math.round((dl.speed_bps || 0) / 1024)
+        const eta = dl.eta_sec || 0
+        const etaTxt = eta > 0 ? (Math.floor(eta / 60) + 'm' + String(eta % 60).padStart(2, '0') + 's') : ''
+        const fCnt = dl.failed_count || 0
+        const wrap = (inner, tone) => h('div', {
+          style: 'padding:10px 12px;border-radius:8px;' + ({
+            ok: 'background:rgba(46,158,91,.08);border:1px solid rgba(46,158,91,.35);',
+            run: 'background:rgba(58,120,168,.08);border:1px solid rgba(58,120,168,.35);',
+            warn: 'background:rgba(214,158,46,.10);border:1px solid rgba(214,158,46,.4);',
+            err: 'background:rgba(217,82,78,.06);border:1px solid rgba(217,82,78,.3);',
+            idle: 'background:rgba(217,82,78,.06);border:1px solid rgba(217,82,78,.3);',
+          }[tone] || ''),
+        }, inner)
+
+        if (st === 'completed') {
+          dlBlock = wrap([
+            h('div', { style: 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;' }, [
+              h('span', { style: 'color:var(--success);font-size:13px;font-weight:600;' }, '已下载'),
+              h('span', { class: 'faint', style: 'font-size:12px;' }, tPages + ' 页'),
+              first ? h('button', { class: 'btn btn-primary btn-sm', onclick: () => this.openChapter(first.cid, first.aid) }, '开始阅读（第 1 话）') : null,
+            ]),
+          ], 'ok')
+        } else if (st === 'downloading' || st === 'queued') {
+          dlBlock = wrap([
             h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;' }, [
               h('div', null, [
-                h('div', { style: 'font-size:13px;color:var(--text-muted);' }, cancelling ? '正在取消…' : '正在下载: ' + (dl.downloaded || 0) + '/' + dl.total + ' 页'),
-                h('div', { class: 'faint', style: 'font-size:11px;margin-top:2px;' }, cancelling ? '当前整本收尾后将清理，稍候' : '剩余 ' + Math.max(0, dl.total - (dl.downloaded || 0)) + ' 页 · ' + pct + '%'),
+                h('div', { style: 'font-size:13px;color:var(--text);font-weight:600;' },
+                  st === 'queued' ? ('排队中 · ' + (dl.current || '准备…')) : ('下载中 ' + dPages + '/' + tPages + ' 页')),
+                h('div', { class: 'faint', style: 'font-size:11px;margin-top:2px;' },
+                  (st === 'queued' ? '' : (pct2 + '% · '))
+                  + (spKB > 0 ? spKB + ' KB/s' : '')
+                  + (etaTxt ? (' · 剩余 ' + etaTxt) : '')
+                  + (fCnt ? (' · 失败 ' + fCnt + ' 页') : '')),
               ]),
-              h('button', { class: 'btn btn-sm btn-danger', disabled: cancelling, onclick: () => this.cancelDownload(a.id) }, cancelling ? '取消中…' : '取消下载'),
+              h('div', { style: 'display:flex;gap:6px;' }, [
+                h('button', { class: 'btn btn-sm', onclick: () => this.pauseDownload(a.id) }, '暂停'),
+                h('button', { class: 'btn btn-sm btn-danger', onclick: () => this.cancelDownload(a.id) }, '取消'),
+              ]),
             ]),
-            h('div', { class: 'rcjm-bar' }, h('div', { style: 'width:' + pct + '%' })),
-          ])
+            h('div', { class: 'rcjm-bar' }, h('div', { style: 'width:' + Math.max(1, pct2) + '%' })),
+          ], 'run')
+        } else if (st === 'paused') {
+          dlBlock = wrap([
+            h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;' }, [
+              h('div', null, [
+                h('div', { style: 'font-size:13px;color:var(--text);font-weight:600;' }, '已暂停'),
+                h('div', { class: 'faint', style: 'font-size:11px;margin-top:2px;' },
+                  dPages + '/' + tPages + ' 页已完成，继续时会跳过这些页'),
+              ]),
+              h('button', { class: 'btn btn-primary btn-sm', onclick: () => this.resumeDownload(a.id) }, '继续下载'),
+            ]),
+            h('div', { class: 'rcjm-bar' }, h('div', { style: 'width:' + Math.max(1, pct2) + '%' })),
+          ], 'warn')
+        } else if (st === 'failed') {
+          dlBlock = wrap([
+            h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;' }, [
+              h('div', null, [
+                h('div', { style: 'font-size:13px;color:var(--error,#d9524e);font-weight:600;' },
+                  '下载未完成 · ' + dPages + '/' + tPages + ' 页'),
+                h('div', { class: 'faint', style: 'font-size:11px;margin-top:2px;' },
+                  (fCnt ? (fCnt + ' 页失败') : '') + (dl.error ? ('　' + dl.error) : '')),
+              ]),
+              h('div', { style: 'display:flex;gap:6px;' }, [
+                h('button', { class: 'btn btn-primary btn-sm', onclick: () => this.retryFailed(a.id) }, '只补失败'),
+                h('button', { class: 'btn btn-sm', onclick: () => this.resumeDownload(a.id) }, '全部续传'),
+              ]),
+            ]),
+            h('div', { class: 'rcjm-bar' }, h('div', { style: 'width:' + Math.max(1, pct2) + '%' })),
+          ], 'err')
+        } else if (st === 'cancelled') {
+          dlBlock = wrap([
+            h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;' }, [
+              h('span', { style: 'font-size:13px;color:var(--text-muted);' },
+                '已取消' + (dPages ? ('（已下 ' + dPages + ' 页会保留）') : '')),
+              h('button', { class: 'btn btn-primary btn-sm', onclick: () => this.startDownload(a.id) }, '重新下载'),
+            ]),
+          ], 'err')
         } else {
-          dlBlock = h('div', { style: 'padding:10px 12px;background:rgba(217,82,78,.06);border:1px solid rgba(217,82,78,.3);border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;' }, [
-            h('span', { style: 'font-size:13px;color:var(--text-muted);' }, cancelled ? '已取消本次下载，可重新开始' : '尚未下载，下载后解锁章节与阅读'),
-            h('button', { class: 'btn btn-primary', disabled: this.dlBusy, onclick: () => this.startDownload(a.id) }, this.dlBusy ? '提交中…' : '先下载本子'),
-          ])
+          dlBlock = wrap([
+            h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;' }, [
+              h('span', { style: 'font-size:13px;color:var(--text-muted);' }, '尚未下载到本地，下载后可离线阅读'),
+              h('button', { class: 'btn btn-primary', disabled: this.dlBusy, onclick: () => this.startDownload(a.id) },
+                this.dlBusy ? '提交中…' : '下载整本'),
+            ]),
+          ], 'idle')
         }
         const related = (a.related || []).slice(0, 8)
         v = h('div', null, [
