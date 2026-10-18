@@ -208,15 +208,59 @@ def _mark_cover_failed(aid):
     _COVER_FAILED.add(aid)
 
 
+# 后台补生成缩略图的 inflight 表（避免同一张图被反复转）
+_THUMB_ASYNC = set()
+_THUMB_ASYNC_LOCK = _th.Lock()
+
+
+def _thumb_async(aid, src):
+    """后台把原图转成缩略图；不阻塞调用方。
+
+    原图已经在服务器上时，我们**先返回原图 URL 让界面立刻显示**，
+    再慢慢转缩略图。下次请求就会用上体积小 4~5 倍的缩略图。
+    转的过程很快（实测 0.06s/张），但批量时不能串在响应路径上。
+    """
+    with _THUMB_ASYNC_LOCK:
+        if aid in _THUMB_ASYNC:
+            return
+        _THUMB_ASYNC.add(aid)
+
+    def run():
+        try:
+            _make_thumb(src, aid)
+        except Exception:
+            pass
+        finally:
+            with _THUMB_ASYNC_LOCK:
+                _THUMB_ASYNC.discard(aid)
+
+    _th.Thread(target=run, daemon=True, name='jm-thumb-%s' % aid).start()
+
+
 def _thumb_url_if_exists(aid):
-    """只查缩略图是否存在，不做任何图像处理、不发网络请求。
-    批量接口第一遍用它，保证快速返回已就绪的那部分。"""
+    """返回"现在就能显示"的封面 URL，不做网络请求。
+
+    顺序：缩略图 → 原图 → 无。
+
+    ★ 原图也要返回：服务器上已经有原图时，没有理由让用户继续看骨架屏。
+      原来只认缩略图，导致"文件明明在服务器上，界面还是空的"，
+      要等后台转完缩略图（批量时能拖几秒）。现在直接给原图，
+      后台异步把缩略图补上，下次请求自动换成小的。
+    """
     if not aid or not aid.isdigit():
         return ''
     t = _thumb_path(aid)
     if os.path.isfile(t) and os.path.getsize(t) > 0:
         _perf('cover', True, 0.0)
         return _cover_url('%s_t.webp' % aid)
+
+    cache = _cover_cache_dir()
+    for ext in ('jpg', 'jpeg', 'webp', 'png', 'gif'):
+        src = os.path.join(cache, '%s.%s' % (aid, ext))
+        if os.path.isfile(src) and os.path.getsize(src) > 0:
+            _thumb_async(aid, src)
+            _perf('cover', True, 0.0)
+            return _cover_url('%s.%s' % (aid, ext))
     return ''
 
 
@@ -597,8 +641,10 @@ def jm_covers(params):
             pending.append(a)
 
     if cached_only:
-        pref = _prefix_filter(aids, covers)
-        return {'ok': True, 'covers': pref, 'total': len(aids),
+        # 不裁剪成前缀：返回所有「现在就能显示」的。
+        # 裁剪会让「第 2 个已就绪但第 1 个没就绪」时第 2 个也不显示 ——
+        # 而现在的目标是"处理完一个就立即显示"。
+        return {'ok': True, 'covers': covers, 'total': len(aids),
                 'pending': len(pending), 'cached_only': True}
 
     generated = 0

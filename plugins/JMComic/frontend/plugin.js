@@ -3,14 +3,15 @@
 import { createApp, h } from 'vue'
 
 const NAME = 'JMComic'
-/** 封面最多轮询多少次（2s 一次 ≈ 30s）。真没封面的本子不该无限重试。 */
-const MAX_COVER_POLL = 15
-
 /**
- * 顺序门控的兜底时间：某个位置等这么久还没封面就跳过它，
- * 避免一个确实没有封面的本子把后面整屏堵住。
+ * 封面最多轮询多少次。
+ *
+ * ★ 必须和轮询间隔一起看：这个值是**次数**，不是时长。
+ *   轮询从 2s 改到 0.7s 后，15 次只覆盖 10.5 秒 —— 而这里生成一张封面
+ *   要 40 秒以上，结果就是「前几张出来了，后面的被提前放弃、永远不显示」。
+ *   按 0.7s × 260 ≈ 3 分钟算，足够覆盖一批封面的完整生成。
  */
-const COVER_GIVE_UP_MS = 30000
+const MAX_COVER_POLL = 260
 
 const STYLE_ID = 'rc-jmcomic-style'
 const RECENT_KEY = 'rc_jmcomic_recent'
@@ -46,8 +47,8 @@ function mount(container, ctx) {
         // coverErrCount —— <img> 加载失败次数（用于绕过浏览器缓存重试）
         // coverTimer    —— 定时重试 pending 的计时器
         coverPending: {}, coverErrCount: {}, coverTimer: null, coverLoading: false,
-        // 顺序门控：coverWaitSince 记录每个 aid 从何时开始等；coverGiveUp 是等太久被放行的
-        coverWaitSince: {}, coverGiveUp: {}, coverTick: 0,
+        // coverGiveUp：服务端确认拿不到封面的 aid，UI 跳过它们不再重试
+        coverGiveUp: {},
         prefetchIdx: 0 }
     },
     mounted() {
@@ -83,14 +84,14 @@ function mount(container, ctx) {
       // 封面是服务端按需生成的，一个要 1~2 秒（3 次网络请求）。
       // 首批 4s 必然拿不全，所以每 2 秒轮询一次（cached_only，纯读文件），
       // 哪张生成好了就显示哪张。最多轮询 30 秒。
+      // 700ms 一轮。cached_only 查询是纯文件 stat（实测 0.86ms），
+      // 这个频率对服务器几乎无成本，换来的是「生成完立刻可见」。
+      // 原来 2s 一轮，用户会觉得"明明好了却不显示"。
       this.coverTimer = setInterval(() => {
         if (this.loading) return
         if (this.tab !== 'search' && this.tab !== 'lib') return
         if (Object.keys(this.coverPending).length) this.retryPendingCovers()
-        // 唤醒一次渲染：门控依赖「等了多久」，不重渲染的话
-        // 超时放行永远不会生效（Vue 只在响应式数据变化时才重绘）
-        this.coverTick = (this.coverTick || 0) + 1
-      }, 2000)
+      }, 700)
     },
     unmounted() {
       clearInterval(this.dlTimer); clearTimeout(this.searchTimer); clearInterval(this.coverTimer)
@@ -135,7 +136,6 @@ function mount(container, ctx) {
           this.coverQueueStop = false; this.coverLoaded = 0
           // 换了一批结果，旧的重试队列作废（coverMap 保留，已取到的不用重取）
           this.coverPending = {}
-          this.coverWaitSince = {}
           this.coverGiveUp = {}
           this.loadNextCoverBatch()
         } catch (e) { this.err = (e && e.message) || e }
@@ -153,36 +153,6 @@ function mount(container, ctx) {
       //   服务端改成渐进返回（最多等 4s）之后，这个漏洞被放大 ——
       //   首屏 12 个里只生成了 5 个，另外 7 个就永远空着。
       //   现在把没拿到的记进 coverPending，由定时器重试。
-      /**
-       * 顺序门控：返回"可以显示封面的最大下标"。
-       *
-       * 从列表头开始逐个检查，遇到第一个「还没封面、也没放弃」的就停 ——
-       * 它后面的即使已经拿到封面也先不渲染，这样视觉上是**从上往下依次填充**，
-       * 而不是"第 5 个先出图、第 1 个还空着"。
-       *
-       * 防止卡死：等超过 COVER_GIVE_UP_MS 还没拿到的位置记为放弃，
-       * 门控跳过它继续往后（否则一个没有封面的本子会把整屏堵住）。
-       */
-      coverGate(items) {
-        // 读一下 coverTick 建立响应式依赖：定时器递增它 → 触发重渲染 →
-        // 才能让「等待超时放行」生效
-        void this.coverTick
-        const now = Date.now()
-        let i = 0
-        for (; i < items.length; i++) {
-          const id = String(items[i].id ?? items[i].aid ?? '')
-          if (this.coverMap[id]) continue
-
-          if (!this.coverWaitSince[id]) this.coverWaitSince[id] = now
-          if (this.coverGiveUp[id]) continue
-          if (now - this.coverWaitSince[id] > COVER_GIVE_UP_MS) {
-            this.coverGiveUp[id] = true
-            continue
-          }
-          break
-        }
-        return i
-      },
       // 找到真正的滚动容器（面板布局是 <main class="content"> overflow-y:auto）
       findScroller() {
         let el = this.$el ? this.$el.parentElement : null
@@ -233,7 +203,11 @@ function mount(container, ctx) {
         this.coverLoaded += queue.length
         this.coverLoading = true
         try {
-          // 触发式：允许服务端现场生成，最多等 4s（拿不全没关系，后面轮询补）
+          // ★ 先立刻问一次「现在就能拿的」，不等生成。
+          //   服务器上已有原图/缩略图的，这一步就全显示出来了（毫秒级）。
+          //   没有的再走下面触发式请求，让服务端现场去生成。
+          await this.fetchCovers(queue, true)
+          // 触发式：允许现场生成，最多等 4s（拿不全没关系，700ms 轮询会补）
           await this.fetchCovers(queue, false)
         } finally {
           this.coverLoading = false
@@ -383,7 +357,6 @@ function mount(container, ctx) {
         try {
           const r = await ctx.invoke('jmcomic.library.list', { page: 1, page_size: 60 })
           this.lib = ((r && r.items) || []).map((it) => ({ ...it, id: String(it.id ?? it.aid ?? '') })); this.coverLoadedLib = 0
-          this.coverWaitSince = {}
           this.coverGiveUp = {}
           this.loadNextCoverBatchLib()
         } catch (e) { this.err = (e && e.message) || e }
@@ -394,7 +367,9 @@ function mount(container, ctx) {
         if (!queue.length) return
         this.coverLoadedLib = (this.coverLoadedLib || 0) + queue.length
         this.coverLoading = true
-        this.fetchCovers(queue, false).finally(() => { this.coverLoading = false })
+        this.fetchCovers(queue, true)
+          .then(() => this.fetchCovers(queue, false))
+          .finally(() => { this.coverLoading = false })
       },
       async rm(aid) {
         try {
@@ -417,8 +392,6 @@ function mount(container, ctx) {
         grid = h('div', { class: 'card-grid', style: 'grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;' },
           Array.from({ length: 12 }).map((_, i) => h('div', { key: 's' + i, class: 'card', style: 'padding:6px;' }, h('div', { class: 'rcjm-skel' }))))
       } else {
-        // 每次渲染算一次门控边界（依赖 coverMap / 等待时间）
-        const coverGate = this.coverGate(gridItems)
         grid = h('div', null, [
           h('p', { class: 'faint', style: 'font-size:12px;margin:2px 0 8px;' }, this.tab === 'search'
             ? this.results.length + ' 条结果 · 第 ' + this.page + '/' + this.pageCount + ' 页' + (this.searchMs ? ' · ' + (this.searchMs / 1000).toFixed(1) + 's' : '')
@@ -426,8 +399,10 @@ function mount(container, ctx) {
           h('div', { class: 'card-grid', style: 'grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;' },
             gridItems.map((it, gi) => {
               const id = String(it.id ?? it.aid ?? '')
-              // 只有门控放行的位置才显示封面；后面的即使已拿到也先留骨架，保证按顺序出现
-              const cover = gi < coverGate ? this.coverMap[id] : null
+              // 每个位置独立显示：谁就绪谁先出图，不再等前面的。
+              // 服务端按顺序生成，所以视觉上仍是从上往下依次填充；
+              // 但不会出现「第 2 个已就绪却因为第 1 个没好而一直空着」。
+              const cover = this.coverMap[id]
               return h('div', { key: id, class: 'card rcjm-card', style: 'padding:6px;', onclick: () => this.openAlbum(id) }, [
                 cover
                   ? h('img', { src: cover, loading: 'lazy', class: 'rcjm-thumb', onerror: (e) => this.onCoverErr(e, id) })
