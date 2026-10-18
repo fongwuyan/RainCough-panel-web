@@ -3,9 +3,9 @@
     {
       "version": "1.0.0-beta",
       "tag": "v1.0.0-beta",
-      "size_bytes": 3956189,
-      "md5": "33f9258429940e4fe0e7aa54f518fa2d",
-      "sha256": "fb735dbd368e79ae8207d33c24d3f09c31bbbc43c84ad542886adfb881dedfd5",
+      "size_bytes": 3956460,
+      "md5": "e29baa28e80ace3a1e65aad63c529a0b",
+      "sha256": "2c1926dcd734b75b2fb9f85e4cdd71958b34fecf16f8a6140df229656d81428d",
       "asset": "raincough-linux-x86_64-1.0.0-beta.tar.gz",
       "install_command": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/v1.0.0-beta/install.sh | bash"
     }
