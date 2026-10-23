@@ -1,7 +1,7 @@
 {
   "name": "atk",
   "label": "网络攻防工具库",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "安全作业编排台: 侦察、检测、验证、解码、取证（纯标准库实现，无第三方依赖）",
   "author": "RainCough",
   "icon": "",
@@ -243,6 +243,66 @@
         "type": "object"
       },
       "description": "把请求转成 curl 片段"
+    },
+    {
+      "id": "atk.analyze.upload",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "上传样本并解析结构（ELF / PE）"
+    },
+    {
+      "id": "atk.analyze.info",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "样本结构、保护机制、导入导出与可疑能力"
+    },
+    {
+      "id": "atk.analyze.functions",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "函数/符号列表"
+    },
+    {
+      "id": "atk.analyze.disasm",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "指定地址反汇编（自研解码器）"
+    },
+    {
+      "id": "atk.analyze.strings",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "字符串分类提取"
     },
     {
       "id": "atk.decode.identify",

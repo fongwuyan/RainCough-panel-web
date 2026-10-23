@@ -415,16 +415,142 @@ const TPL = `
       </div>
     </template>
 
-    <!-- ══════════════ 分析（未开放） ══════════════ -->
+    <!-- ══════════════ 分析 ══════════════ -->
     <template v-if="cur === 'analyze'">
       <div class="rcat-panel">
-        <div class="rcat-ph"><h2>分析</h2><p>拆解二进制、安装包与固件</p></div>
-        <div class="rcat-empty">
-          本模块排在四期。<br>
-          依赖反汇编引擎（capstone / ghidra headless），宿主当前都没装，硬做出来只会是空壳。<br>
-          <span class="rcat-faint">三期的「取证」已能做文件类型识别、字符串提取与 EXIF，先满足大部分查看需求。</span>
+        <div class="rcat-ph"><h2>分析</h2><p>ELF / PE 结构、保护机制、导入导出与入口反汇编</p></div>
+        <div v-if="!aInfo" class="rcat-drop" @click="$refs.bin.click()" @dragover.prevent @drop.prevent="onBinDrop">
+          <b>拖入 ELF / PE 或点击选择</b>
+          结构解析与反汇编都是自研实现，不依赖 capstone / ghidra
         </div>
+        <div v-else class="rcat-row">
+          <span class="rcat-mono">{{ aInfo.filename }}</span>
+          <span class="rcat-badge rcat-b-info">{{ aInfo.format }} {{ aInfo.bits }}-bit</span>
+          <span class="rcat-muted">{{ aInfo.arch }}</span>
+          <span class="rcat-faint">{{ fmtSize(aInfo.size) }}</span>
+          <div style="flex:1"></div>
+          <button class="rcat-btn s" @click="aInfo = null">换一个</button>
+        </div>
+        <input ref="bin" type="file" style="display:none" @change="onBinPick">
+        <div v-if="aBusy" class="rcat-hint rcat-mt8">解析中…</div>
       </div>
+
+      <template v-if="aInfo">
+        <div class="rcat-panel">
+          <div class="rcat-kv">
+            <div><span>类型</span><b>{{ aInfo.type }}</b></div>
+            <div><span>入口</span><b class="rcat-mono">{{ hex(aInfo.entry) }}</b></div>
+            <div><span>节区</span><b>{{ aInfo.sections.length }}</b></div>
+            <div><span>导入 / 导出</span><b>{{ aInfo.imports.length }} / {{ aInfo.exports.length }}</b></div>
+          </div>
+          <div class="rcat-mt12" style="display:flex;gap:8px;flex-wrap:wrap">
+            <span v-for="(v, k) in aInfo.protections" :key="k" class="rcat-badge"
+                  :class="protClass(k, v)">{{ protLabel(k) }}: {{ protVal(v) }}</span>
+          </div>
+          <div v-if="aInfo.suspicious && aInfo.suspicious.length" class="rcat-mt12">
+            <span class="rcat-hint">能力提示（来自导入表，非判定）：</span>
+            <span v-for="c in aInfo.suspicious" :key="c.api" class="rcat-badge"
+                  :class="c.level === '高危' ? 'rcat-b-high' : c.level === '中危' ? 'rcat-b-mid' : 'rcat-b-low'"
+                  style="margin-left:6px" :title="c.api">{{ c.cap }}</span>
+          </div>
+          <div v-if="aInfo.notes && aInfo.notes.length" class="rcat-mt8">
+            <div v-for="(n, i) in aInfo.notes" :key="i" class="rcat-faint" style="font-size:11.5px">· {{ n }}</div>
+          </div>
+        </div>
+
+        <div class="rcat-tabs">
+          <div class="rcat-tab" :class="{ on: aTab === 'sections' }" @click="aTab = 'sections'">节区</div>
+          <div class="rcat-tab" :class="{ on: aTab === 'imports' }" @click="aTab = 'imports'">导入 {{ aInfo.imports.length }}</div>
+          <div class="rcat-tab" :class="{ on: aTab === 'exports' }" @click="aTab = 'exports'">导出 {{ aInfo.exports.length }}</div>
+          <div class="rcat-tab" :class="{ on: aTab === 'strings' }" @click="aTab = 'strings'; loadStrings()">字符串</div>
+        </div>
+
+        <div class="rcat-tblwrap" v-if="aTab === 'sections'" style="max-height:320px">
+          <table class="rcat-tbl">
+            <thead><tr><th>节区</th><th>地址</th><th>大小</th><th>属性</th><th>熵</th></tr></thead>
+            <tbody>
+              <tr v-for="sec in aInfo.sections" :key="sec.name">
+                <td class="rcat-mono">{{ sec.name }}</td>
+                <td class="rcat-mono rcat-muted">{{ hex(sec.addr) }}</td>
+                <td class="rcat-mono">{{ fmtSize(sec.size) }}</td>
+                <td>
+                  <span v-if="sec.exec" class="rcat-badge rcat-b-mid">X</span>
+                  <span v-if="sec.write" class="rcat-badge rcat-b-low" style="margin-left:4px">W</span>
+                </td>
+                <td>
+                  <span class="rcat-mono" :style="{ color: sec.entropy >= 7.2 ? 'var(--bad)' : sec.entropy >= 6 ? 'var(--warn)' : 'var(--muted)' }">{{ sec.entropy }}</span>
+                  <span class="rcat-faint" style="font-size:11px"> / 8</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="rcat-tblwrap" v-else-if="aTab === 'imports'" style="max-height:320px">
+          <table class="rcat-tbl">
+            <thead><tr><th>导入符号</th><th>能力</th></tr></thead>
+            <tbody>
+              <tr v-for="(im, i) in aInfo.imports" :key="i">
+                <td class="rcat-mono">{{ im }}</td>
+                <td><span v-if="capOf(im)" class="rcat-badge rcat-b-mid">{{ capOf(im) }}</span></td>
+              </tr>
+              <tr v-if="!aInfo.imports.length"><td colspan="2" class="rcat-empty">无导入（静态链接或已加壳）</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="rcat-tblwrap" v-else-if="aTab === 'exports'" style="max-height:320px">
+          <table class="rcat-tbl">
+            <thead><tr><th>导出符号</th><th>地址</th><th>大小</th></tr></thead>
+            <tbody>
+              <tr v-for="(ex, i) in aInfo.exports" :key="i">
+                <td class="rcat-mono">{{ ex.name }}</td>
+                <td class="rcat-mono rcat-muted">{{ hex(ex.addr) }}</td>
+                <td class="rcat-mono">{{ ex.size || '—' }}</td>
+              </tr>
+              <tr v-if="!aInfo.exports.length"><td colspan="3" class="rcat-empty">无导出符号</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-else class="rcat-panel">
+          <div v-if="!aStrings" class="rcat-faint">加载中…</div>
+          <template v-else>
+            <div class="rcat-hint" style="margin-bottom:8px">共提取 {{ aStrings.total }} 条可打印字符串</div>
+            <div v-for="(arr, k) in aStrings.groups" :key="k" class="rcat-mt8">
+              <div class="rcat-ph"><h2 style="font-size:12.5px">{{ k }}</h2><p>{{ arr.length }} 条</p></div>
+              <pre class="rcat-code" style="max-height:140px">{{ arr.join('\\n') }}</pre>
+            </div>
+            <div v-if="!Object.keys(aStrings.groups).length" class="rcat-empty">没有命中分类特征的字符串</div>
+          </template>
+        </div>
+
+        <div class="rcat-split" style="margin-top:12px">
+          <div class="rcat-list">
+            <div class="rcat-list-h">函数 / 符号 {{ aFuncs.length }}</div>
+            <div v-for="(f, i) in aFuncs.slice(0, 300)" :key="i" class="rcat-list-i"
+                 :class="{ on: aDisasm && aDisasm.base === f.addr }" @click="disasmAt(f.addr)">
+              {{ f.name }}
+              <div class="sub">{{ hex(f.addr) }}<span v-if="f.size"> · {{ f.size }}B</span></div>
+            </div>
+            <div v-if="!aFuncs.length" class="rcat-empty">无符号表（已 strip）</div>
+          </div>
+          <div class="rcat-panel">
+            <div class="rcat-ph">
+              <h2>反汇编</h2>
+              <p v-if="aDisasm">{{ hex(aDisasm.base) }} · {{ aDisasm.count }} 条<span v-if="aDisasm.unknown"> · 未覆盖 {{ aDisasm.unknown }}</span></p>
+              <p v-else>点左侧函数，或</p>
+              <button class="rcat-btn s" style="margin-left:6px" @click="disasmAt(aInfo.entry)">从入口开始</button>
+            </div>
+            <pre class="rcat-code" style="max-height:420px" v-if="aDisasm">{{ disasmText }}</pre>
+            <div v-else class="rcat-empty">尚未反汇编</div>
+            <div class="rcat-faint" style="font-size:11px;margin-top:6px">
+              自研解码器：覆盖整数/跳转/常用 SSE，已用 objdump 对照验证（真实二进制 100% 对齐）。
+              未覆盖的指令显示为 db，可能影响后续对齐。
+            </div>
+          </div>
+        </div>
+      </template>
     </template>
 
     <!-- ══════════════ 解码 ══════════════ -->
@@ -683,6 +809,8 @@ function mount(container, ctx) {
         // 验证
         risks2: [], vRisk: null, vMethod: 'POST', vUrl: '', vHeaders: '', vBody: '',
         vResp: null, vBusy: false, vTab: 'body', payloadKinds: [], payloads: [], pKind: '',
+        // 分析
+        aInfo: null, aFuncs: [], aDisasm: null, aStrings: null, aBusy: false, aTab: 'sections',
         // 解码
         dInput: '', dCands: [], dChain: [], dOut: '', dSteps: [], dSolve: null,
         rsaOpen: false, rsaN: '', rsaE: '3', rsaC: '',
@@ -695,7 +823,7 @@ function mount(container, ctx) {
           { id: 'recon', label: '侦察', ready: true, icon: '<circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' },
           { id: 'detect', label: '检测', ready: true, icon: '<path d="M8 1.8l5 2v4.1c0 3-2.1 5.1-5 6.3-2.9-1.2-5-3.3-5-6.3V3.8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>' },
           { id: 'verify', label: '验证', ready: true, icon: '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/>' },
-          { id: 'analyze', label: '分析', ready: false, note: '四期开放', icon: '<path d="M6 3.5L2 8l4 4.5M10 3.5L14 8l-4 4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>' },
+          { id: 'analyze', label: '分析', ready: true, icon: '<path d="M6 3.5L2 8l4 4.5M10 3.5L14 8l-4 4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>' },
           { id: 'decode', label: '解码', ready: true, icon: '<circle cx="5.2" cy="8" r="2.7" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7.9 8H14M11.2 8v3.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' },
           { id: 'forensic', label: '取证', ready: true, icon: '<path d="M4 1.8h5l3 3v9.4H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9 1.8v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>' },
         ],
@@ -742,6 +870,11 @@ function mount(container, ctx) {
       },
       solveText() {
         return this.dSolve ? JSON.stringify(this.dSolve, null, 2) : ''
+      },
+      disasmText() {
+        if (!this.aDisasm) return ''
+        return this.aDisasm.insns.map((i) =>
+          this.hex(i.addr).padEnd(12) + i.bytes.padEnd(20) + i.text).join('\n')
       },
     },
 
@@ -1031,6 +1164,87 @@ function mount(container, ctx) {
           if (i > 0) out[l.slice(0, i).trim()] = l.slice(i + 1).trim()
         })
         return out
+      },
+
+      // ── 分析 ──
+      onBinPick(e) {
+        const f = e.target.files && e.target.files[0]
+        if (f) this.readBin(f)
+        e.target.value = ''
+      },
+      onBinDrop(e) {
+        const f = e.dataTransfer.files && e.dataTransfer.files[0]
+        if (f) this.readBin(f)
+      },
+      readBin(f) {
+        if (f.size > 32 * 1024 * 1024) { this.flash('样本超过 32MB', true); return }
+        this.aBusy = true
+        const fr = new FileReader()
+        fr.onload = async () => {
+          try {
+            const b64 = String(fr.result).split(',')[1] || ''
+            const r = await ctx.invoke('atk.analyze.upload', {
+              task_id: this.taskId, filename: f.name, data_b64: b64,
+            })
+            this.aInfo = r.info
+            this.aInfo.id = r.sample_id        // ★ 后续接口都用这个 id
+            this.aInfo.filename = r.filename
+            this.aInfo.size = r.size
+            this.aFuncs = []; this.aDisasm = null; this.aStrings = null
+            this.aTab = 'sections'
+            this.log('已解析 ' + f.name + ' → ' + r.kind + ' ' + (r.info.bits || '') + '-bit')
+            await this.loadFuncs()
+            this.disasmAt(this.aInfo.entry)
+          } catch (e) { this.flash('解析失败：' + e.message, true) }
+          this.aBusy = false
+        }
+        fr.onerror = () => { this.aBusy = false; this.flash('读文件失败', true) }
+        fr.readAsDataURL(f)
+      },
+      async loadFuncs() {
+        if (!this.aInfo) return
+        try {
+          const r = await ctx.invoke('atk.analyze.functions', { sample_id: this.aInfo.id })
+          this.aFuncs = r.functions || []
+        } catch (e) { /* 无符号表不算错误 */ }
+      },
+      async disasmAt(addr) {
+        if (!this.aInfo) return
+        try {
+          this.aDisasm = await ctx.invoke('atk.analyze.disasm', {
+            sample_id: this.aInfo.id, addr: Number(addr) || 0, count: 60,
+          })
+        } catch (e) { this.flash('反汇编失败：' + e.message, true) }
+      },
+      async loadStrings() {
+        if (this.aStrings || !this.aInfo) return
+        try {
+          this.aStrings = await ctx.invoke('atk.analyze.strings', { sample_id: this.aInfo.id })
+        } catch (e) { this.flash(e.message, true) }
+      },
+      hex(v) {
+        if (v === null || v === undefined) return '—'
+        const n = Number(v)
+        return '0x' + (n < 0 ? 0 : n).toString(16).padStart(8, '0')
+      },
+      protLabel(k) {
+        return { pie: 'PIE', nx: 'NX', canary: 'Canary', relro: 'RELRO', stack_exec: '可执行栈',
+                 aslr: 'ASLR', dep: 'DEP', cfg: 'CFG', high_entropy_va: '高熵VA' }[k] || k
+      },
+      protVal(v) {
+        if (typeof v === 'boolean') return v ? '是' : '否'
+        return v
+      },
+      protClass(k, v) {
+        const good = (k === 'stack_exec') ? !v : (typeof v === 'boolean' ? v : v !== '无')
+        if (typeof v === 'string') return v === '全' ? 'rcat-b-low' : v === '部分' ? 'rcat-b-mid' : 'rcat-b-gray'
+        return good ? 'rcat-b-low' : 'rcat-b-high'
+      },
+      capOf(name) {
+        if (!this.aInfo || !this.aInfo.suspicious) return ''
+        const base = String(name).split('!').pop().split('@')[0]
+        const hit = this.aInfo.suspicious.find((x) => String(x.api).split('!').pop().split('@')[0] === base)
+        return hit ? hit.cap : ''
       },
 
       // ── 解码 ──

@@ -21,6 +21,7 @@ if PLUGIN_DIR not in sys.path:
 
 import rcplugin as rc                     # noqa: E402
 from core import store, util              # noqa: E402
+from modules import analyze as m_analyze  # noqa: E402
 from modules import decode as m_decode    # noqa: E402
 from modules import detect as m_detect    # noqa: E402
 from modules import forensic as m_forensic  # noqa: E402
@@ -28,7 +29,7 @@ from modules import recon as m_recon      # noqa: E402
 from modules import task as m_task        # noqa: E402
 from modules import verify as m_verify    # noqa: E402
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 LABEL = "网络攻防工具库"
 
 
@@ -222,6 +223,37 @@ def verify_poc(params):
     return m_verify.gen_poc(_p(params))
 
 
+# ══════════════════════════════════════════════════════════ 分析
+# 结构解析与反汇编全部自研(见 modules/analyze.py 与 core/x86.py),
+# 不依赖 capstone / pyelftools / pefile。
+
+@rc.interface("atk.analyze.upload")
+def analyze_upload(params):
+    return m_analyze.upload(_i(params, "task_id"), _s(params, "filename"),
+                            _s(params, "data_b64"))
+
+
+@rc.interface("atk.analyze.info")
+def analyze_info(params):
+    return m_analyze.info(_i(params, "sample_id"))
+
+
+@rc.interface("atk.analyze.functions")
+def analyze_functions(params):
+    return m_analyze.functions(_i(params, "sample_id"))
+
+
+@rc.interface("atk.analyze.disasm")
+def analyze_disasm(params):
+    return m_analyze.disasm(_i(params, "sample_id"), _i(params, "addr"),
+                            _i(params, "count", 60))
+
+
+@rc.interface("atk.analyze.strings")
+def analyze_strings(params):
+    return m_analyze.strings(_i(params, "sample_id"))
+
+
 # ══════════════════════════════════════════════════════════ 解码
 
 @rc.interface("atk.decode.identify")
@@ -296,7 +328,7 @@ def env_info(params):
             {"id": "recon", "label": "侦察", "ready": True},
             {"id": "detect", "label": "检测", "ready": True},
             {"id": "verify", "label": "验证", "ready": True},
-            {"id": "analyze", "label": "分析", "ready": False, "note": "四期: 依赖反汇编引擎"},
+            {"id": "analyze", "label": "分析", "ready": True},
             {"id": "decode", "label": "解码", "ready": True},
             {"id": "forensic", "label": "取证", "ready": True},
         ],
