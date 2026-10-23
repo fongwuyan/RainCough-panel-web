@@ -5,8 +5,12 @@
 协议: JSON-RPC over UDS(宿主预建端点, 见 .rc.endpoint), 由 rcplugin 处理。
 分工: 本文件只做"参数校验 + 转发", 业务在各 modules/*.py。
 
-★ 侦察/检测/解码/取证全部用内置引擎实现, 不依赖 nmap/subfinder/nuclei。
-  实测宿主上这些工具都没装, 按"调外部命令"写出来会是个空壳。
+★ 两条硬约束:
+  1. 侦察/检测/解码/取证全部用内置引擎, 不依赖 nmap/subfinder/nuclei。
+     实测宿主上这些工具都没装, 按"调外部命令"写出来会是个空壳。
+  2. **只用 Python 标准库**, 不引 requests / Pillow 等第三方包。
+     HTTP 走 core/httpc.py(自己实现的连接池), 图片元数据自己解 TIFF/IFD。
+     这样插件拷到任何有 python3 的机器上都能跑, 不需要 pip。
 """
 import os
 import sys
@@ -24,7 +28,7 @@ from modules import recon as m_recon      # noqa: E402
 from modules import task as m_task        # noqa: E402
 from modules import verify as m_verify    # noqa: E402
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 LABEL = "网络攻防工具库"
 
 

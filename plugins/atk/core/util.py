@@ -15,16 +15,10 @@ import socket
 import threading
 import time
 
-from . import store
-
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/122.0 Safari/537.36")
+from . import httpc, store
 
 SCOPE_FILE = os.path.join(store.DATA_DIR, "scope.json")
 _SCOPE_LOCK = threading.Lock()
-
-_SESSION = None
-_SESSION_LOCK = threading.Lock()
 
 # 常见端口: 按实际出现频率排序, 扫前 N 个即可覆盖大多数暴露面
 TOP_PORTS = [
@@ -81,29 +75,15 @@ SUB_WORDS = [
 
 
 def session():
-    """复用连接的 requests.Session。每次新建 TCP+TLS 要 0.5~1s, 扫描时开销可观。"""
-    global _SESSION
-    with _SESSION_LOCK:
-        if _SESSION is None:
-            import requests
-            s = requests.Session()
-            s.headers.update({"User-Agent": UA, "Accept": "*/*"})
-            ad = requests.adapters.HTTPAdapter(pool_connections=32, pool_maxsize=64, max_retries=0)
-            s.mount("http://", ad)
-            s.mount("https://", ad)
-            _SESSION = s
-        return _SESSION
+    """HTTP 会话。底层是 core/httpc.py(纯标准库), 按线程复用连接。
+
+    插件只用标准库 —— 目标机器可能没有 pip, 装 requests 就会变成"装不上就废"。
+    """
+    return httpc.session()
 
 
 def reset_session():
-    global _SESSION
-    with _SESSION_LOCK:
-        try:
-            if _SESSION is not None:
-                _SESSION.close()
-        except Exception:
-            pass
-        _SESSION = None
+    httpc.reset()
 
 
 # ---------------------------------------------------------------- 目标
