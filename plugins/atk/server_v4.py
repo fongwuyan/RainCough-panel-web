@@ -29,7 +29,7 @@ from modules import recon as m_recon      # noqa: E402
 from modules import task as m_task        # noqa: E402
 from modules import verify as m_verify    # noqa: E402
 
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 LABEL = "网络攻防工具库"
 
 
@@ -102,9 +102,12 @@ def task_export(params):
 def recon_start(params):
     tid = _i(params, "task_id")
     t = _task(tid)
-    target = _s(params, "target") or t.get("target") or ""
-    if not target:
-        raise ValueError("请先填写目标(域名或 IP)")
+    # 支持单个 target 或 targets 列表（批量）
+    tg = _p(params).get("targets") or _s(params, "target") or t.get("target") or ""
+    if isinstance(tg, list):
+        tg = "\n".join(str(x) for x in tg)
+    if not str(tg).strip():
+        raise ValueError("请先填写目标(域名或 IP，可多行)")
     modes = _p(params).get("modes") or {}
     modes = {
         "subdomain": bool(modes.get("subdomain", True)),
@@ -114,10 +117,11 @@ def recon_start(params):
     }
     if not any(modes.values()):
         raise ValueError("至少要勾选一项")
-    run_id = m_recon.start(tid, target, modes, _s(params, "intensity", "normal"))
-    # 目标记到任务上, 下次不用重填
+    run_id = m_recon.start(tid, tg, modes, _s(params, "intensity", "normal"))
+    # 目标记到任务上, 下次不用重填（批量时只记第一个 + 数量）
     if not t.get("target"):
-        store.ex("UPDATE atk_task SET target=? WHERE id=?", (target, tid))
+        first = str(tg).strip().splitlines()[0].strip()
+        store.ex("UPDATE atk_task SET target=? WHERE id=?", (first, tid))
     return {"run_id": run_id, "run": store.run_get(run_id)}
 
 

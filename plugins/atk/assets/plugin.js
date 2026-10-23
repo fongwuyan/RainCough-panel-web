@@ -185,8 +185,8 @@ textarea.rcat-inp{font-family:ui-monospace,Consolas,monospace;resize:vertical}
       <div class="rcat-panel">
         <div class="rcat-ph"><h2>\u4FA6\u5BDF</h2><p>\u8F93\u5165\u76EE\u6807\uFF0C\u4EA7\u51FA\u8D44\u4EA7\u6E05\u5355</p></div>
         <div class="rcat-row">
-          <input class="rcat-inp rcat-grow" v-model="target" placeholder="\u57DF\u540D\u3001IP \u6216\u516C\u53F8\u540D\uFF0C\u5982 example.com / 192.168.2.0"
-                 @keyup.enter="startRecon">
+          <textarea class="rcat-inp rcat-grow" v-model="target" rows="2"
+                    placeholder="\u57DF\u540D\u6216 IP\uFF0C\u53EF\u591A\u884C\uFF08\u6BCF\u884C\u4E00\u4E2A\u76EE\u6807\uFF0C\u6700\u591A 20 \u4E2A\uFF09"></textarea>
           <select class="rcat-inp" v-model="intensity">
             <option value="fast">\u5FEB\u901F</option>
             <option value="normal">\u6807\u51C6</option>

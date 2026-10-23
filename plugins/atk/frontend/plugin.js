@@ -224,8 +224,8 @@ const TPL = `
       <div class="rcat-panel">
         <div class="rcat-ph"><h2>侦察</h2><p>输入目标，产出资产清单</p></div>
         <div class="rcat-row">
-          <input class="rcat-inp rcat-grow" v-model="target" placeholder="域名、IP 或公司名，如 example.com / 192.168.2.0"
-                 @keyup.enter="startRecon">
+          <textarea class="rcat-inp rcat-grow" v-model="target" rows="2"
+                    placeholder="域名或 IP，可多行（每行一个目标，最多 20 个）"></textarea>
           <select class="rcat-inp" v-model="intensity">
             <option value="fast">快速</option>
             <option value="normal">标准</option>

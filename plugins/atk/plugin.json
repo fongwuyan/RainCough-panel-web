@@ -1,7 +1,7 @@
 {
   "name": "atk",
   "label": "网络攻防工具库",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "安全作业编排台: 侦察、检测、验证、解码、取证（纯标准库实现，无第三方依赖）",
   "author": "RainCough",
   "icon": "",
