@@ -1,7 +1,7 @@
 {
   "name": "atk",
   "label": "网络攻防工具库",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "安全作业编排台: 侦察、检测、验证、解码、取证（纯标准库实现，无第三方依赖）",
   "author": "RainCough",
   "icon": "",
@@ -255,6 +255,18 @@
         "type": "object"
       },
       "description": "上传样本并解析结构（ELF / PE）"
+    },
+    {
+      "id": "atk.analyze.open",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "按服务器路径打开样本（大文件用，绕过 8MB 帧上限）"
     },
     {
       "id": "atk.analyze.info",

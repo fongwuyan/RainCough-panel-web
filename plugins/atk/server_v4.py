@@ -29,7 +29,7 @@ from modules import recon as m_recon      # noqa: E402
 from modules import task as m_task        # noqa: E402
 from modules import verify as m_verify    # noqa: E402
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 LABEL = "网络攻防工具库"
 
 
@@ -231,6 +231,11 @@ def verify_poc(params):
 def analyze_upload(params):
     return m_analyze.upload(_i(params, "task_id"), _s(params, "filename"),
                             _s(params, "data_b64"))
+
+
+@rc.interface("atk.analyze.open")
+def analyze_open(params):
+    return m_analyze.open_path(_i(params, "task_id"), _s(params, "path"))
 
 
 @rc.interface("atk.analyze.info")

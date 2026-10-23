@@ -19,7 +19,9 @@ import struct
 
 from core import store, x86
 
-MAX_READ = 64 * 1024 * 1024        # 单样本读取上限
+# 单样本读取上限。APK 常见几十 MB(实测一个 67MB), 64MB 会卡住;
+# 256MB 在几十 GB 内存的机器上安全, 再大就该用外部工具了。
+MAX_READ = 256 * 1024 * 1024
 
 # 可疑 API: 命中即提示"这个样本会做什么", 不做判定
 SUSPICIOUS = {
@@ -359,11 +361,243 @@ def _pe(buf):
     }
 
 
+# ══════════════════════════════════════════════════════ APK
+#
+# APK = zip + 二进制 AndroidManifest.xml(AXML) + 若干 dex。
+# AXML 不是文本 XML, 是 Android 的二进制资源格式: 字符串池 + 带类型的属性。
+# 纯标准库就能解: zipfile 读包, struct 走 chunk。
+
+AXML_STR_POOL = 0x0001
+AXML_START = 0x0102
+
+
+def _axml_strings(buf, off, chunk_size, header_size):
+    """解析字符串池 chunk。返回 (strings, 下一个 chunk 偏移)。"""
+    try:
+        count, _style_count, flags, str_start = struct.unpack_from("<IIII", buf, off + 8)
+    except struct.error:
+        return [], off + chunk_size
+    utf8 = bool(flags & 0x100)
+    offs = []
+    base = off + header_size
+    for i in range(min(count, 20000)):
+        try:
+            offs.append(struct.unpack_from("<I", buf, base + i * 4)[0])
+        except struct.error:
+            break
+    data_base = off + str_start
+    out = []
+    for o in offs:
+        p = data_base + o
+        try:
+            if utf8:
+                # UTF-8: 字符数(1-2 字节) + 字节数(1-2 字节) + 数据
+                n = buf[p]
+                p += 1
+                if n & 0x80:
+                    p += 1
+                m = buf[p]
+                p += 1
+                if m & 0x80:
+                    m = ((m & 0x7F) << 8) | buf[p]
+                    p += 1
+                out.append(buf[p:p + m].decode("utf-8", "replace"))
+            else:
+                n = struct.unpack_from("<H", buf, p)[0]
+                p += 2
+                if n & 0x8000:
+                    n = ((n & 0x7FFF) << 16) | struct.unpack_from("<H", buf, p)[0]
+                    p += 2
+                out.append(buf[p:p + n * 2].decode("utf-16-le", "replace"))
+        except Exception:
+            out.append("")
+    return out, off + chunk_size
+
+
+def _axml(buf):
+    """解析二进制 AndroidManifest.xml → {"strings": [...], "elements": [(name, attrs)]}。"""
+    if len(buf) < 8 or struct.unpack_from("<H", buf, 0)[0] != 0x0003:
+        return None
+    strings = []
+    elements = []
+    pos = struct.unpack_from("<H", buf, 2)[0]
+    total = min(struct.unpack_from("<I", buf, 4)[0], len(buf))
+    while pos + 8 <= total:
+        ctype, hsize, csize = struct.unpack_from("<HHI", buf, pos)
+        if csize <= 0 or pos + csize > total:
+            break
+        if ctype == AXML_STR_POOL:
+            strings, _ = _axml_strings(buf, pos, csize, hsize)
+        elif ctype == AXML_START:
+            try:
+                name_idx = struct.unpack_from("<I", buf, pos + 20)[0]
+                attr_start, attr_size, attr_count = struct.unpack_from("<HHH", buf, pos + 24)
+                attrs = {}
+                # ★ attributeStart 是相对「节点头(16 字节)之后」的偏移, 不是相对 chunk 起点。
+                #   按 pos 直接加会整体错位 16 字节 —— 结果是把属性**值**当成了属性名,
+                #   解析出来变成 {"v0.1006-beta": "", "16": ""} 这种鬼东西。
+                attr_base = pos + 16
+                for i in range(attr_count):
+                    a = attr_base + attr_start + i * attr_size
+                    if a + 20 > pos + csize:
+                        break
+                    aname = struct.unpack_from("<I", buf, a + 4)[0]
+                    raw = struct.unpack_from("<I", buf, a + 8)[0]
+                    dtype = buf[a + 15]
+                    data = struct.unpack_from("<I", buf, a + 16)[0]
+                    key = strings[aname] if aname < len(strings) else ""
+                    if raw != 0xFFFFFFFF and raw < len(strings):
+                        val = strings[raw]
+                    elif dtype == 0x03 and data < len(strings):
+                        val = strings[data]
+                    elif dtype == 0x12:                 # 布尔
+                        val = "true" if data else "false"
+                    elif dtype in (0x10, 0x11):         # 十进制 / 十六进制整数
+                        val = str(data)
+                    elif dtype == 0x01:                 # 资源引用
+                        val = "@ref/0x%08x" % data
+                    else:
+                        val = ""
+                    if key:
+                        attrs[key] = val
+                ename = strings[name_idx] if name_idx < len(strings) else ""
+                if ename:
+                    elements.append((ename, attrs))
+            except Exception:
+                pass
+        pos += csize
+    return {"strings": strings, "elements": elements}
+
+
+def _dex_info(buf):
+    """DEX 头: 版本、字符串数、类数、方法数。"""
+    if buf[:4] != b"dex\n" or len(buf) < 112:
+        return None
+    return {
+        "version": buf[4:7].decode("ascii", "replace"),
+        "strings": int.from_bytes(buf[56:60], "little"),
+        "types": int.from_bytes(buf[64:68], "little"),
+        "protos": int.from_bytes(buf[72:76], "little"),
+        "fields": int.from_bytes(buf[80:84], "little"),
+        "methods": int.from_bytes(buf[88:92], "little"),
+        "classes": int.from_bytes(buf[96:100], "little"),
+    }
+
+
+def _apk(buf):
+    if buf[:2] != b"PK":
+        return None
+    import io
+    import zipfile
+    try:
+        z = zipfile.ZipFile(io.BytesIO(buf))
+    except Exception:
+        return None
+    names = z.namelist()
+    if "AndroidManifest.xml" not in names:
+        return None
+
+    out = {
+        "format": "APK", "bits": 0, "arch": "Android", "type": "安装包",
+        "entry": 0, "sections": [], "imports": [], "exports": [],
+        "protections": {}, "notes": [], "apk": {},
+    }
+
+    pkg = ver_name = ver_code = ""
+    min_sdk = target_sdk = ""
+    perms = []
+    comps = {"activity": [], "activity-alias": [], "service": [],
+             "receiver": [], "provider": []}
+    flags = {}
+    try:
+        man = _axml(z.read("AndroidManifest.xml"))
+    except Exception:
+        man = None
+    if man:
+        for ename, attrs in man["elements"]:
+            if ename == "manifest":
+                pkg = attrs.get("package", "")
+                ver_name = attrs.get("versionName", "")
+                ver_code = attrs.get("versionCode", "")
+            elif ename in ("uses-permission", "uses-permission-sdk-23"):
+                n = attrs.get("name", "")
+                if n:
+                    perms.append(n[len("android.permission."):]
+                                 if n.startswith("android.permission.") else n)
+            elif ename == "application":
+                flags = {
+                    "debuggable": attrs.get("debuggable", "false"),
+                    "allowBackup": attrs.get("allowBackup", "true"),
+                    "usesCleartextTraffic": attrs.get("usesCleartextTraffic", ""),
+                    "networkSecurityConfig": "有" if attrs.get("networkSecurityConfig") else "无",
+                }
+            elif ename in comps:
+                n = attrs.get("name", "")
+                if n:
+                    comps[ename].append(n)
+            elif ename == "uses-sdk":
+                min_sdk = attrs.get("minSdkVersion", "")
+                target_sdk = attrs.get("targetSdkVersion", "")
+
+    dexes = []
+    for n in names:
+        if n.endswith(".dex") and "/" not in n:
+            try:
+                info = _dex_info(z.read(n)) or {}
+            except Exception:
+                info = {}
+            dexes.append(dict({"name": n, "size": z.getinfo(n).file_size}, **info))
+    dexes.sort(key=lambda x: -x["size"])
+
+    abis = sorted({n.split("/")[1] for n in names
+                   if n.startswith("lib/") and n.count("/") >= 2})
+    sigs = [n for n in names if n.startswith("META-INF/")
+            and n.upper().endswith((".RSA", ".DSA", ".EC", ".SF"))]
+    # v2/v3 签名块紧挨在中央目录之前, 不在文件尾部 —— 先定位 EOCD 拿到 CD 偏移
+    v2 = False
+    try:
+        eocd = buf.rfind(b"PK\x05\x06", max(0, len(buf) - 65558))
+        if eocd > 0:
+            cd_off = struct.unpack_from("<I", buf, eocd + 16)[0]
+            lo = max(0, cd_off - 262144)
+            v2 = b"APK Sig Block 42" in buf[lo:cd_off + 8]
+    except Exception:
+        v2 = b"APK Sig Block 42" in buf[-262144:]
+
+    out["apk"] = {
+        "package": pkg, "versionName": ver_name, "versionCode": ver_code,
+        "permissions": perms[:80],
+        "components": {k: v[:40] for k, v in comps.items() if v},
+        "flags": flags, "dex": dexes[:20], "dex_count": len(dexes),
+        "minSdk": min_sdk, "targetSdk": target_sdk,
+        "abis": abis, "v1_sign": bool(sigs), "v2_sign": v2,
+        "entries": len(names),
+    }
+    out["protections"] = {
+        "可调试": flags.get("debuggable", "false") == "true",
+        "允许备份": flags.get("allowBackup", "true") == "true",
+        "明文流量": flags.get("usesCleartextTraffic", "") == "true",
+        "v1 签名": bool(sigs),
+        "v2/v3 签名": v2,
+    }
+    if flags.get("debuggable") == "true":
+        out["notes"].append("android:debuggable=true —— 可被 jdbs 附加调试, 生产包不应开启")
+    if flags.get("allowBackup") == "true":
+        out["notes"].append("allowBackup=true —— adb backup 可导出应用私有数据")
+    if flags.get("usesCleartextTraffic") == "true":
+        out["notes"].append("usesCleartextTraffic=true —— 允许 HTTP 明文流量")
+    if not v2:
+        out["notes"].append("未检出 v2/v3 签名块, 只有 v1 签名(整包易被篡改)")
+    if len(dexes) > 1:
+        out["notes"].append("多 dex(%d 个) —— multidex 或大量依赖" % len(dexes))
+    return out
+
+
 # ══════════════════════════════════════════════════════ 通用
 
 def parse(buf):
     """识别并解析。返回结构 dict, 不支持则 None。"""
-    for fn in (_elf, _pe):
+    for fn in (_elf, _pe, _apk):
         try:
             r = fn(buf)
         except Exception as e:
@@ -387,13 +621,8 @@ def suspicious(imports):
     return list(seen.values())
 
 
-def classify_strings(buf, limit=300):
-    """把字符串按用途分类 —— 比"一坨可打印字符"有用得多。"""
-    txt = []
-    for m in re.finditer(rb"[\x20-\x7e]{5,}", buf[:4 << 20]):
-        txt.append(m.group().decode("ascii", "ignore"))
-        if len(txt) >= 20000:
-            break
+def classify_texts(txt, limit=300):
+    """把一批字符串按用途分类 —— 比"一坨可打印字符"有用得多。"""
     pats = {
         "URL": re.compile(r"https?://[^\s\"'<>]{4,120}"),
         "IP": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
@@ -415,6 +644,56 @@ def classify_strings(buf, limit=300):
                 if len(out[k]) < limit // len(pats):
                     out[k].append(v)
     return {"total": len(txt), "groups": {k: v for k, v in out.items() if v}}
+
+
+def classify_strings(buf, limit=300):
+    """从原始字节里抽可打印串再分类(ELF/PE 用)。"""
+    txt = []
+    for m in re.finditer(rb"[\x20-\x7e]{5,}", buf[:4 << 20]):
+        txt.append(m.group().decode("ascii", "ignore"))
+        if len(txt) >= 20000:
+            break
+    return classify_texts(txt, limit)
+
+
+def _dex_strings(buf, limit=200000):
+    """解 DEX 的字符串池。
+
+    ★ APK 里的 dex 在 zip 里是压缩的, 直接扫原始字节只能扫到压缩数据 ——
+      必须解压 + 走 string_ids 表, 才能拿到"这个 App 里到底有哪些 URL/域名"。
+    """
+    if buf[:4] != b"dex\n" or len(buf) < 112:
+        return []
+    n = int.from_bytes(buf[56:60], "little")
+    off = int.from_bytes(buf[60:64], "little")
+    out = []
+    for i in range(min(n, limit)):
+        p0 = off + i * 4
+        if p0 + 4 > len(buf):
+            break
+        p = int.from_bytes(buf[p0:p0 + 4], "little")
+        if p >= len(buf):
+            continue
+        # string_data_item: uleb128 长度(UTF-16 码元数) + MUTF-8 字节 + 0x00
+        ln, shift, q = 0, 0, p
+        try:
+            while q < len(buf):
+                b = buf[q]
+                q += 1
+                ln |= (b & 0x7F) << shift
+                if not (b & 0x80):
+                    break
+                shift += 7
+                if shift > 28:
+                    break
+            raw = buf[q:q + ln * 3 + 1]
+            end = raw.find(b"\x00")
+            if end >= 0:
+                raw = raw[:end]
+            out.append(raw.decode("utf-8", "replace"))
+        except Exception:
+            continue
+    return out
 
 
 # ══════════════════════════════════════════════════════ 样本存取
@@ -474,6 +753,34 @@ def _enrich(st, buf):
     st.setdefault("notes", [])
     st.setdefault("protections", {})
     return st
+
+
+def open_path(task_id, path):
+    """直接读服务器上的文件(大样本用)。路径由使用者自己填, 不做沙箱 —— 这是自建面板。"""
+    import time as _t
+    p = (path or "").strip()
+    if not p:
+        raise ValueError("请填写文件路径")
+    if not os.path.isfile(p):
+        raise ValueError("文件不存在: " + p)
+    size = os.path.getsize(p)
+    if size > MAX_READ:
+        raise ValueError("文件超过 %d MB" % (MAX_READ // 1024 // 1024))
+    with open(p, "rb") as f:
+        buf = f.read(MAX_READ)
+    st = parse(buf)
+    if not st:
+        raise ValueError("无法识别的格式(支持 ELF / PE / APK)")
+    kind = st.get("format") or "未知"
+    meta = {"format": kind, "size": size, "src": p,
+            "sha256": hashlib.sha256(buf).hexdigest(),
+            "md5": hashlib.md5(buf).hexdigest()}
+    aid = store.artifact_add(int(task_id or 0), os.path.basename(p),
+                             "样本·" + kind, json.dumps(meta), p)
+    full = _enrich(st, buf)
+    full["filename"] = os.path.basename(p)
+    return {"sample_id": aid, "filename": os.path.basename(p), "kind": kind,
+            "size": size, "info": full}
 
 
 def info(sample_id):
@@ -611,4 +918,19 @@ def _elf_vaddr2off(buf, vaddr):
 
 def strings(sample_id):
     row, buf = _load(sample_id)
+    st = parse(buf)
+    if st and st.get("format") == "APK":
+        import io
+        import zipfile
+        try:
+            z = zipfile.ZipFile(io.BytesIO(buf))
+            dexes = sorted([n for n in z.namelist() if n.endswith(".dex") and "/" not in n],
+                           key=lambda n: -z.getinfo(n).file_size)[:4]
+            texts = []
+            for n in dexes:
+                texts.extend(_dex_strings(z.read(n), 120000))
+            if texts:
+                return classify_texts(texts[:400000])
+        except Exception:
+            pass
     return classify_strings(buf)

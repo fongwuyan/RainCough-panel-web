@@ -425,19 +425,30 @@ const TPL = `
         </div>
         <div v-else class="rcat-row">
           <span class="rcat-mono">{{ aInfo.filename }}</span>
-          <span class="rcat-badge rcat-b-info">{{ aInfo.format }} {{ aInfo.bits }}-bit</span>
+          <span class="rcat-badge rcat-b-info">{{ aInfo.format }}<template v-if="aInfo.bits"> {{ aInfo.bits }}-bit</template></span>
           <span class="rcat-muted">{{ aInfo.arch }}</span>
           <span class="rcat-faint">{{ fmtSize(aInfo.size) }}</span>
           <div style="flex:1"></div>
           <button class="rcat-btn s" @click="aInfo = null">换一个</button>
         </div>
         <input ref="bin" type="file" style="display:none" @change="onBinPick">
+        <div class="rcat-row rcat-mt8" v-if="!aInfo">
+          <input class="rcat-inp rcat-grow rcat-mono" v-model="aPath"
+                 placeholder="或填服务器上的路径，如 /tmp/app.apk（APK 动辄几十 MB，走这个）">
+          <button class="rcat-btn" @click="openByPath">按路径打开</button>
+        </div>
         <div v-if="aBusy" class="rcat-hint rcat-mt8">解析中…</div>
       </div>
 
       <template v-if="aInfo">
         <div class="rcat-panel">
-          <div class="rcat-kv">
+          <div class="rcat-kv" v-if="aInfo.format === 'APK'">
+            <div><span>包名</span><b class="rcat-mono" style="font-size:11px">{{ aInfo.apk.package || '—' }}</b></div>
+            <div><span>版本</span><b>{{ aInfo.apk.versionName || '—' }} <span class="rcat-faint">({{ aInfo.apk.versionCode }})</span></b></div>
+            <div><span>SDK</span><b>{{ aInfo.apk.minSdk || '?' }} → {{ aInfo.apk.targetSdk || '?' }}</b></div>
+            <div><span>条目 / dex</span><b>{{ aInfo.apk.entries }} / {{ aInfo.apk.dex_count }}</b></div>
+          </div>
+          <div class="rcat-kv" v-else>
             <div><span>类型</span><b>{{ aInfo.type }}</b></div>
             <div><span>入口</span><b class="rcat-mono">{{ hex(aInfo.entry) }}</b></div>
             <div><span>节区</span><b>{{ aInfo.sections.length }}</b></div>
@@ -458,14 +469,55 @@ const TPL = `
           </div>
         </div>
 
-        <div class="rcat-tabs">
+        <div class="rcat-panel" v-if="aInfo.format === 'APK'">
+          <div class="rcat-ph"><h2>权限</h2><p>{{ aInfo.apk.permissions.length }} 项</p></div>
+          <div class="rcat-ops">
+            <span v-for="p in aInfo.apk.permissions" :key="p" class="rcat-op"
+                  :class="{ on: /INTERNET|SMS|CONTACTS|LOCATION|CAMERA|RECORD|STORAGE|ADMIN|SYSTEM_ALERT|READ_LOGS/.test(p) }">{{ p }}</span>
+          </div>
+          <div class="rcat-ph rcat-mt12"><h2>组件</h2><p>{{ compCount }} 个</p></div>
+          <div class="rcat-tblwrap" style="max-height:200px">
+            <table class="rcat-tbl">
+              <thead><tr><th>类型</th><th>类名</th></tr></thead>
+              <tbody>
+                <tr v-for="(arr, k) in aInfo.apk.components" :key="k">
+                  <td><span class="rcat-badge rcat-b-info">{{ k }}</span></td>
+                  <td class="rcat-mono">{{ arr.join('\\n') }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="rcat-ph rcat-mt12"><h2>dex</h2><p>共 {{ aInfo.apk.dex_count }} 个</p></div>
+          <div class="rcat-tblwrap" style="max-height:220px">
+            <table class="rcat-tbl">
+              <thead><tr><th>文件</th><th>大小</th><th>类</th><th>方法</th><th>字符串</th></tr></thead>
+              <tbody>
+                <tr v-for="d in aInfo.apk.dex" :key="d.name">
+                  <td class="rcat-mono">{{ d.name }}</td>
+                  <td class="rcat-mono">{{ fmtSize(d.size) }}</td>
+                  <td class="rcat-mono">{{ d.classes }}</td>
+                  <td class="rcat-mono">{{ d.methods }}</td>
+                  <td class="rcat-mono">{{ d.strings }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="rcat-faint rcat-mt8" style="font-size:11.5px">
+            ABI: {{ (aInfo.apk.abis || []).join(' / ') || '—' }} · 签名: v1 {{ aInfo.apk.v1_sign ? '有' : '无' }} / v2·v3 {{ aInfo.apk.v2_sign ? '有' : '无' }}
+          </div>
+        </div>
+
+        <div class="rcat-tabs" v-if="aInfo.format !== 'APK'">
           <div class="rcat-tab" :class="{ on: aTab === 'sections' }" @click="aTab = 'sections'">节区</div>
           <div class="rcat-tab" :class="{ on: aTab === 'imports' }" @click="aTab = 'imports'">导入 {{ aInfo.imports.length }}</div>
           <div class="rcat-tab" :class="{ on: aTab === 'exports' }" @click="aTab = 'exports'">导出 {{ aInfo.exports.length }}</div>
           <div class="rcat-tab" :class="{ on: aTab === 'strings' }" @click="aTab = 'strings'; loadStrings()">字符串</div>
         </div>
+        <div class="rcat-tabs" v-else>
+          <div class="rcat-tab" :class="{ on: aTab === 'strings' }" @click="aTab = 'strings'; loadStrings()">字符串</div>
+        </div>
 
-        <div class="rcat-tblwrap" v-if="aTab === 'sections'" style="max-height:320px">
+        <div class="rcat-tblwrap" v-if="aTab === 'sections' && aInfo.format !== 'APK'" style="max-height:320px">
           <table class="rcat-tbl">
             <thead><tr><th>节区</th><th>地址</th><th>大小</th><th>属性</th><th>熵</th></tr></thead>
             <tbody>
@@ -486,7 +538,7 @@ const TPL = `
           </table>
         </div>
 
-        <div class="rcat-tblwrap" v-else-if="aTab === 'imports'" style="max-height:320px">
+        <div class="rcat-tblwrap" v-else-if="aTab === 'imports' && aInfo.format !== 'APK'" style="max-height:320px">
           <table class="rcat-tbl">
             <thead><tr><th>导入符号</th><th>能力</th></tr></thead>
             <tbody>
@@ -499,7 +551,7 @@ const TPL = `
           </table>
         </div>
 
-        <div class="rcat-tblwrap" v-else-if="aTab === 'exports'" style="max-height:320px">
+        <div class="rcat-tblwrap" v-else-if="aTab === 'exports' && aInfo.format !== 'APK'" style="max-height:320px">
           <table class="rcat-tbl">
             <thead><tr><th>导出符号</th><th>地址</th><th>大小</th></tr></thead>
             <tbody>
@@ -525,7 +577,7 @@ const TPL = `
           </template>
         </div>
 
-        <div class="rcat-split" style="margin-top:12px">
+        <div class="rcat-split" style="margin-top:12px" v-if="aInfo.format !== 'APK'">
           <div class="rcat-list">
             <div class="rcat-list-h">函数 / 符号 {{ aFuncs.length }}</div>
             <div v-for="(f, i) in aFuncs.slice(0, 300)" :key="i" class="rcat-list-i"
@@ -811,6 +863,7 @@ function mount(container, ctx) {
         vResp: null, vBusy: false, vTab: 'body', payloadKinds: [], payloads: [], pKind: '',
         // 分析
         aInfo: null, aFuncs: [], aDisasm: null, aStrings: null, aBusy: false, aTab: 'sections',
+        aPath: '',
         // 解码
         dInput: '', dCands: [], dChain: [], dOut: '', dSteps: [], dSolve: null,
         rsaOpen: false, rsaN: '', rsaE: '3', rsaC: '',
@@ -870,6 +923,10 @@ function mount(container, ctx) {
       },
       solveText() {
         return this.dSolve ? JSON.stringify(this.dSolve, null, 2) : ''
+      },
+      compCount() {
+        const c = (this.aInfo && this.aInfo.apk && this.aInfo.apk.components) || {}
+        return Object.values(c).reduce((n, arr) => n + arr.length, 0)
       },
       disasmText() {
         if (!this.aDisasm) return ''
@@ -1186,20 +1243,34 @@ function mount(container, ctx) {
             const r = await ctx.invoke('atk.analyze.upload', {
               task_id: this.taskId, filename: f.name, data_b64: b64,
             })
-            this.aInfo = r.info
-            this.aInfo.id = r.sample_id        // ★ 后续接口都用这个 id
-            this.aInfo.filename = r.filename
-            this.aInfo.size = r.size
-            this.aFuncs = []; this.aDisasm = null; this.aStrings = null
-            this.aTab = 'sections'
-            this.log('已解析 ' + f.name + ' → ' + r.kind + ' ' + (r.info.bits || '') + '-bit')
-            await this.loadFuncs()
-            this.disasmAt(this.aInfo.entry)
+            this.applySample(r)
+            this.log('已解析 ' + f.name + ' → ' + r.kind)
           } catch (e) { this.flash('解析失败：' + e.message, true) }
           this.aBusy = false
         }
         fr.onerror = () => { this.aBusy = false; this.flash('读文件失败', true) }
         fr.readAsDataURL(f)
+      },
+      async openByPath() {
+        const p = (this.aPath || '').trim()
+        if (!p) { this.flash('填文件路径', true); return }
+        this.aBusy = true
+        try {
+          const r = await ctx.invoke('atk.analyze.open', { task_id: this.taskId, path: p })
+          this.applySample(r)
+          this.log('已打开 ' + p + ' → ' + r.kind)
+        } catch (e) { this.flash('打开失败：' + e.message, true) }
+        this.aBusy = false
+      },
+      applySample(r) {
+        this.aInfo = r.info
+        this.aInfo.id = r.sample_id
+        this.aInfo.filename = r.filename
+        this.aInfo.size = r.size
+        this.aFuncs = []; this.aDisasm = null; this.aStrings = null
+        this.aTab = (r.info.format === 'APK') ? 'strings' : 'sections'
+        if (r.info.format === 'APK') { this.loadStrings(); return }
+        this.loadFuncs().then(() => this.disasmAt(this.aInfo.entry))
       },
       async loadFuncs() {
         if (!this.aInfo) return
