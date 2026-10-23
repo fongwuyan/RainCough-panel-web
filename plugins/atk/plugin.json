@@ -1,0 +1,368 @@
+{
+  "name": "atk",
+  "label": "网络攻防工具库",
+  "version": "1.0.0",
+  "description": "安全作业编排台: 侦察、检测、验证、解码、取证（内置引擎, 不依赖 nmap/nuclei）",
+  "author": "RainCough",
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      {
+        "path": "",
+        "title": "网络攻防工具库"
+      }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": [
+      "python",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
+  },
+  "interfaces": [
+    {
+      "id": "atk.task.list",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "任务列表"
+    },
+    {
+      "id": "atk.task.create",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "新建任务"
+    },
+    {
+      "id": "atk.task.get",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "任务详情与产出统计"
+    },
+    {
+      "id": "atk.task.delete",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "删除任务（连同资产与风险）"
+    },
+    {
+      "id": "atk.task.export",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "导出任务（md / json）"
+    },
+    {
+      "id": "atk.recon.start",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "启动侦察，立即返回 run_id"
+    },
+    {
+      "id": "atk.recon.status",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "侦察进度与当前阶段"
+    },
+    {
+      "id": "atk.recon.stop",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "停止侦察"
+    },
+    {
+      "id": "atk.recon.assets",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "资产清单（可按类型/关键字筛选）"
+    },
+    {
+      "id": "atk.recon.assets.delete",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "删除误报资产"
+    },
+    {
+      "id": "atk.detect.start",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "对任务资产启动配置核查"
+    },
+    {
+      "id": "atk.detect.status",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "检测进度"
+    },
+    {
+      "id": "atk.detect.risks",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "风险列表（可按等级/状态筛选）"
+    },
+    {
+      "id": "atk.detect.mark",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "标记风险：待确认 / 已确认 / 误报"
+    },
+    {
+      "id": "atk.verify.payloads",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "按漏洞类型取载荷库"
+    },
+    {
+      "id": "atk.verify.request",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "发送单次请求，返回完整响应"
+    },
+    {
+      "id": "atk.verify.save",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "保存结论与 POC"
+    },
+    {
+      "id": "atk.verify.poc",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "把请求转成 curl 片段"
+    },
+    {
+      "id": "atk.decode.identify",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "识别编码类型与置信度"
+    },
+    {
+      "id": "atk.decode.chain",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "执行操作链，返回每步结果"
+    },
+    {
+      "id": "atk.decode.solve",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "古典密码 / RSA 弱参数 / JWT 求解"
+    },
+    {
+      "id": "atk.forensic.upload",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "上传样本（base64，上限 3MB）并解析"
+    },
+    {
+      "id": "atk.forensic.extract",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "提取物列表"
+    },
+    {
+      "id": "atk.forensic.timeline",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "时间线"
+    },
+    {
+      "id": "atk.env.tools",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "内置引擎与外部工具就绪状态"
+    },
+    {
+      "id": "atk.env.scope",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "目标范围策略"
+    },
+    {
+      "id": "atk.env.setScope",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "设置目标范围策略"
+    },
+    {
+      "id": "atk.env.info",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "插件信息与运行环境"
+    }
+  ]
+}
