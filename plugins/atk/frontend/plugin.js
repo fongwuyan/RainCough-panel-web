@@ -464,6 +464,11 @@ const TPL = `
                   :class="c.level === '高危' ? 'rcat-b-high' : c.level === '中危' ? 'rcat-b-mid' : 'rcat-b-low'"
                   style="margin-left:6px" :title="c.api">{{ c.cap }}</span>
           </div>
+          <div v-if="aInfo.format === 'APK' && aInfo.apk.packers && aInfo.apk.packers.length" class="rcat-mt12">
+            <span class="rcat-hint">加固特征：</span>
+            <span v-for="pk in aInfo.apk.packers" :key="pk.vendor" class="rcat-badge rcat-b-mid"
+                  style="margin-left:6px" :title="pk.evidence.join('、')">{{ pk.vendor }}</span>
+          </div>
           <div v-if="aInfo.notes && aInfo.notes.length" class="rcat-mt8">
             <div v-for="(n, i) in aInfo.notes" :key="i" class="rcat-faint" style="font-size:11.5px">· {{ n }}</div>
           </div>
@@ -514,6 +519,7 @@ const TPL = `
           <div class="rcat-tab" :class="{ on: aTab === 'strings' }" @click="aTab = 'strings'; loadStrings()">字符串</div>
         </div>
         <div class="rcat-tabs" v-else>
+          <div class="rcat-tab" :class="{ on: aTab === 'classes' }" @click="aTab = 'classes'">类 {{ aInfo.apk.class_count }}</div>
           <div class="rcat-tab" :class="{ on: aTab === 'strings' }" @click="aTab = 'strings'; loadStrings()">字符串</div>
         </div>
 
@@ -563,6 +569,32 @@ const TPL = `
               <tr v-if="!aInfo.exports.length"><td colspan="3" class="rcat-empty">无导出符号</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <div v-if="aTab === 'classes'" class="rcat-panel">
+          <div class="rcat-row" style="margin-bottom:8px">
+            <input class="rcat-inp rcat-grow" v-model="aClassQ" placeholder="筛选类名，如 ui.reader / viewmodel">
+            <span class="rcat-hint">
+              自身 <b>{{ aInfo.apk.own_class_count }}</b> · 外层共 {{ aInfo.apk.class_count }}
+              <span class="rcat-faint">（含内部类 {{ aInfo.apk.class_total }}）</span>
+            </span>
+          </div>
+          <div class="rcat-tblwrap" style="max-height:420px">
+            <table class="rcat-tbl">
+              <thead><tr><th>类名</th></tr></thead>
+              <tbody>
+                <tr v-for="c in filteredClasses" :key="c">
+                  <td class="rcat-mono"
+                      :style="{ color: (aInfo.apk.package && c.startsWith(aInfo.apk.package)) ? 'var(--text)' : 'var(--text-muted)' }">{{ c }}</td>
+                </tr>
+                <tr v-if="!filteredClasses.length"><td class="rcat-empty">没有匹配的类</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="rcat-faint rcat-mt8" style="font-size:11px">
+            按外层类聚合（Kotlin lambda 会编译成 Outer$1$1 这类内部类，全列出来会淹没结构）。
+            应用自身的类排在前面。
+          </div>
         </div>
 
         <div v-else class="rcat-panel">
@@ -863,7 +895,7 @@ function mount(container, ctx) {
         vResp: null, vBusy: false, vTab: 'body', payloadKinds: [], payloads: [], pKind: '',
         // 分析
         aInfo: null, aFuncs: [], aDisasm: null, aStrings: null, aBusy: false, aTab: 'sections',
-        aPath: '',
+        aPath: '', aClassQ: '',
         // 解码
         dInput: '', dCands: [], dChain: [], dOut: '', dSteps: [], dSolve: null,
         rsaOpen: false, rsaN: '', rsaE: '3', rsaC: '',
@@ -923,6 +955,13 @@ function mount(container, ctx) {
       },
       solveText() {
         return this.dSolve ? JSON.stringify(this.dSolve, null, 2) : ''
+      },
+      filteredClasses() {
+        if (!this.aInfo || !this.aInfo.apk) return []
+        const q = (this.aClassQ || '').trim().toLowerCase()
+        const list = this.aInfo.apk.classes || []
+        if (!q) return list
+        return list.filter((c) => c.toLowerCase().includes(q))
       },
       compCount() {
         const c = (this.aInfo && this.aInfo.apk && this.aInfo.apk.components) || {}

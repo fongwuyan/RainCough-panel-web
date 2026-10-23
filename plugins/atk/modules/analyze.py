@@ -484,6 +484,112 @@ def _dex_info(buf):
     }
 
 
+# ── 加固 / 壳特征 ──
+#
+# 思路: 加固厂商的 so 与 assets 文件名高度固定, 命中即可判断;
+# 再用「dex 数量与体积」做交叉验证(壳通常把真实代码搬到 so 或加密的 dex 里)。
+PACKERS = [
+    ("360 加固", ["libjiagu.so", "libjiagu_art.so", "libjiagu_x86.so", "libjiagu_a64.so",
+                 "libjiagu.so.x"]),
+    ("腾讯乐固", ["libshella.so", "libshellx.so", "libshell-super", "libmixer.so",
+                "libtosprotection"]),
+    ("梆梆加固", ["libsecexe.so", "libsecmain.so", "libdexhelper.so", "libsecshell.so",
+                "libsecexe.x86.so"]),
+    ("爱加密", ["libexec.so", "libexecmain.so", "ijiami.dat", "ijiami.ajm", "libedog.so"]),
+    ("阿里聚安全", ["libmobisec.so", "libsgmain.so", "libsgsecuritybody.so", "libfakejni.so"]),
+    ("百度加固", ["libbaiduprotect.so", "libbaiduprotect_x86.so"]),
+    ("网易易盾", ["libnesec.so", "libnemsfp.so"]),
+    ("娜迦", ["libchaosvmp.so", "libddog.so", "libfdog.so", "libnagain.so"]),
+    ("顶象", ["libx3g.so", "libx3g.so.1"]),
+    ("腾讯御安全", ["libtosprotection.so", "libshell.so"]),
+    ("通付盾", ["libegame.so", "libtup.so"]),
+    ("几维安全", ["libkwscmm.so", "libkwscr.so"]),
+]
+
+
+def _packer_hints(names, dexes, abis):
+    """按 so / assets 文件名匹配加固特征, 再用 dex 结构做旁证。"""
+    low = [n.lower() for n in names]
+    hits = []
+    for vendor, sigs in PACKERS:
+        matched = []
+        for sig in sigs:
+            for n in low:
+                if sig in n:
+                    matched.append(n)
+                    break
+        if matched:
+            hits.append({"vendor": vendor, "evidence": matched[:3]})
+
+    # 旁证: 只有一个很小的 dex, 但 so 体积很大 —— 真实代码被搬走了
+    if dexes:
+        total_dex = sum(d.get("size", 0) for d in dexes)
+        so_size = sum(1 for _ in abis)  # 仅用于提示是否含 native
+        if len(dexes) == 1 and total_dex < 1024 * 1024 and so_size:
+            hits.append({"vendor": "疑似加固(结构特征)",
+                         "evidence": ["仅 1 个 dex 且 < 1MB，但含 native 库"]})
+    return hits
+
+
+def _dex_classes(buf, limit=4000):
+    """从 class_defs 取类名(Lcom/foo/Bar; → com.foo.Bar)。"""
+    if buf[:4] != b"dex\n" or len(buf) < 112:
+        return []
+    n_str = int.from_bytes(buf[56:60], "little")
+    str_off = int.from_bytes(buf[60:64], "little")
+    n_type = int.from_bytes(buf[64:68], "little")
+    type_off = int.from_bytes(buf[68:72], "little")
+    n_cls = int.from_bytes(buf[96:100], "little")
+    cls_off = int.from_bytes(buf[100:104], "little")
+    if not (n_cls and cls_off and type_off and str_off):
+        return []
+
+    def string_at(i):
+        if i >= n_str:
+            return ""
+        p = int.from_bytes(buf[str_off + i * 4:str_off + i * 4 + 4], "little")
+        if p >= len(buf):
+            return ""
+        ln, shift, q = 0, 0, p
+        while q < len(buf):
+            b = buf[q]
+            q += 1
+            ln |= (b & 0x7F) << shift
+            if not (b & 0x80):
+                break
+            shift += 7
+            if shift > 28:
+                break
+        raw = buf[q:q + ln * 3 + 1]
+        end = raw.find(b"\x00")
+        if end >= 0:
+            raw = raw[:end]
+        return raw.decode("utf-8", "replace")
+
+    out = []
+    seen = set()
+    for i in range(min(n_cls, limit)):
+        p = cls_off + i * 32
+        if p + 32 > len(buf):
+            break
+        type_idx = int.from_bytes(buf[p:p + 4], "little")
+        if type_idx >= n_type:
+            continue
+        tp = type_off + type_idx * 4
+        if tp + 4 > len(buf):
+            continue
+        str_idx = int.from_bytes(buf[tp:tp + 4], "little")
+        name = string_at(str_idx)
+        if not name.startswith("L") or not name.endswith(";"):
+            continue
+        name = name[1:-1].replace("/", ".")
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
 def _apk(buf):
     if buf[:2] != b"PK":
         return None
@@ -564,8 +670,41 @@ def _apk(buf):
     except Exception:
         v2 = b"APK Sig Block 42" in buf[-262144:]
 
+    packers = _packer_hints(names, dexes, abis)
+    # 扫全部 dex 收类名。多 dex 时应用自身的类不一定在 classes.dex 里,
+    # 只扫前两个会得出"应用自身类 0 个"的错误结论。
+    classes = []
+    try:
+        for d in dexes:
+            if len(classes) >= 20000:
+                break
+            classes.extend(_dex_classes(z.read(d["name"]), 4000))
+    except Exception:
+        pass
+    classes = list(dict.fromkeys(classes))
+    # 去掉编译器生成的 synthetic lambda —— 一个 Compose 页面能生成几十个,
+    # 全列出来会淹没真正的业务类。
+    classes = [c for c in classes
+               if "$$ExternalSyntheticLambda" not in c and "-$$Lambda$" not in c]
+    # 按「外层类」聚合: Kotlin 的 lambda 会编译成 Outer$1$1$2 这类内部类,
+    # 一个 Compose 页面能出上百个。列外层类才看得出结构, 内部类数量单独给。
+    inner_total = len(classes)
+    outer = []
+    for c in classes:
+        i = c.find("$")
+        outer.append(c[:i] if i > 0 else c)
+    classes = list(dict.fromkeys(outer))
+    # 应用自身的类排前面 —— 分析 APK 时最先想看的是"它自己写了什么"
+    own_prefix = (pkg + ".") if pkg else None
+    own = [c for c in classes if own_prefix and (c == pkg or c.startswith(own_prefix))]
+    rest = [c for c in classes if c not in set(own)]
+    classes = own + rest
+
     out["apk"] = {
         "package": pkg, "versionName": ver_name, "versionCode": ver_code,
+        "packers": packers, "classes": classes[:1200],
+        "class_count": len(classes), "own_class_count": len(own),
+        "class_total": inner_total,
         "permissions": perms[:80],
         "components": {k: v[:40] for k, v in comps.items() if v},
         "flags": flags, "dex": dexes[:20], "dex_count": len(dexes),
@@ -590,6 +729,8 @@ def _apk(buf):
         out["notes"].append("未检出 v2/v3 签名块, 只有 v1 签名(整包易被篡改)")
     if len(dexes) > 1:
         out["notes"].append("多 dex(%d 个) —— multidex 或大量依赖" % len(dexes))
+    for h in packers:
+        out["notes"].append("命中加固特征: %s（%s）" % (h["vendor"], "、".join(h["evidence"])))
     return out
 
 

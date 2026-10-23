@@ -29,7 +29,7 @@ from modules import recon as m_recon      # noqa: E402
 from modules import task as m_task        # noqa: E402
 from modules import verify as m_verify    # noqa: E402
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 LABEL = "网络攻防工具库"
 
 
