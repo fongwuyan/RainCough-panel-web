@@ -590,6 +590,65 @@ def _dex_classes(buf, limit=4000):
     return out
 
 
+def _apk_libs(z, names, max_libs=24, max_bytes=64 * 1024 * 1024):
+    """解析 APK 里的 .so（复用 ELF 解析器）。
+
+    为什么要看 so: 加固、加密、反调试、网络协议经常只做在 native 层,
+    dex 里反而干净。导入表能直接说明"这个库能干什么"。
+
+    只取一个 ABI（优先 arm64-v8a）—— 各 ABI 的同一个库功能一样, 全解一遍纯属浪费。
+    """
+    libs = [n for n in names if n.startswith("lib/") and n.endswith(".so") and n.count("/") >= 2]
+    if not libs:
+        return [], {}
+    by_abi = {}
+    for n in libs:
+        abi = n.split("/")[1]
+        by_abi[abi] = by_abi.get(abi, 0) + 1
+    prefer = "arm64-v8a" if "arm64-v8a" in by_abi else (
+        "armeabi-v7a" if "armeabi-v7a" in by_abi else sorted(by_abi)[0])
+    chosen = [n for n in libs if n.split("/")[1] == prefer]
+
+    out = []
+    total = 0
+    for n in chosen[:max_libs]:
+        try:
+            size = z.getinfo(n).file_size
+            if total + size > max_bytes:
+                break
+            data = z.read(n)
+            total += len(data)
+            st = _elf(data)
+        except Exception:
+            continue
+        if not st:
+            continue
+        imps = st.get("imports") or []
+        sus = suspicious(imps)
+        out.append({
+            "name": n.split("/")[-1],
+            "path": n,
+            "abi": prefer,
+            "size": len(data),
+            "arch": st.get("arch", ""),
+            "bits": st.get("bits", 0),
+            "imports": len(imps),
+            "jni": "JNI_OnLoad" in imps or "JNI_OnLoad" in {x["name"] for x in st.get("exports", [])},
+            "protections": st.get("protections", {}),
+            "suspicious": sus[:6],
+            "notes": st.get("notes", [])[:2],
+        })
+    out.sort(key=lambda x: -x["size"])
+    summary = {
+        "count": len(libs),
+        "by_abi": by_abi,
+        "analyzed": len(out),
+        "abi": prefer,
+        "suspicious_libs": [x["name"] for x in out if x["suspicious"]][:8],
+    }
+    return out, summary
+
+
 def _apk(buf):
     if buf[:2] != b"PK":
         return None
@@ -671,6 +730,7 @@ def _apk(buf):
         v2 = b"APK Sig Block 42" in buf[-262144:]
 
     packers = _packer_hints(names, dexes, abis)
+    libs, lib_summary = _apk_libs(z, names)
     # 扫全部 dex 收类名。多 dex 时应用自身的类不一定在 classes.dex 里,
     # 只扫前两个会得出"应用自身类 0 个"的错误结论。
     classes = []
@@ -702,7 +762,8 @@ def _apk(buf):
 
     out["apk"] = {
         "package": pkg, "versionName": ver_name, "versionCode": ver_code,
-        "packers": packers, "classes": classes[:1200],
+        "packers": packers, "libs": libs, "lib_summary": lib_summary,
+        "classes": classes[:1200],
         "class_count": len(classes), "own_class_count": len(own),
         "class_total": inner_total,
         "permissions": perms[:80],
@@ -731,6 +792,10 @@ def _apk(buf):
         out["notes"].append("多 dex(%d 个) —— multidex 或大量依赖" % len(dexes))
     for h in packers:
         out["notes"].append("命中加固特征: %s（%s）" % (h["vendor"], "、".join(h["evidence"])))
+    sus_libs = (lib_summary or {}).get("suspicious_libs") or []
+    if sus_libs:
+        out["notes"].append("native 库含敏感能力: " + "、".join(sus_libs[:4])
+                            + "（看「so」页的导入明细）")
     return out
 
 

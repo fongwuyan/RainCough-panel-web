@@ -520,6 +520,7 @@ const TPL = `
         </div>
         <div class="rcat-tabs" v-else>
           <div class="rcat-tab" :class="{ on: aTab === 'classes' }" @click="aTab = 'classes'">类 {{ aInfo.apk.class_count }}</div>
+          <div class="rcat-tab" :class="{ on: aTab === 'libs' }" @click="aTab = 'libs'">so {{ (aInfo.apk.lib_summary || {}).count || 0 }}</div>
           <div class="rcat-tab" :class="{ on: aTab === 'strings' }" @click="aTab = 'strings'; loadStrings()">字符串</div>
         </div>
 
@@ -569,6 +570,45 @@ const TPL = `
               <tr v-if="!aInfo.exports.length"><td colspan="3" class="rcat-empty">无导出符号</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <div v-if="aTab === 'libs'" class="rcat-panel">
+          <div class="rcat-ph">
+            <h2>native 库</h2>
+            <p v-if="aInfo.apk.lib_summary">
+              共 {{ aInfo.apk.lib_summary.count }} 个 ·
+              ABI {{ Object.keys(aInfo.apk.lib_summary.by_abi || {}).join(' / ') }} ·
+              已解析 {{ aInfo.apk.lib_summary.analyzed }} 个（取 {{ aInfo.apk.lib_summary.abi }}）
+            </p>
+          </div>
+          <div class="rcat-tblwrap" style="max-height:380px">
+            <table class="rcat-tbl">
+              <thead><tr><th>库</th><th>大小</th><th>架构</th><th>导入</th><th>JNI</th><th>能力</th></tr></thead>
+              <tbody>
+                <tr v-for="l in (aInfo.apk.libs || [])" :key="l.path">
+                  <td class="rcat-mono">{{ l.name }}</td>
+                  <td class="rcat-mono">{{ fmtSize(l.size) }}</td>
+                  <td class="rcat-muted">{{ l.arch }}{{ l.bits }}-bit</td>
+                  <td class="rcat-mono">{{ l.imports }}</td>
+                  <td>
+                    <span v-if="l.jni" class="rcat-badge rcat-b-info">JNI</span>
+                    <span v-else class="rcat-faint">—</span>
+                  </td>
+                  <td>
+                    <span v-for="c in l.suspicious" :key="c.api" class="rcat-badge"
+                          :class="c.level === '高危' ? 'rcat-b-high' : c.level === '中危' ? 'rcat-b-mid' : 'rcat-b-low'"
+                          style="margin-right:4px" :title="c.api">{{ c.cap }}</span>
+                    <span v-if="!(l.suspicious || []).length" class="rcat-faint">—</span>
+                  </td>
+                </tr>
+                <tr v-if="!(aInfo.apk.libs || []).length"><td colspan="6" class="rcat-empty">没有 .so（纯 Java/Kotlin 应用）</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="rcat-faint rcat-mt8" style="font-size:11px">
+            只解析一个 ABI（优先 arm64-v8a）—— 各 ABI 的同一个库功能相同，全解一遍没有额外信息。
+            加固、加密、反调试经常只做在 native 层，dex 里反而干净。
+          </div>
         </div>
 
         <div v-if="aTab === 'classes'" class="rcat-panel">
