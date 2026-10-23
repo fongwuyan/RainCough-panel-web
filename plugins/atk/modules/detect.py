@@ -179,6 +179,24 @@ def _check_web(asset):
     return out
 
 
+def _probe_sub(asset):
+    """子域探活：https → http 各试一次。返回 (可达?, scheme, port)。
+
+    ★ 为什么单独探活: 侦察枚举出的子域大多已经下线, 直接走 _check_web 会给每个
+      死子域产出一条"目标不可达"风险 —— 20 个子域就是 20 条噪音。
+      探活失败就静默跳过, 只在日志里记数量。
+    """
+    host = asset["addr"]
+    for scheme, port in (("https", 443), ("http", 80)):
+        try:
+            util.session().get("%s://%s/" % (scheme, host), timeout=6,
+                               allow_redirects=True, verify=False)
+            return True, scheme, port
+        except Exception:
+            continue
+    return False, "", 0
+
+
 def _check_path(asset):
     """对侦察找到的 Path 资产做判定。"""
     addr = asset["addr"]
@@ -212,8 +230,10 @@ def _worker(run_id, task_id):
             seen.add(key)
             webs.append(a)
         paths = [a for a in assets if a["kind"] == "Path"]
-        store.run_patch(run_id, total=len(webs) + len(paths), status="running")
-        store.run_log(run_id, "待核查: Web %d 个, 路径 %d 条" % (len(webs), len(paths)))
+        subs = [a for a in assets if a["kind"] == "Sub"]
+        store.run_patch(run_id, total=len(webs) + len(paths) + len(subs), status="running")
+        store.run_log(run_id, "待核查: Web %d 个, 子域 %d 个, 路径 %d 条" % (
+            len(webs), len(subs), len(paths)))
 
         # 清掉上一轮自动产出的风险(人工已确认/误报的保留)
         with store._LOCK:
@@ -237,6 +257,29 @@ def _worker(run_id, task_id):
                     n += 1
                 store.run_incr(run_id)
                 store.run_patch(run_id, stage="核查 %s" % a["addr"])
+
+        # 子域：先探活，通的才核查（死的静默跳过，不产生风险）
+        alive = 0
+        for a in subs:
+            store.run_patch(run_id, stage="探测子域 %s" % a["addr"])
+            ok, scheme, port = _probe_sub(a)
+            if ok:
+                alive += 1
+                a2 = dict(a)
+                a2["port"] = port
+                try:
+                    risks = _check_web(a2)
+                except Exception:
+                    risks = []
+                # 顺手把子域升级成 Web 资产，后续验证模块能直接用
+                store.asset_upsert(task_id, a["addr"], port, "Web", scheme, "检测探测", "")
+                for r in risks:
+                    store.risk_add(task_id, a["id"], r["level"], r["kind"], r["target"],
+                                   r["evidence"], r.get("detail", ""))
+                    n += 1
+            store.run_incr(run_id)
+        if subs:
+            store.run_log(run_id, "子域探活: %d/%d 可达" % (alive, len(subs)))
 
         for a in paths:
             for r in _check_path(a):
