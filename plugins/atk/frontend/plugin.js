@@ -585,7 +585,9 @@ const TPL = `
             <table class="rcat-tbl">
               <thead><tr><th>库</th><th>大小</th><th>架构</th><th>导入</th><th>JNI</th><th>能力</th></tr></thead>
               <tbody>
-                <tr v-for="l in (aInfo.apk.libs || [])" :key="l.path">
+                <tr v-for="l in (aInfo.apk.libs || [])" :key="l.path"
+                    style="cursor:pointer" :class="{ 'rcat-row-on': aLib && aLib.path === l.path }"
+                    @click="openLib(l)">
                   <td class="rcat-mono">{{ l.name }}</td>
                   <td class="rcat-mono">{{ fmtSize(l.size) }}</td>
                   <td class="rcat-muted">{{ l.arch }}{{ l.bits }}-bit</td>
@@ -607,8 +609,47 @@ const TPL = `
           </div>
           <div class="rcat-faint rcat-mt8" style="font-size:11px">
             只解析一个 ABI（优先 arm64-v8a）—— 各 ABI 的同一个库功能相同，全解一遍没有额外信息。
-            加固、加密、反调试经常只做在 native 层，dex 里反而干净。
+            加固、加密、反调试经常只做在 native 层，dex 里反而干净。点一行看导入明细。
           </div>
+        </div>
+
+        <div class="rcat-panel" v-if="aTab === 'libs' && aLib">
+          <div class="rcat-ph">
+            <h2>{{ aLib.name }}</h2>
+            <p>{{ aLib.arch }} {{ aLib.bits }}-bit · 入口 {{ hex(aLib.entry) }} ·
+               导入 {{ aLib.imports.length }} · 导出 {{ aLib.exports.length }} ·
+               {{ fmtSize(aLib.size) }}</p>
+            <button class="rcat-btn s" style="margin-left:auto" @click="aLib = null">关闭</button>
+          </div>
+          <div v-if="aLib.suspicious && aLib.suspicious.length" class="rcat-mb8" style="margin-bottom:10px">
+            <span class="rcat-hint">能力：</span>
+            <span v-for="c in aLib.suspicious" :key="c.api" class="rcat-badge"
+                  :class="c.level === '高危' ? 'rcat-b-high' : c.level === '中危' ? 'rcat-b-mid' : 'rcat-b-low'"
+                  style="margin-left:6px" :title="c.api">{{ c.cap }}</span>
+          </div>
+          <div class="rcat-tabs">
+            <div class="rcat-tab" v-if="(aLib.jni || []).length" :class="{ on: aLibTab === 'jni' }" @click="aLibTab = 'jni'">JNI {{ aLib.jni.length }}</div>
+            <div class="rcat-tab" :class="{ on: aLibTab === 'imports' }" @click="aLibTab = 'imports'">导入 {{ aLib.imports.length }}</div>
+            <div class="rcat-tab" :class="{ on: aLibTab === 'exports' }" @click="aLibTab = 'exports'">导出 {{ aLib.exports.length }}</div>
+            <div class="rcat-tab" :class="{ on: aLibTab === 'asm' }" @click="aLibTab = 'asm'">反汇编</div>
+          </div>
+          <div v-if="aLibTab === 'jni'" class="rcat-tblwrap" style="max-height:280px">
+            <table class="rcat-tbl">
+              <thead><tr><th>Java 类</th><th>方法</th></tr></thead>
+              <tbody>
+                <tr v-for="j in aLib.jni" :key="j.sym">
+                  <td class="rcat-mono rcat-muted">{{ j.cls }}</td>
+                  <td class="rcat-mono">{{ j.method }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <pre class="rcat-code" style="max-height:280px" v-else-if="aLibTab === 'imports'">{{ (aLib.imports || []).join('\\n') || '（无导入）' }}</pre>
+          <pre class="rcat-code" style="max-height:280px" v-else-if="aLibTab === 'exports'">{{ (aLib.exports || []).map(e => e.name).join('\\n') || '（无导出）' }}</pre>
+          <template v-else>
+            <pre class="rcat-code" style="max-height:280px" v-if="(aLib.disasm || []).length">{{ libAsmText }}</pre>
+            <div v-else class="rcat-empty">{{ aLib.disasm_note || '没有可反汇编的入口' }}</div>
+          </template>
         </div>
 
         <div v-if="aTab === 'classes'" class="rcat-panel">
@@ -996,6 +1037,11 @@ function mount(container, ctx) {
       solveText() {
         return this.dSolve ? JSON.stringify(this.dSolve, null, 2) : ''
       },
+      libAsmText() {
+        if (!this.aLib) return ''
+        return (this.aLib.disasm || []).map((i) =>
+          this.hex(i.addr).padEnd(12) + i.bytes.padEnd(18) + i.text).join('\n')
+      },
       filteredClasses() {
         if (!this.aInfo || !this.aInfo.apk) return []
         const q = (this.aClassQ || '').trim().toLowerCase()
@@ -1365,6 +1411,16 @@ function mount(container, ctx) {
             sample_id: this.aInfo.id, addr: Number(addr) || 0, count: 60,
           })
         } catch (e) { this.flash('反汇编失败：' + e.message, true) }
+      },
+      async openLib(l) {
+        if (!this.aInfo) return
+        this.aLibTab = 'imports'
+        try {
+          this.aLib = await ctx.invoke('atk.analyze.lib', {
+            sample_id: this.aInfo.id, path: l.path,
+          })
+          this.log('已打开 ' + l.name + ' · 导入 ' + this.aLib.imports.length)
+        } catch (e) { this.flash('打开 so 失败：' + e.message, true) }
       },
       async loadStrings() {
         if (this.aStrings || !this.aInfo) return

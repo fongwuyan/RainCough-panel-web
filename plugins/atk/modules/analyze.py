@@ -961,6 +961,94 @@ def _enrich(st, buf):
     return st
 
 
+def jni_decode(sym):
+    """把 JNI 导出符号还原成「类.方法」。
+
+    Java_com_example_Foo_bar  →  com.example.Foo.bar
+    转义规则: `_1`→`_`, `_2`→`;`, `_3`→`[`, `_0XXXX`→ 该 Unicode 码点, 其余 `_`→`.`
+    `__` 之后是重载签名, 丢掉。
+    """
+    if not sym.startswith("Java_"):
+        return None
+    body = sym[5:]
+    if "__" in body:
+        body = body.split("__", 1)[0]
+    out = []
+    i = 0
+    n = len(body)
+    while i < n:
+        c = body[i]
+        if c == "_" and i + 1 < n:
+            nxt = body[i + 1]
+            if nxt == "1":
+                out.append("_"); i += 2; continue
+            if nxt == "2":
+                out.append(";"); i += 2; continue
+            if nxt == "3":
+                out.append("["); i += 2; continue
+            if nxt == "0" and i + 5 < n:
+                try:
+                    out.append(chr(int(body[i + 2:i + 6], 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+            out.append("."); i += 1; continue
+        out.append(c)
+        i += 1
+    text = "".join(out)
+    if "." not in text:
+        return None
+    cls, meth = text.rsplit(".", 1)
+    return {"cls": cls, "method": meth, "sym": sym}
+
+
+def lib_detail(sample_id, lib_path):
+    """打开 APK 里某个 .so 的详情：完整导入/导出 + 入口反汇编。
+
+    [lib_path] 是 zip 内的路径(如 lib/arm64-v8a/libfoo.so)。
+    """
+    row, buf = _load(sample_id)
+    st = parse(buf)
+    if not st or st.get("format") != "APK":
+        raise ValueError("这个样本不是 APK")
+    import io
+    import zipfile
+    try:
+        z = zipfile.ZipFile(io.BytesIO(buf))
+    except Exception as e:
+        raise ValueError("zip 打不开: %s" % e)
+    name = (lib_path or "").strip()
+    if not name:
+        raise ValueError("缺少 so 路径")
+    if name not in z.namelist():
+        raise ValueError("包里没有这个文件: " + name)
+    data = z.read(name)
+    info = _elf(data)
+    if not info:
+        raise ValueError("不是有效的 ELF: " + name)
+    info["name"] = name.split("/")[-1]
+    info["path"] = name
+    info["size"] = len(data)
+    info["suspicious"] = suspicious(info.get("imports") or [])
+    # 导出里的 JNI 符号 → 可读的 类.方法（这是 Java ↔ native 的边界，最有信息量）
+    info["jni"] = [j for j in (jni_decode(x["name"]) for x in info.get("exports") or []) if j]
+
+    # 入口反汇编（x86 才做；ARM 的 so 交给后续版本）
+    info["disasm"] = []
+    if info.get("arch") in ("x86-64", "x86"):
+        off = _elf_vaddr2off(data, info.get("entry") or 0)
+        if off is not None:
+            ins, unk = x86.disasm(data[off:off + 512], info["entry"],
+                                  max_bytes=512, max_insn=30)
+            info["disasm"] = [{"addr": i.addr, "bytes": i.raw.hex(), "text": i.text()}
+                              for i in ins]
+            info["disasm_unknown"] = unk
+    else:
+        info["disasm_note"] = "当前只对 x86/x86-64 做反汇编；%s 的指令解码在后续版本" % info.get("arch")
+    return info
+
+
 def open_path(task_id, path):
     """直接读服务器上的文件(大样本用)。路径由使用者自己填, 不做沙箱 —— 这是自建面板。"""
     import time as _t

@@ -29,7 +29,7 @@ from modules import recon as m_recon      # noqa: E402
 from modules import task as m_task        # noqa: E402
 from modules import verify as m_verify    # noqa: E402
 
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 LABEL = "网络攻防工具库"
 
 
@@ -252,6 +252,11 @@ def analyze_functions(params):
 def analyze_disasm(params):
     return m_analyze.disasm(_i(params, "sample_id"), _i(params, "addr"),
                             _i(params, "count", 60))
+
+
+@rc.interface("atk.analyze.lib")
+def analyze_lib(params):
+    return m_analyze.lib_detail(_i(params, "sample_id"), _s(params, "path"))
 
 
 @rc.interface("atk.analyze.strings")

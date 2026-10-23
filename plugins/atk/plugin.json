@@ -1,7 +1,7 @@
 {
   "name": "atk",
   "label": "网络攻防工具库",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "安全作业编排台: 侦察、检测、验证、解码、取证（纯标准库实现，无第三方依赖）",
   "author": "RainCough",
   "icon": "",
@@ -303,6 +303,18 @@
         "type": "object"
       },
       "description": "指定地址反汇编（自研解码器）"
+    },
+    {
+      "id": "atk.analyze.lib",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "APK 内单个 .so 的详情（导入导出 + 入口反汇编）"
     },
     {
       "id": "atk.analyze.strings",
