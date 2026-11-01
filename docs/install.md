@@ -180,4 +180,14 @@ sudo rm -rf /opt/raincough
 （日志出现 `GitHub token 无效, 改用匿名请求`），不影响使用。
 
 **插件库提示已上锁**
-输入插件库口令解锁，30 天内免输。忘掉口令可点「重新上锁」后重试；连续输错 5 次锁定 60 秒。
+闸门默认是**关的**（不设环境变量时市场无需口令）。只有部署方显式启用了才会看到解锁框：
+
+```ini
+# /etc/systemd/system/raincough.service 的 [Service] 段
+Environment=RC_STORE_GATE=on
+Environment=RC_STORE_GATE_HASH=$6$...      # 用 raincough -hash-password 生成
+```
+
+解锁后 30 天内免输。连续输错 5 次锁定 60 秒。想彻底关掉：删掉上面两行再
+`systemctl daemon-reload && systemctl restart raincough`。
+（`RC_STORE_GATE=on` 但没给哈希时，面板会放弃上锁并在日志里写明原因，不会悄悄放行。）

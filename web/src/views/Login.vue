@@ -26,6 +26,11 @@ const inputRef = ref(null)
 
 const isAuthed = computed(() => !!(status.value && status.value.logged_in))
 const showSSHHint = computed(() => !!(status.value && status.value.can_ssh_password))
+// 系统密码通道本身可用, 但被设置页关掉了 —— 与"读不到 shadow"是两回事, 提示要分开
+const sshDisabled = computed(() => {
+  const s = status.value
+  return !!(s && s.shadow_available && !s.allow_ssh_password)
+})
 const sshUser = computed(() => (status.value && status.value.ssh_username) || '')
 const shadowNote = computed(() => {
   const s = status.value
@@ -116,8 +121,11 @@ async function submit() {
           输入你 SSH 登录本机的密码
           <span v-if="sshUser">(用户名 <code>{{ sshUser }}</code>)</span>
         </template>
+        <template v-else-if="sshDisabled">
+          面板已关闭系统密码登录，请输入<b>面板密码</b>
+        </template>
         <template v-else-if="adminKind === '已设置, $6$ 哈希'">
-          输入面板密码(安装时设置, 与你的 SSH 密码相同)
+          输入面板密码（设置时指定的那个，与 SSH 密码无关）
         </template>
         <template v-else>
           输入面板密码 — 首次启动已生成, 用

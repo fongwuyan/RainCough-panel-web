@@ -222,40 +222,67 @@ func TestStoreGate_lock(t *testing.T) {
 	}
 }
 
-// TestStoreGate_disabled_by_env 环境变量关闭
-func TestStoreGate_disabled_by_env(t *testing.T) {
-	for _, v := range []string{"off", "OFF", "0", "false", " false "} {
-		t.Setenv("RC_STORE_GATE", v)
-		if !IsStoreGateOff() {
-			t.Fatalf("%q 应视为关闭", v)
-		}
+// TestGateEnabled_default_off 闸门默认关闭。
+//
+// 2026-11-01 改: 此前是"默认开 + 口令哈希写死在二进制里", 结果是
+// 所有人都拿得到密文、只有主人不知道明文, 忘口令只能重编译。
+// 现在反过来 —— 不设环境变量就没有口令, 需要挡插件内容的部署自己开。
+func TestGateEnabled_default_off(t *testing.T) {
+	cases := []struct {
+		val  string
+		want bool
+	}{
+		{"", false}, // 不设 = 关闭
+		{"off", false},
+		{"0", false},
+		{"false", false},
+		{"no", false},
+		{"  ", false},
+		{"on", true},
+		{"ON", true},
+		{"1", true},
+		{"true", true},
+		{" on ", true},
 	}
-	for _, v := range []string{"", "on", "1", "true"} {
-		t.Setenv("RC_STORE_GATE", v)
-		if IsStoreGateOff() {
-			t.Fatalf("%q 不应视为关闭", v)
+	for _, c := range cases {
+		t.Setenv("RC_STORE_GATE", c.val)
+		if got := GateEnabled(); got != c.want {
+			t.Fatalf("RC_STORE_GATE=%q 期望 enabled=%v, 实得 %v", c.val, c.want, got)
 		}
 	}
 }
 
-// TestStoreGate_hash_still_valid 生产哈希必须仍是合法 $6$, 且不被测试口令命中。
+// TestNewStoreGate_requires_hash 开启闸门却没给哈希必须报错。
 //
-// 这条测试守两件事:
-//  1. 有人手抄错哈希 → 直接崩, 不会等到线上才发现"口令怎么输都不对"
-//  2. 仓库里公开的测试口令绝不应能解开生产哈希
-//     —— 若能解开, 说明生产哈希被误改成了测试口令
-func TestStoreGate_hash_still_valid(t *testing.T) {
-	if !strings.HasPrefix(storeGateHash, "$6$") {
-		t.Fatalf("应为 $6$ SHA-512 crypt 哈希, 实得 %q", storeGateHash[:8])
+// 不能用"默认口令"兜底: 兜底等于没有口令, 却让运维以为门是锁着的。
+// 也不能 Fatalf 到起不来 —— 由调用方降级为"不锁 + 日志提示"(见 main.go)。
+func TestNewStoreGate_requires_hash(t *testing.T) {
+	t.Setenv("RC_STORE_GATE_HASH", "")
+	if _, err := NewStoreGate(newMemKV()); err == nil {
+		t.Fatal("缺少 RC_STORE_GATE_HASH 时应报错")
 	}
-	// $6$<salt>$<86> —— 长度固定, 偏短说明被截断或手抄少了
-	if len(storeGateHash) != 106 {
-		t.Fatalf("哈希长度应为 106, 实得 %d (可能被截断)", len(storeGateHash))
+
+	t.Setenv("RC_STORE_GATE_HASH", testGateHash)
+	g, err := NewStoreGate(newMemKV())
+	if err != nil {
+		t.Fatalf("给定哈希后应成功: %v", err)
 	}
-	if err := VerifySha512Crypt([]byte(testGatePW), storeGateHash); err == nil {
-		t.Fatalf("生产哈希被测试口令解开了, 说明哈希被误改")
+	if _, err := g.Unlock(reqFrom("10.0.0.9"), httptest.NewRecorder(), testGatePW); err != nil {
+		t.Fatalf("环境变量提供的哈希应能解锁: %v", err)
 	}
-	// 测试哈希自身必须自洽(否则所有闸门测试会假通过)
+}
+
+// TestStoreGate_testHash_selfconsistent 测试哈希必须与测试口令自洽。
+//
+// 这条守一件事: 有人手抄错 testGateHash → 所有闸门测试会"假通过"
+// (反正谁都解不开), 于是正确口令也进不来却没人发现。
+func TestStoreGate_testHash_selfconsistent(t *testing.T) {
+	if !strings.HasPrefix(testGateHash, "$6$") {
+		t.Fatalf("应为 $6$ SHA-512 crypt 哈希, 实得 %q", testGateHash[:8])
+	}
+	if len(testGateHash) != 106 {
+		t.Fatalf("哈希长度应为 106, 实得 %d (可能被截断)", len(testGateHash))
+	}
 	if err := VerifySha512Crypt([]byte(testGatePW), testGateHash); err != nil {
 		t.Fatalf("测试哈希与测试口令不匹配: %v", err)
 	}

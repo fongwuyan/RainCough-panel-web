@@ -1,0 +1,261 @@
+{
+  "name": "QQBot",
+  "label": "QQ Bot",
+  "version": "1.1.1",
+  "description": "NapCat 协议端 + RainCough Bot 统一控制台",
+  "author": "RainCough",
+  "icon": "",
+  "requirements": [],
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      {
+        "path": "",
+        "title": "QQ Bot"
+      }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": [
+      "python3",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
+  },
+  "interfaces": [
+    {
+      "id": "qqbot.health",
+      "visibility": "all",
+      "version": "1",
+      "description": "探活"
+    },
+    {
+      "id": "qqbot.conn.get",
+      "visibility": "all",
+      "version": "1",
+      "description": "读取连接地址与连通性"
+    },
+    {
+      "id": "qqbot.conn.save",
+      "visibility": "main",
+      "version": "1",
+      "description": "保存连接地址"
+    },
+    {
+      "id": "qqbot.nc.overview",
+      "visibility": "all",
+      "version": "1",
+      "description": "NapCat 概览（账号/系统/网络计数）"
+    },
+    {
+      "id": "qqbot.nc.account",
+      "visibility": "all",
+      "version": "1",
+      "description": "QQ 账户状态与二维码"
+    },
+    {
+      "id": "qqbot.nc.action",
+      "visibility": "main",
+      "version": "1",
+      "description": "刷新二维码 / 快速登录 / 重启"
+    },
+    {
+      "id": "qqbot.nc.logs",
+      "visibility": "all",
+      "version": "1",
+      "description": "NapCat 运行日志（实时/历史）"
+    },
+    {
+      "id": "qqbot.nc.logs.clear",
+      "visibility": "main",
+      "version": "1",
+      "description": "清空日志缓冲"
+    },
+    {
+      "id": "rcbot.status",
+      "visibility": "all",
+      "version": "1",
+      "description": "机器人运行状态"
+    },
+    {
+      "id": "rcbot.config.get",
+      "visibility": "all",
+      "version": "1",
+      "description": "读取上下文/触发/能力配置"
+    },
+    {
+      "id": "rcbot.config.save",
+      "visibility": "main",
+      "version": "1",
+      "description": "保存上下文/触发/能力配置"
+    },
+    {
+      "id": "rcbot.tools.search",
+      "visibility": "main",
+      "version": "1",
+      "description": "试一下联网搜索"
+    },
+    {
+      "id": "rcbot.providers",
+      "visibility": "all",
+      "version": "1",
+      "description": "模型提供商列表"
+    },
+    {
+      "id": "rcbot.provider.save",
+      "visibility": "main",
+      "version": "1",
+      "description": "新增/修改提供商"
+    },
+    {
+      "id": "rcbot.provider.delete",
+      "visibility": "main",
+      "version": "1",
+      "description": "删除提供商"
+    },
+    {
+      "id": "rcbot.provider.test",
+      "visibility": "main",
+      "version": "1",
+      "description": "测试提供商连通性"
+    },
+    {
+      "id": "rcbot.provider.models",
+      "visibility": "main",
+      "version": "1",
+      "description": "拉取可用模型列表"
+    },
+    {
+      "id": "rcbot.personas",
+      "visibility": "all",
+      "version": "1",
+      "description": "人格列表"
+    },
+    {
+      "id": "rcbot.persona.save",
+      "visibility": "main",
+      "version": "1",
+      "description": "新增/修改人格"
+    },
+    {
+      "id": "rcbot.persona.delete",
+      "visibility": "main",
+      "version": "1",
+      "description": "删除人格"
+    },
+    {
+      "id": "rcbot.sessions",
+      "visibility": "all",
+      "version": "1",
+      "description": "会话列表"
+    },
+    {
+      "id": "rcbot.session.get",
+      "visibility": "all",
+      "version": "1",
+      "description": "会话详情与消息"
+    },
+    {
+      "id": "rcbot.session.save",
+      "visibility": "main",
+      "version": "1",
+      "description": "修改会话（人格/模型/启停）"
+    },
+    {
+      "id": "rcbot.session.clear",
+      "visibility": "main",
+      "version": "1",
+      "description": "清空会话上下文"
+    },
+    {
+      "id": "rcbot.session.delete",
+      "visibility": "main",
+      "version": "1",
+      "description": "删除会话"
+    },
+    {
+      "id": "rcbot.context",
+      "visibility": "all",
+      "version": "1",
+      "description": "上下文预览（含压缩摘要）"
+    },
+    {
+      "id": "rcbot.test_chat",
+      "visibility": "main",
+      "version": "1",
+      "description": "试聊（不经过 QQ）"
+    }
+  ],
+  "environment": {
+    "level": "apply",
+    "check": [
+      {
+        "id": "napcat",
+        "label": "NapCat 协议端",
+        "required": true,
+        "run": "curl -fsS -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:6099/webui/",
+        "expect": "^2",
+        "hint": "NapCat 未运行或未安装（第三方客户端，面板无法代装）",
+        "guide": "https://napcat.napneko.icu/guide/start"
+      },
+      {
+        "id": "onebot",
+        "label": "QQ 已登录(OneBot 协议端)",
+        "required": true,
+        "run": "command -v ss >/dev/null 2>&1 || { echo '缺少 ss(iproute2), 无法探测端口'; exit 2; }; ss -ltn 2>/dev/null | grep -q ':6700 ' || { echo 'NapCat OneBot(6700) 未监听: QQ 未登录或 NapCat 未运行'; exit 1; }; echo listening",
+        "expect": "^listening$",
+        "hint": "NapCat 在跑但 QQ 没登录 —— 需要扫一次二维码(会话失效时重扫即可)",
+        "guide": "https://napcat.napneko.icu/guide/start"
+      },
+      {
+        "id": "deps",
+        "label": "rcbot Python 依赖",
+        "required": true,
+        "run": "/opt/rcbot/venv/bin/python -c 'import aiohttp, aiosqlite, PIL'",
+        "hint": "rcbot 的 venv 缺失或缺依赖"
+      },
+      {
+        "id": "runtime",
+        "label": "rcbot 运行时与部署一致且服务在跑",
+        "required": true,
+        "run": "for f in rcbot.py rcbot/*.py; do t=\"/opt/rcbot/$f\"; [ -f \"$t\" ] || { echo \"缺少 $t\"; exit 1; }; [ -r \"$t\" ] || { echo \"无法读取 $t(面板权限不足, 无法比对版本)\"; exit 2; }; cmp -s \"$f\" \"$t\" || { echo \"$f 与已部署版本不一致\"; exit 1; }; done; systemctl is-active --quiet rcbot || { echo \"rcbot 服务未运行\"; exit 1; }; echo same",
+        "hint": "机器人本体未部署、版本落后，或服务没在跑"
+      },
+      {
+        "id": "port6710",
+        "label": "rcbot HTTP 端口",
+        "type": "port",
+        "port": 6710,
+        "bind": "127.0.0.1",
+        "owner": {
+          "unit": "rcbot.service"
+        },
+        "required": true
+      }
+    ],
+    "apply": [
+      {
+        "id": "deps",
+        "label": "创建 venv 并安装 rcbot 依赖",
+        "check": "deps",
+        "needs": "root",
+        "timeout": 900,
+        "run": "set -e\nexport DEBIAN_FRONTEND=noninteractive\nif [ ! -x /opt/rcbot/venv/bin/python ]; then\n  python3 -m venv /opt/rcbot/venv 2>/dev/null || { apt-get update -qq && apt-get install -y -qq python3-venv; python3 -m venv /opt/rcbot/venv; }\nfi\n/opt/rcbot/venv/bin/pip install -q --upgrade pip\n/opt/rcbot/venv/bin/pip install -q 'aiohttp>=3.11' 'aiosqlite>=0.17' 'pillow>=9'"
+      },
+      {
+        "id": "runtime",
+        "label": "部署 rcbot 运行时并注册 systemd 服务",
+        "check": "runtime",
+        "needs": "root",
+        "timeout": 180,
+        "run": "set -e\ninstall -d -m 0755 /opt/rcbot /opt/rcbot/data /opt/rcbot/logs /opt/rcbot/rcbot\nrm -f /opt/rcbot/rcbot/*.py\ncp -rf rcbot/. /opt/rcbot/rcbot/\ninstall -m 0644 rcbot.py /opt/rcbot/rcbot.py\n# 源码要可读: 非 root 的面板也要能比对版本, 否则检查只会说\"读不到\"\nchmod 0644 /opt/rcbot/rcbot/*.py\ncat > /etc/systemd/system/rcbot.service <<'RCBOT_UNIT'\n[Unit]\nDescription=RainCough Bot (rcbot)\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=/opt/rcbot\nExecStart=/opt/rcbot/venv/bin/python /opt/rcbot/rcbot.py\nRestart=always\nRestartSec=5\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=RCBOT_LOG_LEVEL=INFO\n\n[Install]\nWantedBy=multi-user.target\nRCBOT_UNIT\nsystemctl daemon-reload\nsystemctl enable rcbot\nsystemctl restart rcbot"
+      }
+    ]
+  }
+}

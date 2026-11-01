@@ -3,14 +3,28 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlugins } from '../stores/plugins'
 import { useAuth } from '../stores/auth'
+import { useUi } from '../stores/ui'
 import PanelUpdate from './panel/PanelUpdate.vue'
+import { api } from '../api'
 
 const route = useRoute()
 const router = useRouter()
 const { plugins, load } = usePlugins()
 const auth = useAuth()
+const ui = useUi()
+// 收起侧栏：隐藏后内容区右下角的球能把它叫回来
+function hideSidebar() { ui.setSidebarHidden(true) }
 
-onMounted(() => { load() })
+// 版本号从 /api/panel/version 读，不再写死。
+// 写死时升版本要改四处(VERSION / config.go / package.json / 这里)，漏一处就显示旧号。
+const appVer = ref('')
+
+onMounted(() => {
+  load()
+  api.panelVersion()
+    .then((d) => { appVer.value = (d && d.version) || '' })
+    .catch(() => { /* 取不到就显示占位，不阻塞侧栏 */ })
+})
 
 async function onLogout() {
   await auth.logout()
@@ -73,6 +87,7 @@ function isActive(name) {
       <span class="brand-dot"></span>
       <h2>RainCough</h2>
       <button ref="updBtn" class="upd-btn" title="面板更新" @click="showUpdate = !showUpdate">↓</button>
+      <button class="upd-btn" title="收起侧栏（内容区右下角的球可以叫回来）" @click="hideSidebar">≡</button>
     </div>
     <div style="padding:10px">
       <input v-model="searchQ" class="input" style="width:100%" placeholder="搜索: 页面/插件…" @keydown.enter="searchResults.length && pick(searchResults[0])" />
@@ -124,7 +139,7 @@ function isActive(name) {
       <div v-else class="hint" style="padding:16px 8px;">暂无插件</div>
     </nav>
     <div class="sidebar-footer">
-      <span class="version">v1.0.0 · 仅局域网</span>
+      <span class="version">v{{ appVer || '—' }} · 仅局域网</span>
       <button v-if="auth.loggedIn()" class="logout-btn" title="注销当前 session" @click="onLogout">登出</button>
     </div>
   </aside>

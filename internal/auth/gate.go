@@ -2,22 +2,30 @@ package auth
 
 // 插件库口令闸门(StoreGate)
 //
-// 背景: 插件库(RainCough-Plugin)计划改为公开仓库, 但插件本身是要保护的内容 ——
-// 公开后任何人都能浏览/下载。所以给面板的"插件市场"加一道写死的口令:
+// 背景: 插件库(RainCough-Plugin)曾计划公开, 而插件本身是要保护的内容 ——
+// 公开后任何人都能浏览/下载。所以给面板的"插件市场"加一道口令:
 // 只有输入正确口令, 才能拉取插件清单 / 安装 / 更新插件。
 //
+// ★ 默认关闭。不设任何环境变量时市场无需口令 —— 这道锁只服务
+//   "确实要把插件内容挡起来"的部署, 不该默认架在所有人面前。
+//
+// 开启方式(两个都要):
+//
+//	Environment=RC_STORE_GATE=on
+//	Environment=RC_STORE_GATE_HASH=$6$xxxx        # raincough -hash-password 生成
+//
 // 设计要点:
-//   · 口令哈希【写死在二进制里】, 仓库里没有明文; 用 SHA-512 crypt(5000 轮 + 随机盐),
-//     不是裸 SHA-256 —— 二进制公开后可被离线爆破, 5000 轮 crypt 把单次尝试成本
-//     抬到 ~5ms, GPU 批量爆破难度提高约 4 个数量级
-//   · 解锁状态用签名 cookie(rc_store_gate)保持, 默认 30 天, 与面板 session 同寿命;
-//     签名密钥首次启动随机生成并存 KV, 重启不失效, 但**改口令不会自动失效**
-//     (口令是写死的, 本来也改不了), 需要时可 -store-gate-reset 清空
-//   · 在线爆破防护: 同一 IP 连续 5 次错误 → 锁定 60s, 且每次错误固定延迟 300ms
+//   · 口令哈希来自环境变量, **不再写死在二进制里**。写死的口令会随二进制分发,
+//     等于"所有人都能拿到密文、只有主人不知道明文" —— 忘口令只能重编译。
+//   · 用 SHA-512 crypt(5000 轮 + 随机盐), 不是裸 SHA-256: 二进制公开后可被离线爆破,
+//     5000 轮把单次尝试成本抬到 ~5ms
+//   · 解锁状态用签名 cookie(rc_store_gate)保持, 30 天; 签名密钥首次启动随机生成并存 KV,
+//     重启不失效。改口令不会让已解锁的浏览器立刻失效(那是签名密钥的事)
+//   · 在线爆破防护: 同一 IP 连续 5 次错误 → 锁定 60s, 每次错误固定延迟 300ms
 //   · 只能防"知道面板地址的人随手拿插件"; **不能防**知道 GitHub 仓库地址的人直接 clone
 //     —— 仓库一旦公开, 权限边界就只剩"不被发现"。真要保护内容必须保持私有 + token
 //
-// 关闭方式: RC_STORE_GATE=off(测试/不想用时不设锁)
+// 关闭方式: 不设 RC_STORE_GATE 即关闭; 显式 RC_STORE_GATE=off 也一样。
 
 import (
 	"crypto/hmac"
@@ -38,10 +46,6 @@ import (
 const (
 	// StoreGateCookie 解锁状态 cookie 名
 	StoreGateCookie = "rc_store_gate"
-	// storeGateHash 写死的口令哈希: SHA-512 crypt, 5000 轮 + 随机盐(盐已内嵌在字符串里)。
-	// 仓库里只有哈希, 不含明文 —— 明文口令不外传、不写注释、不进测试。
-	// 生成方式: raincough -hash-password 后把结果替换到这里。
-	storeGateHash = "$6$rBkCCZu1w/KZIo8e$mBaTOIE0gSbYtQICvTuO.3j83r..75UllKBgxzqQh0DYKrNIL.Dren8qhnu6DhJjk7iDI9brTKer3g5ZVvMIR."
 
 	gateKVKey       = "gate_hmac_key"
 	gateCookieValue = "store-gate|v1"
@@ -60,7 +64,7 @@ type GateKV interface {
 type StoreGate struct {
 	mu    sync.Mutex
 	key   []byte               // HMAC 签名密钥
-	hash  string               // 口令哈希($6$); 生产用 storeGateHash, 测试可注入
+	hash  string               // 口令哈希($6$); 来自 RC_STORE_GATE_HASH, 测试可注入
 	fails map[string]*failInfo // 按 IP 记录失败次数
 }
 
@@ -69,9 +73,18 @@ type failInfo struct {
 	until time.Time
 }
 
-// NewStoreGate 创建闸门, 密钥从 KV 读取; 不存在则随机生成并落库(重启后旧 cookie 仍有效)。
+// NewStoreGate 创建闸门, 口令哈希取自 RC_STORE_GATE_HASH。
+// 密钥从 KV 读取; 不存在则随机生成并落库(重启后旧 cookie 仍有效)。
+//
+// 未配置哈希时返回错误而不是用某个"默认口令"兜底: 兜底口令等于没有口令,
+// 却会让运维以为门是锁着的。
 func NewStoreGate(kv GateKV) (*StoreGate, error) {
-	return NewStoreGateWithHash(kv, storeGateHash)
+	hash := GatePasswordHash()
+	if hash == "" {
+		return nil, errors.New("已启用插件库闸门(RC_STORE_GATE=on)但未设置 RC_STORE_GATE_HASH; " +
+			"先用 raincough -hash-password 生成, 再写进 systemd 的 Environment=")
+	}
+	return NewStoreGateWithHash(kv, hash)
 }
 
 // NewStoreGateWithHash 用指定哈希创建闸门。
@@ -192,8 +205,23 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// IsStoreGateOff 环境变量是否显式关闭闸门
-func IsStoreGateOff() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("RC_STORE_GATE")))
-	return v == "off" || v == "0" || v == "false"
+// GateEnabled 是否启用插件库口令闸门。
+//
+// 默认关闭: 不设 RC_STORE_GATE 就没有口令, 市场直接可见。
+// 只有显式 on/1/true/yes 才启用 —— 这道锁服务于"确实要挡插件内容"的部署,
+// 不该默认架在所有人面前(2026-11-01 改: 此前是"默认开、写死口令", 忘口令无法恢复)。
+func GateEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RC_STORE_GATE"))) {
+	case "on", "1", "true", "yes":
+		return true
+	}
+	return false
+}
+
+// GatePasswordHash 口令哈希($6$ SHA-512 crypt), 取自 RC_STORE_GATE_HASH。
+//
+// 放环境变量而不是写死进二进制: 写死的口令会随二进制一起分发, 变成
+// "所有人都拿得到密文、只有主人不知道明文", 忘掉就只能重编译。
+func GatePasswordHash() string {
+	return strings.TrimSpace(os.Getenv("RC_STORE_GATE_HASH"))
 }

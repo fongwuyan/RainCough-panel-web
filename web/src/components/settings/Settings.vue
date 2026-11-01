@@ -1,8 +1,12 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useSettings, fmtUptime } from './useSettings'
+import { useUi } from '../../stores/ui'
+import { api } from '../../api'
 
 const st = useSettings()
+const ui = useUi()
+const { sidebarHidden, ball } = useUi()
 const {
   theme, setTheme, cfg, loading, saving, pinging, pingState, pingMsg,
   gatePW, gateLocked, gateEnabled, gateBusy,
@@ -11,9 +15,122 @@ const {
 } = st
 
 const active = ref('appearance')
+
+// ---- 移动端访问密钥 ----
+// /<插件名>/api/... 前缀通道不走登录中间件(App 没有登录能力), 全靠这个密钥把关。
+const restKey = ref('')
+const restKeyErr = ref('')
+const restKeyBusy = ref(false)
+const restKeyConfirm = ref(false)
+
+async function loadRestKey() {
+  try {
+    const d = await api.restKey()
+    restKey.value = (d && d.key) || ''
+    restKeyErr.value = ''
+  } catch (e) {
+    restKeyErr.value = (e && e.message) || '读取失败'
+  }
+}
+// 两步确认: 重置会让已配对的 App 立刻失效, 不能一次点击就做
+async function rotateRestKey() {
+  if (!restKeyConfirm.value) {
+    restKeyConfirm.value = true
+    setTimeout(function () { restKeyConfirm.value = false }, 5000)
+    return
+  }
+  restKeyConfirm.value = false
+  restKeyBusy.value = true
+  try {
+    const d = await api.restKeyRotate()
+    restKey.value = (d && d.key) || ''
+    restKeyErr.value = ''
+  } catch (e) {
+    restKeyErr.value = (e && e.message) || '重置失败'
+  } finally {
+    restKeyBusy.value = false
+  }
+}
+function copyRestKey() {
+  if (!restKey.value) return
+  try { navigator.clipboard.writeText(restKey.value) } catch (e) { /* 无剪贴板权限时可手动选中复制 */ }
+}
+onMounted(loadRestKey)
+
+// ---- 登录方式 ----
+// 面板默认接受「系统(SSH)密码」和「面板密码」两种。这里只切系统密码那条通道，
+// 服务端 Verify() 会真的跳过它, 不是只在界面上藏起来。
+const loginPolicy = ref(null)
+const loginBusy = ref(false)
+const loginErr = ref('')
+
+async function loadLoginPolicy() {
+  try {
+    loginPolicy.value = await api.authLoginPolicy()
+    loginErr.value = ''
+  } catch (e) {
+    loginErr.value = (e && e.message) || '读取失败'
+  }
+}
+
+async function setSshLogin(on) {
+  if (loginBusy.value) return
+  loginBusy.value = true
+  loginErr.value = ''
+  try {
+    loginPolicy.value = await api.authSetLoginPolicy(on)
+  } catch (e) {
+    loginErr.value = (e && e.message) || '保存失败'
+    // 失败时重新读一次: 开关位置必须等于服务端真实状态, 不能停在用户点的那个位置
+    await loadLoginPolicy()
+  } finally {
+    loginBusy.value = false
+  }
+}
+onMounted(loadLoginPolicy)
+
+// ---- 面板密码 ----
+// 关掉系统密码后只剩这一条登录通道，所以必须能在这里设一个自己记得住的密码，
+// 否则用户只能去服务器上跑 `raincough -set-password`。
+const newPW = ref('')
+const newPW2 = ref('')
+const pwBusy = ref(false)
+const pwMsg = ref('')
+const pwOk = ref(false)
+
+async function savePanelPassword() {
+  if (pwBusy.value) return
+  pwMsg.value = ''
+  if (newPW.value.length < 8) {
+    pwOk.value = false
+    pwMsg.value = '至少 8 位'
+    return
+  }
+  if (newPW.value !== newPW2.value) {
+    pwOk.value = false
+    pwMsg.value = '两次输入不一致'
+    return
+  }
+  pwBusy.value = true
+  try {
+    await api.authSetPassword(newPW.value)
+    pwOk.value = true
+    pwMsg.value = '已更新，其它设备需重新登录'
+    newPW.value = ''
+    newPW2.value = ''
+    await loadLoginPolicy()
+  } catch (e) {
+    pwOk.value = false
+    pwMsg.value = (e && e.message) || '保存失败'
+  } finally {
+    pwBusy.value = false
+  }
+}
+
 const NAV = [
   { key: 'appearance', label: '外观', desc: '主题与显示' },
   { key: 'repo', label: '仓库配置', desc: '插件市场 / 面板仓库' },
+  { key: 'login', label: '登录', desc: '密码与登录方式' },
   { key: 'panel', label: '面板信息', desc: '版本与运行状态' },
   { key: 'maint', label: '维护', desc: '数据清理' },
 ]
@@ -58,6 +175,20 @@ const NAV = [
             </button>
           </div>
           <p class="st-hint">主题保存在浏览器本地，切换立即生效。</p>
+
+          <div class="st-group-title" style="margin-top:18px">布局</div>
+          <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:12px">
+            <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+              <input type="checkbox" :checked="!sidebarHidden" @change="ui.setSidebarHidden(!$event.target.checked)" />
+              显示侧栏
+            </label>
+            <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+              <input type="checkbox" :checked="ball.on" @change="ui.setBall({ on: $event.target.checked })" />
+              显示悬浮球
+            </label>
+            <button class="btn" @click="ui.setBall({ x: null, y: null })">球归位</button>
+          </div>
+          <p class="st-hint">侧栏收起后点悬浮球展开；球可拖动，右键（或长按）换黑/白底色、上传图标。</p>
         </div>
 
         <!-- 仓库配置 -->
@@ -78,34 +209,159 @@ const NAV = [
             <label class="st-field"><span>Branch</span><input v-model="cfg.panel_repo.branch" class="input mono" /></label>
           </div>
 
-          <div class="st-group-title" style="margin-top:22px">密钥</div>
+          <div class="st-group-title" style="margin-top:22px">移动端访问</div>
+          <p class="st-hint">
+            Android 版 JMReader 没有登录能力，走
+            <code class="mono">/&lt;插件名&gt;/api/…</code>
+            前缀读插件数据。这条通道靠下面的密钥把关，重置后 App 要重新填。
+          </p>
           <div class="st-form">
             <label class="st-field wide">
-              <span>密钥</span>
+              <span>访问密钥</span>
               <input
-                v-model="gatePW"
                 class="input mono"
-                type="password"
-                autocomplete="off"
-                :disabled="gateBusy"
-                @keydown.enter="unlockGate"
+                :value="restKey"
+                readonly
+                placeholder="读取中…"
+                @focus="$event.target.select()"
               />
             </label>
           </div>
           <div class="st-actions">
-            <button class="btn btn-primary" :disabled="gateBusy || !gatePW" @click="unlockGate">
-              {{ gateBusy ? '验证中…' : '解锁' }}
+            <button class="btn" :disabled="!restKey" @click="copyRestKey">复制</button>
+            <button
+              class="btn"
+              :class="{ 'btn-danger': restKeyConfirm }"
+              :disabled="restKeyBusy"
+              @click="rotateRestKey"
+            >
+              {{ restKeyBusy ? '重置中…' : (restKeyConfirm ? '确认重置？再点一次' : '重置密钥') }}
             </button>
-            <button v-if="gateEnabled && !gateLocked" class="btn" :disabled="gateBusy" @click="lockGate">上锁</button>
-            <span v-if="gateEnabled" class="st-ping" :class="gateLocked ? 'fail' : 'ok'">
-              {{ gateLocked ? '未解锁' : '已解锁' }}
-            </span>
+            <span v-if="restKeyErr" class="st-ping fail">{{ restKeyErr }}</span>
           </div>
+
+          <!-- 密钥区块只在闸门启用时出现。
+               闸门默认关闭(2026-11-01 起), 之前这块无条件渲染 —— 用户会看到
+               一个输了也没用的密码框, 属于典型的"无效按钮"。 -->
+          <template v-if="gateEnabled">
+            <div class="st-group-title" style="margin-top:22px">插件库口令</div>
+            <div class="st-form">
+              <label class="st-field wide">
+                <span>密钥</span>
+                <input
+                  v-model="gatePW"
+                  class="input mono"
+                  type="password"
+                  autocomplete="off"
+                  :disabled="gateBusy"
+                  @keydown.enter="unlockGate"
+                />
+              </label>
+            </div>
+            <div class="st-actions">
+              <button class="btn btn-primary" :disabled="gateBusy || !gatePW" @click="unlockGate">
+                {{ gateBusy ? '验证中…' : '解锁' }}
+              </button>
+              <button v-if="!gateLocked" class="btn" :disabled="gateBusy" @click="lockGate">上锁</button>
+              <span class="st-ping" :class="gateLocked ? 'fail' : 'ok'">
+                {{ gateLocked ? '未解锁' : '已解锁' }}
+              </span>
+            </div>
+          </template>
+          <p v-else class="st-hint" style="margin-top:22px">
+            插件市场未上锁，无需密钥。需要保护插件内容时，在 systemd 单元里设置
+            <code class="mono">RC_STORE_GATE=on</code> 与
+            <code class="mono">RC_STORE_GATE_HASH</code>（用
+            <code class="mono">raincough -hash-password</code> 生成）后重启面板。
+          </p>
 
           <div class="st-actions">
             <button class="btn btn-primary" :disabled="saving" @click="saveRepo">{{ saving ? '保存中…' : '保存配置' }}</button>
             <button class="btn" :disabled="pinging" @click="ping">{{ pinging ? '测试中…' : '测试连接' }}</button>
             <span v-if="pingMsg" class="st-ping" :class="pingState">{{ pingMsg }}</span>
+          </div>
+        </div>
+
+        <!-- 登录 -->
+        <div v-else-if="active === 'login'" class="st-group">
+          <div class="st-group-title">登录方式</div>
+          <p class="st-hint">
+            面板默认接受两种密码：<b>系统（SSH）密码</b>与<b>面板密码</b>。
+            关掉系统密码后，只能用面板密码登录，SSH 密码立即失效。
+          </p>
+
+          <template v-if="loginPolicy">
+            <div class="switch-row">
+              <label>允许用系统（SSH）密码登录</label>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="loginPolicy.allow_ssh_password"
+                  :disabled="loginBusy || !loginPolicy.shadow_available"
+                  @change="setSshLogin($event.target.checked)"
+                />
+                <span class="slider"></span>
+              </span>
+            </div>
+
+            <div class="st-rows">
+              <div class="st-row">
+                <span>系统密码通道</span>
+                <b>{{ loginPolicy.shadow_available ? '可用' : '不可用' }}</b>
+              </div>
+              <div class="st-row">
+                <span>系统用户名</span>
+                <b class="mono">{{ loginPolicy.ssh_username || '—' }}</b>
+              </div>
+              <div class="st-row">
+                <span>面板密码</span>
+                <b>{{ loginPolicy.has_admin_pw ? (loginPolicy.admin_kind || '已设置') : '未设置' }}</b>
+              </div>
+            </div>
+
+            <p v-if="!loginPolicy.shadow_available" class="st-hint" style="margin-top:10px">
+              系统密码不可用：{{ loginPolicy.shadow_note || '读不到 /etc/shadow（面板需要以 root 运行）' }}。
+              这时开关是灰的，只能用面板密码登录。
+            </p>
+            <p v-else-if="!loginPolicy.allow_ssh_password" class="st-hint" style="margin-top:10px">
+              <b>已关闭。</b>现在只能用面板密码登录。面板密码不是 SSH 密码；忘了就在服务器上执行
+              <code class="mono">raincough -set-password</code> 重设，再重启面板。
+            </p>
+            <p v-else class="st-hint" style="margin-top:10px">
+              关闭后只能用面板密码登录；已登录的浏览器不受影响，不会掉线。
+            </p>
+
+            <p v-if="loginErr" class="st-ping fail">{{ loginErr }}</p>
+          </template>
+          <p v-else-if="loginErr" class="st-ping fail">{{ loginErr }}</p>
+          <p v-else class="st-hint">读取中…</p>
+
+          <div class="st-group-title" style="margin-top:22px">面板密码</div>
+          <p class="st-hint">
+            独立于 SSH 的登录密码。设一个自己记得住的 —— 关掉系统密码后，这就是唯一的入口。
+            至少 8 位；保存后其它设备需要重新登录，当前浏览器保持登录。
+          </p>
+          <div class="st-form">
+            <label class="st-field">
+              <span>新密码</span>
+              <input v-model="newPW" class="input" type="password" autocomplete="new-password" />
+            </label>
+            <label class="st-field">
+              <span>确认</span>
+              <input
+                v-model="newPW2"
+                class="input"
+                type="password"
+                autocomplete="new-password"
+                @keydown.enter="savePanelPassword"
+              />
+            </label>
+          </div>
+          <div class="st-actions">
+            <button class="btn btn-primary" :disabled="pwBusy || !newPW" @click="savePanelPassword">
+              {{ pwBusy ? '保存中…' : '设置面板密码' }}
+            </button>
+            <span v-if="pwMsg" class="st-ping" :class="pwOk ? 'ok' : 'fail'">{{ pwMsg }}</span>
           </div>
         </div>
 

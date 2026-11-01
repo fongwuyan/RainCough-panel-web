@@ -4,6 +4,179 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## Unreleased — 插件环境准备（P1/P2）+ 内置功能审计 + 市场免口令 + 登录方式可切换
+### 插件环境准备：装完能一键补齐环境（P1 + P2）
+
+P0 只能"看"环境差什么；P1 把报告接进安装流程，P2 让面板能真的把它补齐。
+
+- **上传安装的响应里带 `env`**：装完不再只说一句"安装成功"，而是
+  "已更新 X v1.2.3(3 个文件), **还需 1 步环境准备**"，前端浮窗直接吃这份报告
+- **新增执行器** `internal/pluginrt/envapply.go` + `POST /api/plugins/{name}/environment/apply`
+  - **前端只传步骤 id，绝不传命令原文** —— 传原文等于让任何登录用户
+    在面板上执行任意 shell。命令永远来自插件清单，确认页把它原样摊开
+  - `level=check` 的清单拒绝执行；`needs=root` 的步骤在非 root 面板上直接拒绝
+    （不 sudo、不降级）
+  - 必须 `confirm:true`；步骤失败即停；可用 `check` 字段做幂等（点第二次不会重装）
+- **新增安装浮窗**（`InstallDock.vue` / `InstallTimeline.vue` / `ConfirmSheet.vue`）
+  - 胶囊 ↔ 浮窗两态，挂根组件 → **切路由不消失**
+  - 时间轴把未到达的阶段**置灰但显示**，用户不用盯百分比猜还有几步
+  - 确认遮罩里命令**不折叠不省略**，横向滚动不折行（折行会让人读错命令）
+  - 窄屏变底部抽屉；同时装多个包胶囊显示数量
+- **报告新增 `apply[]` 步骤清单与每项的 `apply_steps`**：前端不用猜"哪个步骤修哪一项"
+
+**实施中修掉两个真问题：**
+
+1. **"读不到"被当成"缺失"** —— 非 root 面板读不到 root 的私有文件时，
+   检查会永远报"缺东西"，把真正缺的那项盖掉。
+   现在有**退出码约定**：`1`=确定缺失、`2`=无法确定(unknown)、`3`=状态可疑(degraded)。
+   `2`/`3` 不计入 pending。
+2. **只探"NapCat 在跑"没探"QQ 登录了"** —— 程序活着 WebUI 就返回 200，
+   但 QQ 掉线时机器人其实不回话，报告却显示正常。
+   改看 OneBot 端口（**QQ 登录后才监听**）才算真判据。
+
+### 登录方式：可关闭系统（SSH）密码，并可在设置页改面板密码
+
+起因：面板同时接受「系统密码（`/etc/shadow`）」和「面板密码」两条通道，
+但没有任何开关 —— 想只用面板密码做不到；而面板密码忘了只能上服务器跑 CLI。
+
+- **新增登录策略** `GET/POST /api/auth/login-policy`（需登录，不在鉴权白名单里）
+  - 关闭后 `Verify()` 真的跳过 shadow 那条分支，不是只在界面上藏起来
+  - 状态落盘 `<data>/secret/login.json`（0600），重启保持；文件损坏时**回退到允许**，
+    宁可多开一条通道也不能把自己锁在外面
+- **设置页新增「登录」分区**：开关 + 三条只读状态（系统密码通道 / 系统用户名 / 面板密码）
+  - 系统密码不可用时开关置灰，并显示真实原因（见下）
+  - 开关失败会重新拉一次服务端状态，不让开关停在用户点的位置
+- **新增 `POST /api/auth/password`**：设置页直接改面板密码（≥8 位）
+  - 当前会话保留，其它设备下线 —— 否则改完自己就被踢出去，等于没法改
+  - 同时把它暴露到 UI，是因为关掉系统密码后**这就是唯一入口**，
+    不让人只能去服务器上跑 `raincough -set-password`
+
+**实测发现：这台机器的系统密码通道从来没生效过。**
+
+| 实例 | 运行身份 | 结果 |
+|---|---|---|
+| prod 3900 | root | `shadow 使用 yescrypt($y$), 无法离线验证` —— Debian 12 默认 yescrypt，代码只支持 SHA-512(`$6$`) |
+| dev 3910 | f | `无法读取 /etc/shadow(需 root 或 shadow 组)` |
+
+也就是说两台都一直在走面板密码。开关配上之后这个事实第一次在界面上说得清。
+yescrypt 支持要另做（libxcrypt 的 KDF），没在本次范围。
+
+### 内置功能审计（2026-11-01）
+
+起因：`docs/功能清单.md` 第 101 行早就点出「前端 api 方法 ↔ 后端路由无自动对拍，
+历史上的空壳/死按钮全部出在这里」，但一直没有守卫。这次逐项查了一遍并修掉。
+
+- **插件启停完全没有 UI**（最严重）：supervisor 的 start/stop/restart/autostart 四个能力、
+  三个接口都在，前端一次都没调过。后果是插件崩了只能重启整个面板；新装插件默认不开自启，
+  面板重启后它静默停着（当天 QQBot 实测踩到）
+  - `api.serviceAction` 的签名还是 v3 的 `(unit, action)` + 下发 `{unit, action}`，
+    按 v4 契约会被解析成空名 → 400。改成 `(name, action)`
+  - 新增 `serviceAutostart` / `serviceLog` 两个方法
+  - 「插件」页每行新增「管理」面板：启动 / 停止 / 重启、开机自启开关、运行日志
+    替换掉原来与「打开」完全重复的「设置」按钮
+- **插件运行日志没有入口**：supervisor 一直写 `.runtime.log`，`/api/services/log` 也在，
+  但没有任何页面能看。现在「管理」面板里可以看最近 200 行并刷新
+- **侧栏版本号是硬编码字符串**（`v1.0.0-beta.2`）：升版本要改四处，漏一处就显示旧号。
+  改为从 `GET /api/panel/version` 读
+- **删除死代码 `handleStoreProject`**（22 行）：从未在 mux 里注册过，注释却写着
+  "归 404 而不是返回假数据"，让人以为它还活着
+- **删除 8 个死配置字段**：`RC_DB_POOL_SIZE` / `RC_DB_QUERY_TIMEOUT` /
+  `RC_PLUGIN_HOST_PORT` / `RC_PLUGIN_TIMEOUT` / `RC_PLUGIN_MAX` / `RC_PLUGIN_KEEPALIVE` /
+  `RC_PLUGIN_PROXY_TIMEOUT` / `RC_SUDO_PW` —— 全是 v3 遗留，设了不生效。
+  尤其 `RC_SUDO_PW` 读一个 sudo 密码却从未使用，"看起来存着 root 密码的死字段"比没有更危险
+- **新增契约守卫** `tools/check-api-contract.mjs`，接进 `npm run check`：
+  - 组件调 `api.X` 但 api.js 没有 X → 直接失败（PanelUpdate 白屏那类）
+  - api.js 的路径在后端找不到路由 → 直接失败（点了 404 那类）
+  - 扫描范围含 `cmd/` 与 `internal/`（auth 三个路由注册在 internal/auth，只扫 cmd 会误报）
+- **设置页「密钥」区块**改为按 `gateEnabled` 渲染：闸门默认关闭后，那里原本是个输了也没用的死输入框
+- **删除 14 个无调用的前端 API 方法**（ifaces/ifaceDetail/ifaceInvoke/diskUnmount/netStatus/
+  fmDelete/fmRead/fmOpsDownload/tmHostSort/storeChangelog/panelInstallCommand/
+  panelUpdateLog/servicesHealthLog 等）。删除过程中契约检查抓到 `ifacesSummary`
+  仍被工作台使用，已恢复 —— 正好证明守卫有用
+
+### 修掉一个会把人绕晕的 CLI 目录 bug
+
+`config.Load()` 的 `BaseDir` 是 `mustAbs(".")` —— **当前目录**。服务由 systemd 设了
+`WorkingDirectory` 所以正确，但手工跑 `raincough -set-password` 时 cwd 可能是 `~` 或 `/tmp`，
+密码会写到 `~/data` 或 `/tmp/data`，面板启动时根本不读它 —— 表现为「我明明改了密码，怎么还是旧的」。
+
+新增 `dataDirForCLI()`：`RC_DATA_DIR` → `cwd/data` 已存在 → 退回**可执行文件所在目录的 data**，
+并把实际落点打到 stderr。实测从 `/tmp` 执行会打印
+`[cli] 当前目录 /tmp 下没有 data/, 改用安装目录: /home/f/raincough-v6/data`，且 `/tmp/data` 不再被创建。
+
+### 移动端访问密钥（新增）
+
+- **`/<插件名>/api/...` 前缀通道不再裸奔**。这条通道为了兼容没有登录能力的
+  Android App（JMReader）而绕开登录中间件，此前**任何知道面板地址的人**都能拉
+  漫画库、读元数据、下整本图片
+- 顺带查明：插件清单里的 `rest_public` 字段（`RESTPublicMatch`）**从未被任何生产代码调用**，
+  一直是个死开关 —— "要不要对外开放"其实从不由它决定。该字段已标记废弃，
+  JMComic 清单里的 `rest_public: true` 已删除
+- 新增访问密钥：存 KV，首次启动自动生成（48 位 hex），
+  `GET /api/panel/restkey` 查看、`POST` 重置（重置后旧密钥立刻失效）
+- 携带方式：请求头 `X-RC-Key` 或 query `?key=`（图片由 Coil 直接加载，塞不进头）
+- 面板「设置 → 移动端访问」可查看 / 复制 / 重置（两步确认）
+- `RC_REST_KEY=off` 可临时关闭校验（排障用，等于重新开放）
+- **JMReader(Android) 同步修改**：设置页新增密钥输入框；所有请求统一带 `X-RC-Key`；
+  封面/图片 URL 追加 `?key=`；401 文案改为直接指向密钥填写位置
+
+### 面板更新：不再需要手工部署二进制
+
+- **新增本地上传更新包** `POST /api/panel/update/upload`（multipart，`.tar.gz`，上限 256MB）：
+  在线更新只认 GitHub Release 资产，自己构建的版本（改了代码没发版）永远进不去，
+  只能手工 scp + `systemctl restart`。现在「改代码 → 打包 → 面板里上传 → 确认重启」闭环
+  - 落盘/解包/校验/备份/覆盖/回滚与在线更新**共用** `applyPanelArchive`，两条路径不会漂
+  - 前端「面板更新」浮窗新增「上传面板包更新…」
+- **补齐回滚入口**：`POST /api/panel/update/rollback` 一直存在却没有 UI ——
+  自更新系统不给退路很危险（新版本起不来只能 ssh 手工救）。浮窗新增「回滚到上一版本」，
+  两次点击确认
+- **修复"待重启"永久残留**：之前只有走 `handlePanelUpdateRestart` 才会清 `pending_restart`，
+  外部 `systemctl restart` / 掉电重启后会永远提示"待重启"。现在启动时比对
+  `Applied` 与当前版本，一致即自动清除
+- **包结构错误提示**改清楚：缺 VERSION 时直接说明期望结构
+  `<顶层目录>/{raincough, VERSION, public/}`（解包会去掉第一层目录），
+  而不是让人对着"缺少 VERSION"去翻源码
+
+### 插件市场免口令
+
+- **插件市场不再需要口令**：口令闸门改为**默认关闭**，只有显式
+  `RC_STORE_GATE=on` + `RC_STORE_GATE_HASH=...` 才启用
+  - 删掉二进制里写死的口令哈希 —— 写死的口令等于"所有人都拿得到密文、只有主人
+    不知道明文"，忘掉就只能重编译（本次就是这么卡住的）
+  - 口令哈希改由环境变量提供，`raincough -hash-password` 生成
+  - 开启但没给哈希时**降级为不锁 + 日志写明原因**，不再 `Fatalf` 让面板起不来：
+    悄悄启动一个以为锁着其实没锁的闸门，比直接不锁更危险
+  - 删掉注释里那条从未实现的 `-store-gate-reset` 指令（全仓只有注释提到它，
+    按它操作会得到"命令不存在"）
+- **新增插件环境声明**：`plugin.json` 可选 `environment` 块（`level` / `check[]` / `apply[]`），
+  让插件能说明自己需要什么：Python 包、系统包、外部客户端、systemd 服务、端口
+- **新增只读接口** `GET /api/plugins/{name}/environment`：逐项探测并返回结构化报告
+  （`ready` / `pending` / `items`），可反复调用、无副作用
+- **检查项两种形态**：`run`（shell 命令，cwd=插件目录）与 `type:"port"`（结构化端口检查）。
+  端口不交给作者写 shell：`ss` 输出解析、非 root 看不到别人 PID、以及
+  **"升级时自己占着端口不能算冲突"**，每条都足以让手写版本出错
+- **端口归属判定**：先比 `systemctl show -p MainPID`，再比本插件进程 PID，
+  都对不上才算冲突（判定顺序对齐 install.sh 的 `port_holder_is_us()`）
+- **旧式 `requirements` 仍只检查不安装**：翻译成 import 探测项，`fix` 标 `manual`
+  ——没有对应 `apply` 步骤就不能显示成"可一键修复"，否则按钮点了没反应
+- **清单非法不影响安装**：`environment` 解析失败只丢弃该块并在 `warn` 里说明，
+  不阻断插件安装（环境是增强，不该把能用的插件卡死）
+- **超时真的会生效**：`exec.CommandContext` 只杀 `sh`，孙进程仍持有管道会让 `Wait`
+  一直等，实测 `sleep 5` + `timeout 1` 会跑满 5 秒；加 `WaitDelay` 后 1.5 秒返回
+- 前端：「插件」页已安装列表新增「环境」按钮，行内展开环境报告（P0 只读，无修复按钮）
+- 面板版本号不变
+
+## v1.0.0-beta.2 — 侧栏收起与悬浮球
+- **侧栏可收起**：`Sidebar.vue` 顶部加 `≡` 按钮；`App.vue` 按 `sidebarHidden` 条件渲染；
+  状态存 `localStorage['rc_sidebar_hidden']`，刷新后保持；「设置」页有「显示侧栏」开关
+- **新增悬浮球** `PanelBall.vue`（236 行）：侧栏收起后用它把侧栏叫回来
+  - 可拖动，位置 `clamp` 在视口内并记忆；右键菜单换黑/白底色
+  - 可上传自定义图标（base64 存 localStorage，>1MB 拒绝，避免撑爆存储）
+  - 「设置」页有「显示悬浮球」「球归位」
+- **版本号** `1.0.0-beta` → `1.0.0-beta.2`：`VERSION`、`internal/config/config.go` 的 `Version`、
+  `web/package.json` 三处同步
+- 新增探针 `tools/panel-ball-probe.mjs`（校验侧栏收起与悬浮球）
+
 ## v1.0.0-beta — 安装器与文档收口
 - **install.sh 第 2 步要 root 密码**：输入 `yes` 后明确询问一次，用 `sudo -A` + 0600
   askpass 助手完成后续全部特权操作；密码只存内存与临时文件，退出即删，输错重试 3 次

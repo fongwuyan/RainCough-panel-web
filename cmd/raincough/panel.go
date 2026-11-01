@@ -2,13 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -456,6 +459,26 @@ func (s *server) readUpdateState() updateState {
 	return st
 }
 
+// reconcileUpdateState 启动时校正"待重启"标记。
+//
+// 已经跑在 Applied 版本上 = 重启已经完成（不管是用户点「立即重启」、外部
+// systemctl restart，还是掉电重启）。此时 pending 必须清掉，
+// 否则前端会永远提示"待重启，请立即重启"，而用户重启多少次都不消失 ——
+// 只有走一次 handlePanelUpdateRestart 才会被清。
+func (s *server) reconcileUpdateState() {
+	st := s.readUpdateState()
+	if !st.Pending || st.Applied == "" {
+		return
+	}
+	cur := s.panelVersion()
+	if cur != st.Applied {
+		return
+	}
+	st.Pending = false
+	s.writeUpdateState(st)
+	log.Printf("[panel] 已运行在 v%s，清除待重启标记(重启已完成)", cur)
+}
+
 // handlePanelUpdateState GET /api/panel/update/state -> 是否已应用待重启
 func (s *server) handlePanelUpdateState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -495,7 +518,6 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "已有面板更新任务进行中"})
 		return
 	}
-	base := s.cfg.BaseDir
 	repo := globalStore.GetConfig().PanelRepo
 	go func() {
 		defer func() { <-panelUpdMu }()
@@ -547,9 +569,7 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 		globalTasks.Update(tid, "下载", 45, "已下载 "+assetName+" ("+via+")")
 		ud := s.updateDir()
 		dl := filepath.Join(ud, "dl")
-		stage := filepath.Join(ud, "stage")
 		_ = os.RemoveAll(dl)
-		_ = os.RemoveAll(stage)
 		if err := os.MkdirAll(dl, 0o755); err != nil {
 			fail("准备目录失败: " + err.Error())
 			return
@@ -559,66 +579,240 @@ func (s *server) handlePanelUpdateApply(w http.ResponseWriter, r *http.Request) 
 			fail("写入资产失败: " + err.Error())
 			return
 		}
-		if err := os.MkdirAll(stage, 0o755); err != nil {
-			fail("准备 stage 失败: " + err.Error())
-			return
-		}
 
-		// 3) 解包
-		globalTasks.Update(tid, "解包", 60, "解包到 stage")
-		if err := extractTarGzStrip(zf, stage); err != nil {
-			fail("解包失败: " + err.Error())
+		// 3) 应用(解包 → 校验 → 备份 → 覆盖)
+		//    与"上传更新包"(handlePanelUpdateUpload)共用同一实现 ——
+		//    备份/校验是安全关键路径, 两处各写一份迟早会漂。
+		applied, _, aerr := s.applyPanelArchive(zf, target, "apply",
+			func(phase string, pct int, msg string) { globalTasks.Update(tid, phase, pct, msg) })
+		if aerr != nil {
+			fail(aerr.Error())
 			return
 		}
-
-		// 4) 校验 stage(不动现网)
-		globalTasks.Update(tid, "校验", 75, "校验新版本文件")
-		if v, err := os.ReadFile(filepath.Join(stage, "VERSION")); err != nil || strings.TrimSpace(string(v)) != target {
-			fail("校验失败: VERSION 不匹配(期望 " + target + ")")
-			return
-		}
-		if st, err := os.Stat(filepath.Join(stage, "raincough")); err != nil || st.Size() < 1<<20 {
-			fail("校验失败: 二进制缺失或异常")
-			return
-		}
-		if _, err := os.Stat(filepath.Join(stage, "public", "index.html")); err != nil {
-			fail("校验失败: 前端产物缺失")
-			return
-		}
-		// 打包可能丢执行位(Windows 侧打 tar), 补回; 否则覆盖后重启起不来
-		_ = os.Chmod(filepath.Join(stage, "raincough"), 0o755)
-
-		// 5) 备份现网(保留最近 3 份)
-		globalTasks.Update(tid, "备份", 85, "备份当前版本")
-		cur := s.panelVersion()
-		bk := filepath.Join(ud, fmt.Sprintf("backup-%s-%d", cur, time.Now().Unix()))
-		if err := os.MkdirAll(bk, 0o755); err != nil {
-			fail("备份目录创建失败: " + err.Error())
-			return
-		}
-		_ = copyFileInto(filepath.Join(base, "raincough"), filepath.Join(bk, "raincough"), 0o755)
-		_ = copyFileInto(filepath.Join(base, "VERSION"), filepath.Join(bk, "VERSION"), 0o644)
-		_ = copyDir(filepath.Join(base, "public"), filepath.Join(bk, "public"))
-		if _, err := os.Stat(filepath.Join(bk, "raincough")); err != nil {
-			fail("备份失败: 未取到当前二进制")
-			return
-		}
-
-		// 6) 覆盖(运行中的进程不受影响, 不重启)
-		globalTasks.Update(tid, "应用", 95, "覆盖面板文件(不重启)")
-		if out, err := copyTreeInto(stage, base); err != nil {
-			fail("应用失败: " + out)
-			return
-		}
-		_ = os.Chmod(filepath.Join(base, "raincough"), 0o755)
-		pruneStaleAssets(filepath.Join(base, "public"))
-		s.writeUpdateState(updateState{Applied: target, Pending: true, Backup: bk, At: time.Now().Unix()})
-		s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: cur, To: target, Action: "apply", Result: "ok", Message: "已应用, 待确认重启", Backup: bk})
-		pruneBackups(ud, 3)
 		done = true
-		globalTasks.Finish(tid, true, "已应用 v"+target+", 待确认重启", "", 100)
+		globalTasks.Finish(tid, true, "已应用 v"+applied+", 待确认重启", "", 100)
 	}()
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "queued", "version": want})
+}
+
+// applyPanelArchive 把已下载到本地的面板包应用上去(解包 → 校验 → 备份 → 覆盖), 不重启。
+//
+// via:  "apply"(在线 Release) / "upload"(本地上传包)，只用于审计历史里的来源标记。
+// want: 期望版本；空串表示只校验包内 VERSION 非空(本地包不知道应该是哪个版本)。
+// prog: 进度回调(阶段, 百分比, 说明)，可传 nil。
+//
+// ★ 顺序是有讲究的: 先 stage → 再校验 → 校验通过才备份 → 备份成功才覆盖。
+//
+//	任何一步失败都不动现网 —— 绝不能出现"新版本没上去、旧版本也没了"。
+func (s *server) applyPanelArchive(zf, want, via string, prog func(string, int, string)) (string, string, error) {
+	if s.cfg == nil || s.cfg.BaseDir == "" {
+		return "", "", errors.New("面板根目录未配置")
+	}
+	base := s.cfg.BaseDir
+	ud := s.updateDir()
+	if ud == "" {
+		return "", "", errors.New("更新目录不可用")
+	}
+	report := func(phase string, pct int, msg string) {
+		if prog != nil {
+			prog(phase, pct, msg)
+		}
+	}
+
+	stage := filepath.Join(ud, "stage")
+	_ = os.RemoveAll(stage)
+	if err := os.MkdirAll(stage, 0o755); err != nil {
+		return "", "", fmt.Errorf("准备 stage 失败: %w", err)
+	}
+
+	report("解包", 60, "解包到 stage")
+	if err := extractTarGzStrip(zf, stage); err != nil {
+		return "", "", fmt.Errorf("解包失败: %w", err)
+	}
+
+	report("校验", 75, "校验新版本文件")
+	verRaw, err := os.ReadFile(filepath.Join(stage, "VERSION"))
+	if err != nil {
+		// 最常见的错是包结构不对(扁平包 / 少了顶层目录)。直接说清期望结构,
+		// 否则运维只会看到"缺少 VERSION"去翻代码。
+		return "", "", errors.New("校验失败: 包内缺少 VERSION —— " +
+			"包结构应为 <顶层目录>/{raincough, VERSION, public/}(解包时会去掉第一层目录)")
+	}
+	ver := strings.TrimSpace(string(verRaw))
+	if ver == "" {
+		return "", "", errors.New("校验失败: 包内 VERSION 为空")
+	}
+	if want != "" && ver != want {
+		return "", "", fmt.Errorf("校验失败: VERSION 不匹配(期望 %s, 实际 %s)", want, ver)
+	}
+	if st, err := os.Stat(filepath.Join(stage, "raincough")); err != nil || st.Size() < 1<<20 {
+		return "", "", errors.New("校验失败: 二进制缺失或异常")
+	}
+	if _, err := os.Stat(filepath.Join(stage, "public", "index.html")); err != nil {
+		return "", "", errors.New("校验失败: 前端产物缺失")
+	}
+	// 打包可能丢执行位(Windows 侧打 tar), 补回; 否则覆盖后重启起不来
+	_ = os.Chmod(filepath.Join(stage, "raincough"), 0o755)
+
+	report("备份", 85, "备份当前版本")
+	cur := s.panelVersion()
+	bk := filepath.Join(ud, fmt.Sprintf("backup-%s-%d", cur, time.Now().Unix()))
+	if err := os.MkdirAll(bk, 0o755); err != nil {
+		return "", "", fmt.Errorf("备份目录创建失败: %w", err)
+	}
+	_ = copyFileInto(filepath.Join(base, "raincough"), filepath.Join(bk, "raincough"), 0o755)
+	_ = copyFileInto(filepath.Join(base, "VERSION"), filepath.Join(bk, "VERSION"), 0o644)
+	_ = copyDir(filepath.Join(base, "public"), filepath.Join(bk, "public"))
+	if _, err := os.Stat(filepath.Join(bk, "raincough")); err != nil {
+		return "", "", errors.New("备份失败: 未取到当前二进制")
+	}
+
+	// 覆盖(运行中的进程不受影响, 不重启)
+	report("应用", 95, "覆盖面板文件(不重启)")
+	if out, err := copyTreeInto(stage, base); err != nil {
+		return "", "", fmt.Errorf("应用失败: %s", out)
+	}
+	_ = os.Chmod(filepath.Join(base, "raincough"), 0o755)
+	pruneStaleAssets(filepath.Join(base, "public"))
+	alignOwnership(base, "raincough", "public")
+	s.writeUpdateState(updateState{Applied: ver, Pending: true, Backup: bk, At: time.Now().Unix()})
+	note := "已应用, 待确认重启"
+	if via == "upload" {
+		note = "已应用上传包, 待确认重启"
+	}
+	s.appendHistory(panelHistoryEntry{At: time.Now().Unix(), From: cur, To: ver, Action: via, Result: "ok", Message: note, Backup: bk})
+	pruneBackups(ud, 3)
+	return ver, bk, nil
+}
+
+// alignOwnership 把刚解出来的文件属主对齐到面板根目录。
+//
+// 为什么需要: tar 会原样保留打包机的 uid/gid。在 Windows 上打的包带到 Linux
+// 解压, 落出来就是 197609:197121 这种本机不存在的属主(root 解包时不会自动纠正)。
+// 结果是 public/ 属于一个幽灵用户 —— 现在不影响读, 但换成非 root 运行就写不进去。
+//
+// 用 --reference 指向 BaseDir 而不是写死 root: 面板以什么身份装的就该以什么身份持有。
+func alignOwnership(base string, names ...string) {
+	if runtime.GOOS != "linux" || base == "" {
+		return
+	}
+	for _, n := range names {
+		p := filepath.Join(base, n)
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if err := exec.Command("chown", "-R", "--reference="+base, p).Run(); err != nil {
+			log.Printf("[panel] 属主对齐失败(%s): %v —— 不影响当前运行", p, err)
+		}
+	}
+}
+
+// handlePanelUpdateUpload POST /api/panel/update/upload
+//
+// 本地上传面板包(.tar.gz) —— 不依赖 GitHub Release。
+//
+// 为什么需要: 在线更新只认 GitHub 上的 Release 资产。自己构建的版本(改了代码但没发版)
+// 永远进不去, 只能手工 scp 二进制 + systemctl restart。这条通道把
+// "改代码 → 打包 → 上传 → 确认重启" 收进面板, 且落盘/校验/备份/回滚与在线更新完全共用。
+//
+// form-data: file = raincough-linux-x86_64-<版本>.tar.gz(内含 raincough / VERSION / public/)
+func (s *server) handlePanelUpdateUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	if globalTasks == nil || s.cfg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "环境未就绪"})
+		return
+	}
+
+	const maxPack = 256 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxPack+(1<<20))
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error": "上传解析失败(需 multipart/form-data, 字段名 file, 上限 256MB)",
+		})
+		return
+	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+
+	part, hdr, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "缺少 file 字段(面板包)"})
+		return
+	}
+	defer part.Close()
+
+	filename := filepath.Base(strings.ReplaceAll(strings.TrimSpace(hdr.Filename), `\`, "/"))
+	lower := strings.ToLower(filename)
+	if !strings.HasSuffix(lower, ".tar.gz") && !strings.HasSuffix(lower, ".tgz") {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "只支持 .tar.gz / .tgz"})
+		return
+	}
+
+	select {
+	case panelUpdMu <- struct{}{}:
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "已有面板更新任务进行中"})
+		return
+	}
+
+	ud := s.updateDir()
+	dl := filepath.Join(ud, "dl")
+	_ = os.RemoveAll(dl)
+	if err := os.MkdirAll(dl, 0o755); err != nil {
+		<-panelUpdMu
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "准备目录失败: " + err.Error()})
+		return
+	}
+	zf := filepath.Join(dl, filename)
+	out, cerr := os.Create(zf)
+	if cerr != nil {
+		<-panelUpdMu
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "创建文件失败: " + cerr.Error()})
+		return
+	}
+	n, cpErr := io.Copy(out, part)
+	if e := out.Close(); e != nil && cpErr == nil {
+		cpErr = e
+	}
+	if cpErr != nil {
+		<-panelUpdMu
+		_ = os.Remove(zf)
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "接收文件失败: " + cpErr.Error()})
+		return
+	}
+	if n < 1<<20 {
+		<-panelUpdMu
+		_ = os.Remove(zf)
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "包过小, 不像是面板包(至少 1MB)"})
+		return
+	}
+
+	go func() {
+		defer func() { <-panelUpdMu }()
+		tid := globalTasks.Begin("panel", "面板上传更新 "+filename, "update", nil)
+		done := false
+		defer func() {
+			if !done {
+				globalTasks.Finish(tid, false, "", "上传包应用失败", 0)
+			}
+		}()
+		applied, _, aerr := s.applyPanelArchive(zf, "", "upload",
+			func(phase string, pct int, msg string) { globalTasks.Update(tid, phase, pct, msg) })
+		if aerr != nil {
+			globalTasks.Update(tid, "", 0, aerr.Error())
+			return
+		}
+		done = true
+		globalTasks.Finish(tid, true, "已应用上传包 v"+applied+", 待确认重启", "", 100)
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "queued", "file": filename, "bytes": n})
 }
 
 // handlePanelUpdateRestart POST /api/panel/update/restart

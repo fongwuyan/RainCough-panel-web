@@ -61,7 +61,7 @@ func main() {
 	// ---- 离线 CLI: 旧库迁移(不启动服务) ----
 	if *migrateDB != "" {
 		// KV 目录: 与 ResolveDSN 的解析保持一致(<data>/kv)
-		dstDir := filepath.Join(cfg.DataDir, "kv")
+		dstDir := filepath.Join(dataDirForCLI(cfg), "kv")
 		var also []string
 		for _, s := range strings.Split(*migrateAlso, ",") {
 			if s = strings.TrimSpace(s); s != "" {
@@ -80,6 +80,10 @@ func main() {
 	}
 
 	// ---- 离线 CLI: 密码管理(不启动服务) ----
+	// 注意: config.Load() 的 BaseDir 取的是【当前目录】, 服务由 systemd 设了
+	// WorkingDirectory 所以正确; 但手工跑 CLI 时 cwd 可能是 ~ 或 /, 会写到
+	// /root/data、/home/f/data 这种地方 —— 面板启动时根本不读它, 表现为
+	// "我明明改了密码, 怎么还是旧的"。所以 CLI 一律走 dataDirForCLI()。
 	if *verifyHash != "" {
 		pw, err := readPasswordLine()
 		if err != nil {
@@ -109,10 +113,11 @@ func main() {
 		if err != nil {
 			log.Fatalf("读取密码失败: %v", err)
 		}
-		if err := auth.SetPassword(cfg.DataDir, pw); err != nil {
+		dir := dataDirForCLI(cfg)
+		if err := auth.SetPassword(dir, pw); err != nil {
 			log.Fatalf("设置密码失败: %v", err)
 		}
-		fmt.Printf("已更新面板密码: %s (mode 0600)\n", auth.PasswordPath(cfg.DataDir))
+		fmt.Printf("已更新面板密码: %s (mode 0600)\n", auth.PasswordPath(dir))
 		fmt.Println("重启服务后生效: systemctl restart raincough.service")
 		return
 	}
@@ -209,17 +214,39 @@ func main() {
 		}
 	})
 
-	// 插件库口令闸门: 插件库改为公开仓库后, 用写死口令保护插件内容
-	// (RC_STORE_GATE=off 可关闭; 详见 internal/auth/gate.go 的能力边界说明)
-	if !auth.IsStoreGateOff() {
+	// 移动端 REST 访问密钥: /<插件名>/api/... 这条前缀通道不走登录中间件,
+	// 此前是裸奔的。现在一律要求密钥(App 携带), 密钥存 KV、可在设置里重置。
+	if auth.RESTKeyRequired() {
+		k, err := auth.LoadAPIKey(storeNS)
+		if err != nil {
+			// 与闸门同样的取舍: 不为一个密钥让面板起不来。但通道要默认拒绝,
+			// 不能因为生成失败就悄悄放行。
+			log.Printf("[restkey] 访问密钥初始化失败, 插件前缀通道将拒绝所有请求: %v", err)
+		} else {
+			globalAPIKey = k
+			log.Printf("[restkey] 移动端访问密钥已启用(设置页可查看/重置)")
+		}
+	} else {
+		log.Printf("[restkey] 警告: 访问密钥校验已关闭(RC_REST_KEY=off), 插件数据对局域网开放")
+	}
+
+	// 插件库口令闸门: 默认不启用 —— 不设环境变量时市场无需口令。
+	// 需要挡插件内容的部署显式开启:
+	//   Environment=RC_STORE_GATE=on
+	//   Environment=RC_STORE_GATE_HASH=$6$...   (raincough -hash-password 生成)
+	if auth.GateEnabled() {
 		g, err := auth.NewStoreGate(storeNS)
 		if err != nil {
-			log.Fatalf("插件库闸门初始化失败: %v", err)
+			// 不 Fatalf: 配置写错不该让整个面板起不来。降级为"不锁"并大声提示,
+			// 运维在 journal 里一眼能看到; 悄悄启动一个以为锁着其实没锁的闸门
+			// 比直接不锁更危险。
+			log.Printf("[gate] 闸门未启用: %v", err)
+		} else {
+			globalGate = g
+			log.Printf("[gate] 插件库已上锁: 拉取清单/安装/更新需口令")
 		}
-		globalGate = g
-		log.Printf("[gate] 插件库已上锁: 拉取清单/安装/更新需口令(rc_store_gate cookie 30 天)")
 	} else {
-		log.Printf("[gate] 插件库闸门已关闭(RC_STORE_GATE=off)")
+		log.Printf("[gate] 插件库闸门未启用(默认): 市场无需口令")
 	}
 
 	// 插件 supervisor(接管所有 v4 后端进程: fork/exec + backoff + 日志)
@@ -258,6 +285,9 @@ func main() {
 	globalWSH.Start(sysMon)
 
 	s := &server{cfg: cfg, sd: sd, sup: globalSUP}
+	// 上次更新已应用且当前就跑在那个版本上 → 重启已生效, 清掉"待重启"标记。
+	// 不做这件事的话, 外部 systemctl restart / 掉电重启后前端会永远提示"待重启"。
+	s.reconcileUpdateState()
 	mux := http.NewServeMux()
 
 	// 鉴权: 除登录接口外的所有 /api/ 路由要求 session
@@ -358,10 +388,12 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	// ---- 面板版本与更新(常驻浮窗) ----
 	mux.HandleFunc("/api/panel/version", s.handlePanelVersion)
+	mux.HandleFunc("/api/panel/restkey", s.handleRESTKey) // 移动端访问密钥(查看/重置)
 	mux.HandleFunc("/api/panel/install-command", s.handlePanelInstallCommand)
 	mux.HandleFunc("/api/panel/update/check", s.handlePanelUpdateCheck)
 	mux.HandleFunc("/api/panel/update/state", s.handlePanelUpdateState)
 	mux.HandleFunc("/api/panel/update/apply", s.handlePanelUpdateApply)
+	mux.HandleFunc("/api/panel/update/upload", s.handlePanelUpdateUpload) // 本地上传面板包(不走 GitHub Release)
 	mux.HandleFunc("/api/panel/update/restart", s.handlePanelUpdateRestart)
 	mux.HandleFunc("/api/panel/update/log", s.handlePanelUpdateLog)
 	mux.HandleFunc("/api/panel/update/rollback", s.handlePanelUpdateRollback)
@@ -420,6 +452,18 @@ func (s *server) rewritePluginPrefix(w http.ResponseWriter, r *http.Request) boo
 	name := globalPX.ResolveName(seg)
 	if name == "" {
 		return false // 不是插件名 → 交给静态/SPA
+	}
+
+	// ★ 访问密钥: 前缀通道绕开了登录中间件, 这里是唯一的关卡。
+	//   不开这个口子的话, 局域网内知道地址就能把插件数据全拉走。
+	if auth.RESTKeyRequired() {
+		if globalAPIKey == nil || !globalAPIKey.Check(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
+				"error": "缺少或错误的访问密钥",
+				"hint":  "面板「设置 → 移动端访问」里查看密钥；App 里填同一个值(请求头 " + auth.RESTKeyHeader + " 或 ?" + auth.RESTKeyQuery + "=)",
+			})
+			return true
+		}
 	}
 	// 还原成面板标准路径并就地分发(不改 http.Request 的不可变字段之外的东西,
 	// 直接调目标 handler 更省事; URL.Path 需要临时改写以便各 handler 解析)
@@ -529,6 +573,18 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"message": "已移除插件目录: " + name})
+
+	case r.Method == http.MethodGet && sub == "environment":
+		// 环境检查(只读): 读 plugin.json 的 environment 块并逐项探测。
+		// 放在 REST 桥之后、其他子路径之前 —— 未注册插件也能查,
+		// 因为"插件起不来的时候"正是最需要看环境报告的时候。
+		s.handlePluginEnvReport(w, r, name)
+
+	case r.Method == http.MethodPost && sub == "environment/apply":
+		// 环境准备(写操作): 执行清单里声明的 apply[] 步骤。
+		// 与只读检查分开成两个端点, 是为了让"会不会改系统"这件事
+		// 在路由层就一目了然 —— 审这个接口的人不用翻到函数体里才知道。
+		s.handlePluginEnvApply(w, r, name)
 
 	case sub == "invoke" && r.Method == http.MethodPost:
 		globalPX.HandlePluginsInvoke(w, r)
@@ -658,6 +714,37 @@ func printMigrateReport(rep *legacy.Report) {
 
 // readPasswordLine 从 stdin 读一行密码(去尾部换行); 空则报错。
 // 供 -set-password / -hash-password 使用(install.sh 通过管道传入, 避免密码出现在进程参数里)。
+// dataDirForCLI 解析离线 CLI 应该写入的数据目录。
+//
+// 服务进程的 DataDir = <cwd>/data, 靠 systemd 的 WorkingDirectory 指到安装目录。
+// 手工跑 CLI 时没有这层保证: 在 ~ 下执行会写到 ~/data, 面板永远读不到 ——
+// 表现是"改了密码但没生效"。这里按以下顺序判定:
+//  1. RC_DATA_DIR 显式指定 → 直接用它
+//  2. cwd/data 已存在 → 说明就在安装目录里跑的, 用它
+//  3. 否则退到可执行文件所在目录的 data(安装布局: <dir>/raincough + <dir>/data)
+//
+// 同时打印实际落点, 免得改了半天改到别处去。
+func dataDirForCLI(cfg *config.Config) string {
+	if os.Getenv("RC_DATA_DIR") != "" {
+		return cfg.DataDir
+	}
+	if st, err := os.Stat(cfg.DataDir); err == nil && st.IsDir() {
+		return cfg.DataDir
+	}
+	if exe, err := os.Executable(); err == nil {
+		if real, err2 := filepath.EvalSymlinks(exe); err2 == nil {
+			exe = real
+		}
+		alt := filepath.Join(filepath.Dir(exe), "data")
+		if st, err := os.Stat(filepath.Dir(exe)); err == nil && st.IsDir() {
+			fmt.Fprintf(os.Stderr,
+				"[cli] 当前目录 %s 下没有 data/, 改用安装目录: %s\n", cfg.BaseDir, alt)
+			return alt
+		}
+	}
+	return cfg.DataDir
+}
+
 func readPasswordLine() (string, error) {
 	r := bufio.NewReader(os.Stdin)
 	line, err := r.ReadString('\n')

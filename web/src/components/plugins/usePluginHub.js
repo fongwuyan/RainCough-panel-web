@@ -333,6 +333,56 @@ export function usePluginHub() {
     }
   }
 
+  // ---- 环境检查(只读) ----
+  // 按需加载: 只有用户展开某个插件的环境面板才去查。
+  // 不放进 refreshAll —— 检查会真的执行 shell 命令, 列表刷一次就全查一遍太浪费。
+  const envMap = ref({}) // name -> { report, loading, error }
+  const envOpen = ref('') // 当前展开环境面板的插件名, '' = 都没展开
+
+  async function loadEnv(name) {
+    if (!name) return
+    const prev = envMap.value[name]
+    envMap.value[name] = { report: prev ? prev.report : null, loading: true, error: '' }
+    try {
+      const rep = await api.pluginEnv(name)
+      envMap.value[name] = { report: rep, loading: false, error: '' }
+    } catch (e) {
+      envMap.value[name] = {
+        report: prev ? prev.report : null,
+        loading: false,
+        error: (e && e.message) || '环境检查失败',
+      }
+    }
+  }
+
+  async function toggleEnv(name) {
+    if (envOpen.value === name) {
+      envOpen.value = ''
+      return
+    }
+    envOpen.value = name
+    // 已查过就不重复查(用户想刷新时会点面板里的「重新检查」)
+    if (!envMap.value[name] || envMap.value[name].error) await loadEnv(name)
+  }
+
+  // invalidateEnv 让某个插件的环境缓存失效。
+  //
+  // 场景: 用户在安装浮窗里修好了环境, 但插件列表里那份报告还是旧的 ——
+  // 徽标会一直显示"缺 N 项"。这里把缓存清掉, 下次展开时重新查。
+  function invalidateEnv(name) {
+    if (!name) return
+    envMap.value[name] = { report: null, loading: false, error: '' }
+  }
+
+  // envBadge: ready | pending | manual | null(还没查过)
+  function envBadge(name) {
+    const e = envMap.value[name]
+    if (!e || !e.report) return null
+    if (e.report.ready) return 'ready'
+    const items = e.report.items || []
+    return items.some((i) => i.fix === 'manual') ? 'manual' : 'pending'
+  }
+
   onMounted(() => {
     loadGate()
     loadRuntime() // 先拉运行时能力, incompatible() 才有依据
@@ -358,5 +408,6 @@ export function usePluginHub() {
     refresh, refreshAll, loadMarket, loadGate, unlock, lockGate,
     openUpload, closeUpload, installFromFile, pickExtOk,
     install, update, remove,
+    envMap, envOpen, loadEnv, toggleEnv, envBadge, invalidateEnv,
   }
 }

@@ -73,6 +73,11 @@ export const api = {
   },
   authLogin: (password) => req('POST', '/api/auth/login', { password }),
   authLogout: () => req('POST', '/api/auth/logout', {}),
+  // 登录策略: 是否允许用系统(SSH)密码登录(设置页开关)
+  authLoginPolicy: () => req('GET', '/api/auth/login-policy'),
+  authSetLoginPolicy: (allow) => req('POST', '/api/auth/login-policy', { allow_ssh_password: !!allow }),
+  // 设置页改面板密码(至少 8 位; 其它设备的会话会被注销)
+  authSetPassword: (pw) => req('POST', '/api/auth/password', { new_password: pw }),
 
   // ---- 插件 ----
   listPlugins: () => req('GET', '/api/plugins'),
@@ -83,28 +88,25 @@ export const api = {
   sysInfo: () => req('GET', '/api/system'),
   sysGpus: () => req('GET', '/api/system/gpus'),
   disks: () => req('GET', '/api/disks'),
-  diskUnmount: (device) => req('POST', '/api/disks/unmount', { device }),
-  netStatus: () => req('GET', '/api/net/status'),
   wsHistory: (points) => req('GET', '/api/workspace/history?points=' + (points || 600)),
 
   // ---- 接口库 / 服务健康 ----
-  ifaces: (params) => {
-    const q = new URLSearchParams()
-    for (const k in params || {}) if (params[k]) q.set(k, params[k])
-    return req('GET', '/api/interfaces?' + q.toString())
-  },
-  ifaceDetail: (id) => req('GET', '/api/interfaces/' + encodeURIComponent(id)),
-  ifaceInvoke: (id, params, timeoutMs) => req('POST', `/api/interfaces/${encodeURIComponent(id)}/invoke`, { params, timeout_ms: timeoutMs }),
-  ifacesSummary: () => req('GET', '/api/interfaces/stats/summary'),
   servicesHealth: () => req('GET', '/api/services/health'),
-  servicesHealthLog: (name, lines, grep) => {
-    let u = '/api/services/health/log?name=' + encodeURIComponent(name) + '&lines=' + (lines || 200)
+  // 接口调用统计(工作台「接口库」卡片用, 5s 轮询)
+  ifacesSummary: () => req('GET', '/api/interfaces/stats/summary'),
+  serviceList: () => req('GET', '/api/services/list'),
+  // ★ 旧签名是 (unit, action) 并下发 {unit, action} —— 那是 v3 的 systemd 单元模型
+  //   (unit=plugin-XXX.service)。v4 由 supervisor 管进程, 后端只认 {name, action},
+  //   按 unit 传会解析出空名 → 400。前端此前没有任何调用方, 所以一直没暴露。
+  serviceAction: (name, action) => req('POST', '/api/services/action', { name, action }),
+  // 开机自启开关。后端用指针接收 on, 缺字段会明确 400 而不是静默当 false
+  serviceAutostart: (name, on) => req('POST', '/api/services/autostart', { name, on }),
+  // 插件运行时日志(读 supervisor 的 .runtime.log, 进程死了也能看)
+  serviceLog: (name, lines, grep) => {
+    let u = '/api/services/log?name=' + encodeURIComponent(name) + '&lines=' + (lines || 200)
     if (grep) u += '&grep=' + encodeURIComponent(grep)
     return req('GET', u)
   },
-  // 插件服务列表/操作(运行时由 Go 自管, 不再经 systemd)
-  serviceList: () => req('GET', '/api/services/list'),
-  serviceAction: (unit, action) => req('POST', '/api/services/action', { unit, action }),
 
   // ---- 文件管理 ----
   fmList: (path) => req('GET', `/api/fm/list?path=${encodeURIComponent(path || '/')}`),
@@ -166,17 +168,14 @@ export const api = {
   },
   fmMkdir: (path) => req('POST', '/api/fm/mkdir', { path }),
   fmRename: (path, newName) => req('POST', '/api/fm/rename', { path, new_name: newName }),
-  fmDelete: (paths) => req('POST', '/api/fm/delete', { paths }),
   fmHash: (path, algo) => req('GET', `/api/fm/hash?path=${encodeURIComponent(path)}&algo=${algo}`),
   fmUnzip: (archive, dest, password) => req('POST', '/api/fm/unzip', { archive, dest, password }),
-  fmRead: (path, limit, offset) => req('GET', `/api/fm/read?path=${encodeURIComponent(path)}&limit=${limit || 5242880}&offset=${offset || 0}`),
   fmSave: (path, content, encoding) => req('POST', '/api/fm/save', { path, content, encoding: encoding || 'utf-8' }),
   fmSize: (paths) => req('POST', '/api/fm/size', { paths }),
   fmOpsStart: (op, paths, opts = {}) => req('POST', '/api/fm/ops', { op, paths, ...opts }),
   fmOpsList: () => req('GET', '/api/fm/ops'),
   fmOpsCancel: (id) => req('POST', `/api/fm/ops/${id}/cancel`),
   fmOpsRemove: (id) => req('DELETE', `/api/fm/ops/${id}`),
-  fmOpsDownload: (id) => `/api/fm/ops/${id}/download`,
   fmPreview: (path) => req('GET', `/api/fm/preview?path=${encodeURIComponent(path)}`),
   fmSearch: (params) => {
     const qs = new URLSearchParams()
@@ -196,7 +195,6 @@ export const api = {
   tmHostUpdate: (h) => req('PUT', '/api/terminal/hosts', h),
   tmHostDelete: (host) => req('DELETE', `/api/terminal/hosts?host=${encodeURIComponent(host)}`),
   // 后端 /hosts/set_sort 读 {hosts:[...]} 数组(原 sort_list 键名+形状双错 → 恒 400)
-  tmHostSort: (hosts) => req('POST', '/api/terminal/hosts/set_sort', { hosts }),
   tmCommandsList: () => req('GET', '/api/terminal/commands'),
   tmCommandCreate: (c) => req('POST', '/api/terminal/commands', c),
   tmCommandUpdate: (c) => req('PUT', '/api/terminal/commands', c),
@@ -221,22 +219,29 @@ export const api = {
   storeRegistry: () => req('GET', '/api/store/registry'),
   // 运行时能力: 支持哪些插件语言、各解释器是否就绪(前端判断"不兼容"的依据)
   pluginsRuntime: () => req('GET', '/api/plugins/runtime'),
+  // 插件环境检查(只读): 读 plugin.json 的 environment 块并逐项探测。
+  // 可反复调用, 有耗时(会执行检查命令), 别放进列表接口或定时轮询里。
+  pluginEnv: (name) => req('GET', `/api/plugins/${encodeURIComponent(name)}/environment`),
+  // steps 只传步骤 id, 不传命令 —— 命令由后端从插件清单里取,
+  // 前端永远碰不到"让面板执行任意 shell"这条路。
+  pluginEnvApply: (name, steps) => req('POST', `/api/plugins/${encodeURIComponent(name)}/environment/apply`,
+                                       { steps: steps || [], confirm: true }),
   // 面板内直接安装: 上传本地插件包(zip/tar.gz), 与"从仓库安装"是两套逻辑
   storePluginUpload: (fd, onProgress) => reqUpload('/api/store/plugin/upload', fd, onProgress),
   storePluginInstall: (name) => req('POST', '/api/store/plugin/install', { name }),
   storePluginUpdate: (name) => req('POST', '/api/store/plugin/update', { name }),
   storePluginRemove: (name) => req('POST', '/api/store/plugin/remove', { name }),
-  storeChangelog: () => req('GET', '/api/store/changelog'),
-
-  // ---- 面板更新(常驻浮窗) ----
-  // ⚠ 这 8 个方法曾整体缺失, PanelUpdate.vue 里 api.panelVersion 等一直是 undefined,
-  // 一调用就抛 TypeError, 悬浮窗永远停在空壳。改名时请同步 PanelUpdate.vue。
-  panelVersion: () => req('GET', '/api/panel/version'),
-  panelInstallCommand: () => req('GET', '/api/panel/install-command'),
+  panelVersion: () => req('GET', '/api/panel/version'),  panelInstallCommand: () => req('GET', '/api/panel/install-command'),
   panelUpdateCheck: () => req('GET', '/api/panel/update/check'),
   panelUpdateState: () => req('GET', '/api/panel/update/state'),
   panelUpdateApply: (version) => req('POST', '/api/panel/update/apply', { version: version || '' }),
-  panelUpdateRestart: () => req('POST', '/api/panel/update/restart', {}),
-  panelUpdateLog: () => req('GET', '/api/panel/update/log'),
+  // 本地上传面板包(.tar.gz): 不依赖 GitHub Release, 自己构建的版本也能直接装。
+  // 落盘/校验/备份/覆盖/回滚与在线更新共用同一实现。
+  panelUpdateUpload: (fd, onProgress) => reqUpload('/api/panel/update/upload', fd, onProgress),
+  // 回滚到备份版本(备份路径传空 = 用 updateState 里记录的最近一次备份)
   panelUpdateRollback: (backup) => req('POST', '/api/panel/update/rollback', { backup: backup || '' }),
+  // 移动端 REST 访问密钥: /<插件名>/api/... 前缀通道的凭证, App 用它免登录访问插件数据
+  restKey: () => req('GET', '/api/panel/restkey'),
+  restKeyRotate: () => req('POST', '/api/panel/restkey', {}),
+  panelUpdateRestart: () => req('POST', '/api/panel/update/restart', {}),
 }

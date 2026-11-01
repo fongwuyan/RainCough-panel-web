@@ -2,12 +2,16 @@
 import { onMounted, onUnmounted, ref, onErrorCaptured, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
+import PanelBall from './components/panel/PanelBall.vue'
 import Lightbox from './components/Lightbox.vue'
+import InstallDock from './components/plugins/InstallDock.vue'
 import { usePreview } from './stores/preview'
 import { useUi } from './stores/ui'
 
 const preview = usePreview()
 const ui = useUi()
+// 侧栏可收起；收起后靠内容区的悬浮球叫回来（状态存 localStorage）
+const { sidebarHidden, ball } = useUi()
 const route = useRoute()
 const errGlobal = ref('')
 const blankHint = ref('')
@@ -57,7 +61,7 @@ onUnmounted(() => {
   <div v-if="blankHint" style="position:fixed;top:60px;left:0;right:0;z-index:99998;background:#e65100;color:#fff;padding:8px 14px;font-size:12px;font-family:monospace">探测: {{ blankHint }}</div>
 <div v-if="errGlobal" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#c62828;color:#fff;padding:10px 14px;font-size:12px;font-family:monospace;max-height:120px;overflow:auto">全局错误: {{ errGlobal }}</div>
 <div class="layout" :class="{ 'layout-login': isLogin }">
-    <Sidebar v-if="!isLogin" />
+    <Sidebar v-if="!isLogin && !sidebarHidden" />
     <main class="content" :class="{ 'content-login': isLogin }">
       <div class="content-inner" :class="{ 'content-inner-login': isLogin }">
         <router-view v-slot="{ Component }">
@@ -66,5 +70,8 @@ onUnmounted(() => {
       </div>
     </main>
     <Lightbox v-if="!isLogin" />
+    <PanelBall v-if="!isLogin && ball.on" />
+    <!-- 安装浮窗挂在根上: 切路由不消失, 装插件时能同时去别处查资料 -->
+    <InstallDock v-if="!isLogin" />
   </div>
 </template>

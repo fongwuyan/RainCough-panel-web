@@ -27,6 +27,17 @@ const noticeOk = ref(true)
 const progress = ref('')
 const dlgOpen = ref(false)
 const applyErr = ref('')
+// 本地上传面板包(离线/自建版本更新)
+const fileEl = ref(null)
+const upErr = ref('')
+const rbConfirm = ref(false)
+const backupPath = computed(() => (st.value && st.value.backup) || '')
+const backupLabel = computed(() => {
+  const p = String(backupPath.value || '')
+  if (!p) return ''
+  const parts = p.split(/[\\/]/)
+  return '备份: ' + (parts[parts.length - 1] || p)
+})
 
 const latest = computed(() => (chk.value && chk.value.latest) || '')
 const curVer = computed(() => (chk.value && chk.value.current) || cur.value.version || '-')
@@ -149,8 +160,80 @@ async function doRestart() {
     }, 2000)
   } catch (e) { progress.value = ''; flash('重启下发失败: ' + e.message, false) }
 }
-function copy(text) {
-  if (!text) return
+// ---- 本地上传更新包 ----
+// 为什么需要: 在线更新只认 GitHub Release。自己构建的版本(改了代码但没发版)永远进不去,
+// 只能手工 scp 二进制 + systemctl restart。这条通道把整件事收进面板,
+// 且落盘/校验/备份/回滚与在线更新共用同一套实现。
+function pickFile() {
+  upErr.value = ''
+  if (fileEl.value) fileEl.value.click()
+}
+async function onFile(e) {
+  const input = e && e.target
+  const f = input && input.files && input.files[0]
+  if (input) input.value = '' // 允许连续选同一个文件(否则第二次不触发 change)
+  if (!f) return
+  if (!/\.(tar\.gz|tgz)$/i.test(f.name)) {
+    upErr.value = '只支持 .tar.gz / .tgz'
+    return
+  }
+  await doUpload(f)
+}
+async function doUpload(file) {
+  upErr.value = ''
+  busy.value = 'upload'
+  progress.value = '正在上传 ' + file.name + '…'
+  try {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    await api.panelUpdateUpload(fd)
+    progress.value = '已上传，正在解包校验并备份…'
+    for (let i = 0; i < 90; i++) {
+      await new Promise(function (r) { setTimeout(r, 2000) })
+      try { st.value = await api.panelUpdateState() } catch (e) { /* 应用期间接口正常, 忽略抖动 */ }
+      if (pendingRestart.value) break
+    }
+    progress.value = ''
+    if (!pendingRestart.value) {
+      upErr.value = '仍在应用中，可到「任务队列」看进度'
+    } else {
+      flash('已应用 v' + ((st.value && st.value.applied) || '') + '，请确认重启')
+      dlgOpen.value = true
+    }
+    try { chk.value = await api.panelUpdateCheck() } catch (e) { /* 检查失败不阻塞 */ }
+  } catch (e) {
+    progress.value = ''
+    upErr.value = '上传更新失败: ' + ((e && e.message) || e)
+  } finally {
+    busy.value = ''
+  }
+}
+
+// ---- 回滚 ----
+// 两步确认而不是 window.confirm: 面板不用原生弹窗, 且原生弹窗在 Electron/移动端表现不一。
+async function doRollback() {
+  if (!rbConfirm.value) {
+    rbConfirm.value = true
+    setTimeout(function () { rbConfirm.value = false }, 5000)
+    return
+  }
+  rbConfirm.value = false
+  busy.value = 'rollback'
+  progress.value = '正在回滚…'
+  try {
+    const r = await api.panelUpdateRollback('')
+    progress.value = ''
+    flash('已回滚到 v' + ((r && r.to) || '') + '，需要重启才生效')
+    await doRestart()
+  } catch (e) {
+    progress.value = ''
+    upErr.value = '回滚失败: ' + ((e && e.message) || e)
+  } finally {
+    busy.value = ''
+  }
+}
+
+function copy(text) {  if (!text) return
   try { navigator.clipboard.writeText(text); flash('已复制') } catch (e) { flash('复制失败, 请手动选择', false) }
 }
 function onDocDown(e) {
@@ -206,6 +289,23 @@ onBeforeUnmount(function () {
         <button v-if="hasUpdate" class="btn btn-sm btn-primary pu-wide" :disabled="!!busy" @click="dlgOpen = true">
           更新面板
         </button>
+
+        <!-- 本地更新: 不走 GitHub Release, 自己构建的包也能装 -->
+        <div class="pu-up">
+          <button class="btn btn-sm" :disabled="!!busy" @click="pickFile">上传面板包更新…</button>
+          <input ref="fileEl" type="file" accept=".gz,.tgz,application/gzip" style="display:none" @change="onFile" />
+          <div v-if="upErr" class="pu-line fail">{{ upErr }}</div>
+          <div v-if="progress" class="pu-line">{{ progress }}</div>
+        </div>
+
+        <!-- 回滚: 后端一直支持, 但此前没有任何入口。
+             自更新系统不给退路是危险的 —— 新版本起不来时用户只能 ssh 手工救。 -->
+        <div v-if="backupPath" class="pu-up">
+          <button class="btn btn-sm" :class="{ 'btn-danger': rbConfirm }" :disabled="!!busy" @click="doRollback">
+            {{ rbConfirm ? '确认回滚？再点一次' : '回滚到上一版本' }}
+          </button>
+          <div class="pu-note mono">{{ backupLabel }}</div>
+        </div>
       </div>
     </div>
 
@@ -358,6 +458,9 @@ onBeforeUnmount(function () {
 }
 .pu-pre.tall { max-height: 300px; }
 .pu-wide { width: 100%; margin-top: 8px; }
+/* 本地更新入口: 与在线更新区分开, 用更轻的样式 —— 它是备选路径, 不该抢主按钮的注意力 */
+.pu-up { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.pu-up .btn { width: 100%; }
 .pu-cmdrow { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .pu-cmdrow code {
   flex: 1;

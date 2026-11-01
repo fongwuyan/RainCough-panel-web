@@ -1,10 +1,14 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePluginHub } from './usePluginHub'
+import { useInstallDock } from './useInstallDock'
+import EnvPanel from './EnvPanel.vue'
+import PluginManage from './PluginManage.vue'
 
 const router = useRouter()
 const hub = usePluginHub()
+const dock = useInstallDock()
 const {
   installed, market, marketSource, health, activeTasks,
   loading, marketLoading, err, marketErr, q, busy, toast,
@@ -16,11 +20,30 @@ const {
   refreshAll, loadMarket, unlock, lockGate,
   openUpload, closeUpload, installFromFile,
   install, update, remove,
+  envMap, envOpen, loadEnv, toggleEnv, envBadge, invalidateEnv,
 } = hub
 
 const tab = ref('installed') // installed | market
 const gatePW = ref('')
 const gateInput = ref(null)
+
+// 「管理」展开的是哪个插件（启停 / 自启 / 运行日志）。
+// 与 envOpen 分开: 这是两条独立的信息线, 同时展开会互相挤。
+const manageOpen = ref('')
+function toggleManage(name) {
+  manageOpen.value = manageOpen.value === name ? '' : name
+}
+
+// 环境徽标文案。徽标只在"查过环境"之后才出现 —— 没查过不瞎猜。
+function envBadgeText(name) {
+  const b = envBadge(name)
+  if (!b) return ''
+  if (b === 'ready') return '环境就绪'
+  if (b === 'manual') return '需手动配置'
+  const e = envMap.value[name]
+  const n = e && e.report ? e.report.pending : 0
+  return n > 0 ? `缺 ${n} 项` : '环境待配置'
+}
 
 // 上传弹窗: 拖拽状态 + 文件选择
 const dragOver = ref(false)
@@ -41,8 +64,42 @@ function onPick(e) {
 }
 
 async function doUpload(f) {
-  await installFromFile(f)
+  const r = await installFromFile(f)
+  // 装完立刻开浮窗: "装上了"不等于"能跑"。
+  // 环境报告由后端在安装响应里一起带回来, 这里直接喂给浮窗, 不用再查一次。
+  if (r) {
+    dock.openInstall({
+      name: r.name,
+      label: r.label,
+      version: r.version,
+      message: r.message,
+      env: r.env || null,
+    })
+  }
 }
+
+// 行内环境面板的"一键修复": 走浮窗那套确认流程, 命令原文照样摊开给用户看。
+function onFixEnv(p, item) {
+  if (!p) return
+  dock.requestApply(
+    {
+      name: p.name,
+      label: p.label || p.name,
+      version: p.version || '',
+      env: envMap.value[p.name] ? envMap.value[p.name].report : null,
+    },
+    item.apply_steps || []
+  )
+}
+
+// 环境被修好后, 列表里那份缓存要失效 —— 否则徽标还写着"缺 N 项"。
+let offEnvFixed = null
+onMounted(() => {
+  offEnvFixed = dock.onEnvFixed((name) => invalidateEnv(name))
+})
+onUnmounted(() => {
+  if (offEnvFixed) offEnvFixed()
+})
 
 // langHint 取后端给的缺失提示(没有就给个通用的)
 function langHint(p) {
@@ -143,32 +200,58 @@ async function submitGate() {
       </div>
 
       <div v-else class="ph-list">
-        <div v-for="p in filteredInstalled" :key="p.name" class="ph-row">
-          <span class="ph-dot" :class="p.alive ? 'on' : 'off'" :title="p.alive ? '在线' : '未运行'"></span>
-          <div class="ph-main">
-            <div class="ph-row-title">
-              <span class="ph-name">{{ p.label || p.name }}</span>
-              <span class="ph-ver mono">v{{ p.version || '—' }}</span>
-              <span v-if="p.lang" class="ph-tag mono">{{ p.lang }}</span>
-              <span
-                v-if="incompatible(p)"
-                class="ph-tag danger"
-                :title="'后端语言 ' + p.lang + ' 不在当前支持列表内'"
-              >语言不受支持</span>
-              <span
-                v-else-if="langUnavailable(p)"
-                class="ph-tag warn"
-                :title="langHint(p)"
-              >缺 {{ p.lang }} 环境</span>
+        <template v-for="p in filteredInstalled" :key="p.name">
+          <div class="ph-row">
+            <span class="ph-dot" :class="p.alive ? 'on' : 'off'" :title="p.alive ? '在线' : '未运行'"></span>
+            <div class="ph-main">
+              <div class="ph-row-title">
+                <span class="ph-name">{{ p.label || p.name }}</span>
+                <span class="ph-ver mono">v{{ p.version || '—' }}</span>
+                <span v-if="p.lang" class="ph-tag mono">{{ p.lang }}</span>
+                <span
+                  v-if="incompatible(p)"
+                  class="ph-tag danger"
+                  :title="'后端语言 ' + p.lang + ' 不在当前支持列表内'"
+                >语言不受支持</span>
+                <span
+                  v-else-if="langUnavailable(p)"
+                  class="ph-tag warn"
+                  :title="langHint(p)"
+                >缺 {{ p.lang }} 环境</span>
+                <span
+                  v-if="envBadgeText(p.name)"
+                  class="ph-tag"
+                  :class="envBadge(p.name) === 'ready' ? 'ok' : 'warn'"
+                  :title="'点击下方「环境」查看明细'"
+                >{{ envBadgeText(p.name) }}</span>
+              </div>
+              <div class="ph-desc">{{ p.description || '（无描述）' }}</div>
             </div>
-            <div class="ph-desc">{{ p.description || '（无描述）' }}</div>
+            <div class="ph-row-actions">
+              <button class="btn btn-sm" @click="open(p.name)">打开</button>
+              <button class="btn btn-sm btn-ghost" @click="toggleEnv(p.name)">
+                {{ envOpen === p.name ? '收起环境' : '环境' }}
+              </button>
+              <button class="btn btn-sm btn-ghost" @click="toggleManage(p.name)">
+                {{ manageOpen === p.name ? '收起管理' : '管理' }}
+              </button>
+              <button class="btn btn-sm btn-danger" :disabled="busy === p.name" @click="doRemove(p)">移除</button>
+            </div>
           </div>
-          <div class="ph-row-actions">
-            <button class="btn btn-sm" @click="open(p.name)">打开</button>
-            <button class="btn btn-sm btn-ghost" @click="open(p.name)">设置</button>
-            <button class="btn btn-sm btn-danger" :disabled="busy === p.name" @click="doRemove(p)">移除</button>
+          <div v-if="envOpen === p.name" class="ph-env">
+            <EnvPanel
+              :report="envMap[p.name] ? envMap[p.name].report : null"
+              :loading="!!(envMap[p.name] && envMap[p.name].loading)"
+              :error="(envMap[p.name] && envMap[p.name].error) || ''"
+              applyable
+              @recheck="loadEnv(p.name)"
+              @fix="(it) => onFixEnv(p, it)"
+            />
           </div>
-        </div>
+          <div v-if="manageOpen === p.name" class="ph-env">
+            <PluginManage :name="p.name" />
+          </div>
+        </template>
       </div>
     </div>
 
@@ -396,6 +479,10 @@ async function submitGate() {
 }
 .ph-row:last-child { border-bottom: 0; }
 .ph-row:hover { background: var(--surface-2); }
+/* 环境面板挂在对应插件行下面: 左边留出与 .ph-main 对齐的缩进, 视觉上属于该行 */
+.ph-env { padding: 0 14px 10px 33px; border-bottom: 1px solid var(--border); background: var(--surface); }
+/* 列表最后一项去掉底边框 —— 展开环境面板后"最后一项"可能是 .ph-env 而不是 .ph-row */
+.ph-list > *:last-child { border-bottom: 0; }
 .ph-dot { width: 7px; height: 7px; background: var(--text-faint); flex-shrink: 0; }
 .ph-dot.on { background: var(--success); }
 .ph-dot.off { background: var(--text-faint); }

@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"raincough/internal/core"
+	"raincough/internal/pluginrt"
 )
 
 // handleStorePluginUpload POST /api/store/plugin/upload
@@ -149,7 +150,12 @@ func (s *server) handleStorePluginUpload(w http.ResponseWriter, r *http.Request)
 	log.Printf("[store] 本地安装成功: %s v%s (%d 文件, %.1f MB, 覆盖=%v)",
 		info.Name, info.Version, info.Files, float64(info.Bytes)/(1<<20), info.Replaced)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	// 装完立刻给一份环境报告: "装上了"不等于"能跑"。
+	// 用户最怕的是装完发现缺依赖、插件静默不响应, 却没有任何提示。
+	// 报告由前端浮窗展示, 同时把"还需 N 步"写进 message。
+	env := s.buildEnvReport(info.Name, info.Dir)
+
+	resp := map[string]interface{}{
 		"ok":       true,
 		"name":     info.Name,
 		"label":    info.Label,
@@ -158,14 +164,26 @@ func (s *server) handleStorePluginUpload(w http.ResponseWriter, r *http.Request)
 		"files":    info.Files,
 		"bytes":    info.Bytes,
 		"replaced": info.Replaced,
-		"message":  uploadMessage(info),
-	})
+		"message":  uploadMessage(info, env),
+	}
+	if env != nil && len(env.Items) > 0 {
+		resp["env"] = env
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
-func uploadMessage(info *core.PluginPackInfo) string {
+// uploadMessage 组装安装结果文案。
+//
+// 环境没齐时要明确说"还需 N 步" —— 只说"安装成功"会让用户以为完事了,
+// 然后对着不响应的机器人一头雾水。
+func uploadMessage(info *core.PluginPackInfo, env *pluginrt.EnvReport) string {
 	verb := "已安装"
 	if info.Replaced {
 		verb = "已更新"
 	}
-	return fmt.Sprintf("%s %s v%s(%d 个文件)", verb, info.Label, info.Version, info.Files)
+	base := fmt.Sprintf("%s %s v%s(%d 个文件)", verb, info.Label, info.Version, info.Files)
+	if env == nil || env.Ready || env.Pending == 0 {
+		return base
+	}
+	return base + fmt.Sprintf(", 还需 %d 步环境准备", env.Pending)
 }

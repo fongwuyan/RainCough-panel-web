@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"raincough/internal/pluginrt"
 	"raincough/internal/shared"
 )
 
@@ -62,15 +63,21 @@ type ManifestV4 struct {
 		// REST 声明式 HTTP 桥: 把插件接口暴露成普通 REST 路由,
 		// 让移动端 App / 第三方客户端无需理解 JSON-RPC 也能用(见 rest.go)。
 		REST []RESTRoute `json:"rest,omitempty"`
-		// RESTPublic 是否允许这些 REST 路由免登录访问。
+		// RESTPublic 声明这些 REST 路由"允许免登录"。
 		//
-		// ★ 必须显式声明才放行: 移动端 App 通常没有登录能力(JMReader 就是),
-		// 但把插件数据无门槛暴露到局域网是实打实的隐私风险。
-		// 所以做成"插件自己声明要公开", 而不是面板默默放开;
-		// 运维可用 RC_PLUGIN_REST_OPEN=off 强制全部回到登录后。
+		// ★已废弃(2026-11-01): RESTPublicMatch 从未被任何生产代码调用过, 这个开关
+		//   实际上一直是死的 —— 前缀通道 /<插件名>/api/... 本来就不经过登录中间件,
+		//   "要不要对外开放"从前缀决定, 跟这里无关。
+		//   现在通道统一要求访问密钥(见 internal/auth/apikey.go), 本字段保留仅为
+		//   兼容老清单解析, 不再影响任何行为。
 		RESTPublic bool `json:"rest_public,omitempty"`
 	} `json:"backend"`
 	Interfaces []InterfaceDef `json:"interfaces"`
+	// Environment 环境声明(可选)。缺省 = 无环境要求, 老插件全部走这条路。
+	//
+	// 只在这里占个位, 真正的解析/校验在 pluginrt.LoadEnvSpec ——
+	// 那边不依赖本结构体, 所以清单其他字段有瑕疵时环境检查照样能跑。
+	Environment *pluginrt.EnvironmentSpec `json:"environment,omitempty"`
 }
 
 // Plugin 注册表插件记录。

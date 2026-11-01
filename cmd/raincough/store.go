@@ -9,16 +9,19 @@ import (
 	"strings"
 
 	"raincough/internal/auth"
-	"raincough/internal/config"
 	"raincough/internal/core"
 )
 
 // 全局插件市场(main 中初始化)。
 var globalStore *core.Store
 
-// globalGate 插件库口令闸门(插件库将改为公开仓库, 用写死口令保护插件内容)。
-// 为 nil 表示闸门关闭(RC_STORE_GATE=off), 所有接口直接放行。
+// globalGate 插件库口令闸门。
+// 为 nil 表示闸门未启用(默认), 所有接口直接放行。
 var globalGate *auth.StoreGate
+
+// globalAPIKey 移动端 REST 访问密钥(见 internal/auth/apikey.go)。
+// 为 nil 表示校验被关闭(RC_REST_KEY=off)或初始化失败 —— 后者一律拒绝, 不放行。
+var globalAPIKey *auth.APIKeyStore
 
 // gateLocked 返回 true 表示该请求未通过闸门 —— 已经写好 403 响应, 调用方直接 return。
 // note: 这是"面板内可见性"的锁, 防不住知道 GitHub 地址的人直接 clone(见 gate.go 注释)。
@@ -291,31 +294,12 @@ func marketPluginVersion(name string) string {
 	return ""
 }
 
-// handleStoreProject GET /api/store/project/status + POST /api/store/project/install
-// 面板自更新【未实现】: 运行中的二进制无法就地替换, 更新必须走部署脚本。
-// 旧版返回伪造的 current=v1.0.0 / latest=v1.0.0 / up_to_date=true / 环境检查数据,
-// 前端据此显示"环境不满足, 将自动拉取离线环境包" "已开始更新…服务将重启" 等不实信息
-// (2026-09-28 审计定位)。现在只回真实版本与明确说明; check / update-info 已无调用方,
-// 归 404 而不是继续返回假数据。
-func (s *server) handleStoreProject(w http.ResponseWriter, r *http.Request) {
-	sub := strings.TrimPrefix(r.URL.Path, "/api/store/project/")
-	repo := globalStore.GetConfig().PanelRepo
-	repoStr := repo.Owner + "/" + repo.Repo
-	switch sub {
-	case "status":
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"implemented": true,
-			"current":     config.Version,
-			"repo":        repoStr,
-			"message":     "面板更新已支持就地更新: 检查 → 下载并应用 → 由你确认是否立即重启",
-			"howto":       "面板内: 侧边栏标题右侧 ↓ → 检查更新 → 下载并应用 → 立即重启; 命令行等价: curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/<面板仓>/v<版本>/install.sh | bash",
-		})
-	case "install":
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status": false, "implemented": false, "deferred": true,
-			"message": "请用 /api/panel/update/apply 走手动更新(检查 → 应用 → 确认重启)",
-		})
-	default:
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unknown"})
-	}
-}
+// 面板自更新现在走 /api/panel/update/*(check → apply → restart → rollback)。
+//
+// 这里曾有一个 handleStoreProject, 返回 /api/store/project/status|install。
+// 它从未在 main.go 里注册过路由(mux 里没有 store/project), 属于死代码,
+// 2026-11-01 面板内置功能审计时删除。旧版那套返回伪造 current/latest 的逻辑
+// (2026-09-28 定位)随之彻底消失。
+//
+// ★ 别再把它加回来: 需要版本信息用 GET /api/panel/version, 需要更新用
+//   /api/panel/update/*。两个入口并存只会让"到底哪个是真的"再变成一次事故。
