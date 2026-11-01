@@ -145,6 +145,16 @@ func (s *server) handleStorePluginUpload(w http.ResponseWriter, r *http.Request)
 	}
 	if globalSUP != nil {
 		globalSUP.Rescan()
+		// 装完启动 + 开机自启: 插件"装上却不跑"是最常见的困惑来源 ——
+		// 用户看到"已安装"却没有任何反应, 还得自己去管理面板点启动;
+		// 而没有自启的话, 面板一重启它又静默停掉(踩过的坑)。
+		// 与市场安装走同一套逻辑。
+		if err := globalSUP.SetAutostart(info.Name, true); err != nil {
+			log.Printf("[store] %s 设置开机自启失败: %v", info.Name, err)
+		}
+		if err := globalSUP.StartPlugin(info.Name); err != nil {
+			log.Printf("[store] %s 启动失败: %v", info.Name, err)
+		}
 	}
 
 	log.Printf("[store] 本地安装成功: %s v%s (%d 文件, %.1f MB, 覆盖=%v)",

@@ -1,9 +1,12 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { api } from '../../api'
 import { verNewer, verOlderInRepo } from '../../version'
+import { useInstallDock } from './useInstallDock'
 
 // 插件中心数据层: 已装列表、市场清单、服务健康、安装任务。
 export function usePluginHub() {
+  // 安装浮窗是全局单例, 这里只借用它的状态与方法
+  const dock = useInstallDock()
   const installed = ref([])
   const market = ref([])
   const marketSource = ref('')
@@ -267,6 +270,8 @@ export function usePluginHub() {
     try {
       const d = await api.taskQueue(false, 20)
       tasks.value = ((d && d.tasks) || []).filter((t) => t.source === 'store')
+      // 把任务状态推进到安装浮窗的时间轴上
+      dock.syncTasks(tasks.value)
     } catch (e) {
       /* 静默 */
     }
@@ -295,8 +300,17 @@ export function usePluginHub() {
   async function install(name) {
     busy.value = name
     try {
-      await api.storePluginInstall(name)
+      const r = await api.storePluginInstall(name)
       flash('已提交安装: ' + name)
+      // 开浮窗: 市场安装是异步的, 没有进度条用户只能干等一个"安装中"。
+      // 浮窗的时间轴跟着任务队列走, 能看见现在到哪一步、还差几步。
+      const jobId = dock.openInstall({
+        name,
+        label: name,
+        mode: 'market',
+        message: '正在从插件市场安装…',
+      })
+      if (r && r.task) dock.attachTask(jobId, r.task)
       startTaskPoll()
       await loadTasks()
     } catch (e) {
@@ -309,8 +323,15 @@ export function usePluginHub() {
   async function update(name) {
     busy.value = name
     try {
-      await api.storePluginUpdate(name)
+      const r = await api.storePluginUpdate(name)
       flash('已提交更新: ' + name)
+      const jobId = dock.openInstall({
+        name,
+        label: name,
+        mode: 'market',
+        message: '正在更新…',
+      })
+      if (r && r.task) dock.attachTask(jobId, r.task)
       startTaskPoll()
       await loadTasks()
     } catch (e) {

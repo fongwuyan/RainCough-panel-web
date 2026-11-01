@@ -197,8 +197,10 @@ func (s *server) handleStorePluginInstall(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusConflict, map[string]interface{}{"error": err.Error()})
 		return
 	}
-	log.Printf("[store] 插件安装: %s (status=%s)", b.Name, status)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "task": "queued"})
+	log.Printf("[store] 插件安装: %s (task=%s)", b.Name, status)
+	// task 字段给的是**任务 id**: 前端靠它把安装浮窗的时间轴和这条任务对上。
+	// 之前这里写死字符串 "queued", 前端只能靠名字猜哪个任务是自己的。
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "queued", "task": status})
 }
 
 // handleStorePluginRemove POST /api/store/plugin/remove {name}
@@ -255,7 +257,7 @@ func (s *server) handleStorePluginUpdate(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "message": "已提交更新"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "queued", "task": status, "message": "已提交更新"})
 }
 
 // installedPluginVersion 读已装插件的 plugin.json 版本; 未装返回空串。

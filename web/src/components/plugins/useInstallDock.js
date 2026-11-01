@@ -17,14 +17,23 @@ import { api } from '../../api'
 
 // 时间轴阶段。
 //
+// ★ key 必须与后端 core.Phase* 常量一致 —— 市场安装时后端把当前阶段报上来,
+//   前端靠 key 定位到时间轴的哪一格。前后端各写一份是这类联动最容易裂的地方。
+//
 // 未到达的阶段要"置灰但显示", 而不是藏起来 —— 用户最烦的就是盯着百分比猜还有几步。
-// 阶段枚举与后端 Task.phase 对齐(市场安装走任务队列时会用同一套)。
 export const INSTALL_PHASES = [
+  { key: 'download', label: '下载' },
+  { key: 'extract', label: '解压' },
   { key: 'validate', label: '校验' },
+  { key: 'precheck', label: '预检' },
   { key: 'write', label: '写入' },
   { key: 'env', label: '环境' },
+  { key: 'start', label: '启动' },
   { key: 'verify', label: '验证' },
 ]
+
+const PHASE_INDEX = {}
+INSTALL_PHASES.forEach((p, i) => { PHASE_INDEX[p.key] = i })
 
 const jobs = ref([])
 const activeId = ref('')
@@ -53,20 +62,30 @@ export function useInstallDock() {
 
   // openInstall 开一个安装浮窗。
   //
-  // info: { name, label, version, message, env, error }
-  // 上传安装是同步的 —— 拿到响应时"校验"和"写入"早已完成,
-  // 所以这两格直接是完成态, 不装样子演一遍进度条。
+  // info: { name, label, version, message, env, error, mode, taskId }
+  // mode: 'upload'(本地上传, 同步完成) | 'market'(市场安装, 阶段由任务驱动)
   function openInstall(info) {
     const id = 'rcjob' + ++seq
     const failed = !!(info && info.error)
     const env = (info && info.env) || null
     const ready = !!(env && env.ready)
+    const market = (info && info.mode) === 'market'
 
     const steps = blankSteps()
-    steps.validate = { state: failed ? 'fail' : 'ok', detail: (info && info.error) || '' }
-    steps.write = { state: failed ? 'skip' : 'ok', detail: '' }
-    steps.env = { state: failed ? 'skip' : (ready ? 'ok' : 'run'), detail: '' }
-    steps.verify = { state: failed ? 'skip' : (ready ? 'ok' : 'wait'), detail: '' }
+    if (market) {
+      // 市场安装: 阶段由任务队列推进, 这里全置 wait
+      if (failed) steps.download = { state: 'fail', detail: info.error }
+    } else {
+      // 本地上传是同步的: 拿到响应时该做的都做完了, 不演一遍进度条
+      steps.download = { state: 'skip', detail: '' }
+      steps.extract = { state: 'skip', detail: '' }
+      steps.validate = { state: failed ? 'fail' : 'ok', detail: (info && info.error) || '' }
+      steps.precheck = { state: 'skip', detail: '' }
+      steps.write = { state: failed ? 'skip' : 'ok', detail: '' }
+      steps.env = { state: failed ? 'skip' : (ready ? 'ok' : 'run'), detail: '' }
+      steps.start = { state: failed ? 'skip' : 'ok', detail: '' }
+      steps.verify = { state: failed ? 'skip' : (ready ? 'ok' : 'wait'), detail: '' }
+    }
 
     const job = {
       id,
@@ -78,6 +97,7 @@ export function useInstallDock() {
       error: (info && info.error) || '',
       steps,
       busy: false,
+      taskId: (info && info.taskId) || '',
       createdAt: Date.now(),
     }
     jobs.value = [job, ...jobs.value]
@@ -113,6 +133,57 @@ export function useInstallDock() {
 
   function setActive(id) {
     activeId.value = id
+  }
+
+  // attachTask 把浮窗和某条安装任务绑上(taskId 来自后端返回)。
+  function attachTask(jobId, taskId) {
+    const job = jobs.value.find((j) => j.id === jobId)
+    if (job && taskId) job.taskId = taskId
+  }
+
+  // syncTasks 用任务队列的状态推进时间轴。
+  //
+  // 后端把当前阶段报在 task.phase 上(与 INSTALL_PHASES 的 key 一致),
+  // 这里把"当前之前的阶段"点亮、"当前"标成进行中、"之后"保持置灰。
+  function syncTasks(list) {
+    if (!list || !list.length) return
+    for (const job of jobs.value) {
+      if (!job.taskId) continue
+      const t = list.find((x) => x.id === job.taskId)
+      if (!t) continue
+      syncOne(job, t)
+    }
+  }
+
+  function syncOne(job, t) {
+    const cur = PHASE_INDEX[t.phase]
+    if (cur == null) return
+    for (let i = 0; i < INSTALL_PHASES.length; i++) {
+      const key = INSTALL_PHASES[i].key
+      const st = job.steps[key]
+      if (i < cur) {
+        // 走过的阶段: 成功就点亮; 失败过就保持红色
+        if (st.state !== 'fail' && st.state !== 'ok') {
+          job.steps[key] = { state: 'ok', detail: '' }
+        }
+      } else if (i === cur) {
+        const failed = t.status === 'failed'
+        job.steps[key] = {
+          state: failed ? 'fail' : (t.status === 'done' ? 'ok' : 'run'),
+          detail: t.message || '',
+        }
+      }
+    }
+    if (t.message) job.message = t.message
+    if (t.status === 'failed') {
+      job.error = t.error || job.error || '安装失败'
+    }
+    // 环境报告: 后端装完就把报告挂在 task.meta.env 上, 这里一次拿全
+    if (t.meta && t.meta.env && !job.env) {
+      job.env = t.meta.env
+      job.steps.env = { state: job.env.ready ? 'ok' : 'run', detail: '' }
+      job.steps.verify = { state: job.env.ready ? 'ok' : 'wait', detail: '' }
+    }
   }
 
   // pendingSteps 从报告里挑出待执行的步骤 id。
@@ -231,6 +302,8 @@ export function useInstallDock() {
     ensureJob,
     closeJob,
     setActive,
+    attachTask,
+    syncTasks,
     pendingSteps,
     requestApply,
     cancelConfirm,

@@ -99,13 +99,36 @@ func (s *server) handlePluginEnvApply(w http.ResponseWriter, r *http.Request, na
 	})
 }
 
-// buildEnvReport 生成插件的环境报告(只读)。
+// buildEnvReport 给插件目录生成环境报告(只读)。
 //
 // 清单非法时不返回错误, 而是丢弃 environment 继续给基础报告,
 // 因为用户此刻最需要知道的恰恰是"这台机器差什么", 而不是"清单第几行写错了"。
 func (s *server) buildEnvReport(name, dir string) *pluginrt.EnvReport {
+	// 本插件进程 PID: 供 owner.plugin="self" 判定"升级时自己占着端口不算冲突"。
+	// supervisor 按插件目录名登记, 所以用目录名而不是 URL 里的大小写变体。
+	selfPID := 0
+	if globalSUP != nil {
+		key := filepath.Base(filepath.Clean(dir))
+		if snap, err := globalSUP.View(key); err == nil {
+			selfPID = snap.Pid
+		}
+	}
+	return buildEnvReportFor(dir, selfPID)
+}
+
+// buildEnvReportFor 给指定目录生成环境报告(不依赖 server 实例)。
+//
+// 市场安装在"落盘前"和"落盘后"都要用它 —— 那时插件可能还没注册,
+// 所以不能走 resolvePluginDir, 直接按目录来。
+func buildEnvReportFor(dir string, selfPID int) *pluginrt.EnvReport {
 	spec, specErr := pluginrt.LoadEnvSpec(dir)
-	rep := s.envRunner(name, dir).Report(spec)
+	runner := &pluginrt.EnvRunner{
+		Dir:     dir,
+		Python:  "python3",
+		Root:    pluginrt.IsRoot(),
+		SelfPID: selfPID,
+	}
+	rep := runner.Report(spec)
 	if specErr != nil {
 		rep.Warn = appendWarn(rep.Warn, "environment 清单非法, 已忽略: "+specErr.Error())
 	}

@@ -101,6 +101,28 @@ onUnmounted(() => {
   if (offEnvFixed) offEnvFixed()
 })
 
+// envNotes 把市场清单里的环境摘要变成一行提示。
+//
+// 装之前就说清楚: 哪些能由面板代劳(装完一键补齐), 哪些只能用户自己弄
+// (第三方客户端、扫码), 要占哪些端口。这样用户不会装完才发现少东西。
+function envNotes(p) {
+  const e = p && p.environment
+  if (!e) return []
+  const out = []
+  const auto = e.auto || []
+  const manual = e.manual || []
+  if (auto.length) {
+    out.push({ kind: 'auto', text: '需 ' + auto.length + ' 项环境准备（装完可一键补齐）' })
+  }
+  for (const m of manual) {
+    out.push({ kind: 'manual', text: '需手动：' + (m.label || m.id) })
+  }
+  for (const pt of e.ports || []) {
+    out.push({ kind: 'port', text: '占用端口 ' + pt.port })
+  }
+  return out
+}
+
 // langHint 取后端给的缺失提示(没有就给个通用的)
 function langHint(p) {
   const d = runtimeInfo.value
@@ -324,6 +346,11 @@ async function submitGate() {
               </div>
               <div class="ph-desc">{{ p.description || '（无描述）' }}</div>
               <div v-if="p.author" class="ph-author">作者 {{ p.author }}</div>
+
+              <!-- 前置条件: 装之前就告诉用户还差什么, 而不是装完才发现少东西 -->
+              <div v-if="p.environment && envNotes(p).length" class="ph-req">
+                <span v-for="n in envNotes(p)" :key="n" class="ph-req-item" :class="n.kind">{{ n.text }}</span>
+              </div>
             </div>
             <div class="ph-row-actions">
               <button
@@ -492,6 +519,25 @@ async function submitGate() {
 .ph-name { font-size: 13px; color: var(--text); font-weight: 500; }
 .ph-ver { font-size: 11px; color: var(--text-faint); }
 .ph-desc { font-size: 11px; color: var(--text-muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 前置条件提示 */
+.ph-req {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+.ph-req-item {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.ph-req-item.auto { color: var(--accent); border-color: var(--accent); }
+.ph-req-item.manual { color: var(--warning); border-color: var(--warning); }
+.ph-req-item.port { color: var(--text-faint); }
+
 .ph-author { font-size: 10px; color: var(--text-faint); margin-top: 2px; }
 
 .ph-tag { font-size: 10px; padding: 0 5px; border: 1px solid var(--border-strong); color: var(--text-muted); }

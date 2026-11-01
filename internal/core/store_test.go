@@ -158,9 +158,13 @@ func waitStoreTask(t *testing.T, ts *TaskStore) *Task {
 func TestStoreInstallSuccessTaskDone(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(newMockNS(), dir, nil)
+	// 清单必须是 v4(name/frontend.entry/backend.exec 齐全) ——
+	// 市场安装现在会先校验清单, 非 v4 的包装上去也跑不起来, 不如直接报错。
 	zipball := fakeZipball(t, map[string]string{
-		"repo-abc123/demo/plugin.json": `{"name":"demo","label":"演示","version":"1.2.3"}`,
-		"repo-abc123/demo/plugin.py":   "print('hi')",
+		"repo-abc123/demo/plugin.json": `{"name":"demo","label":"演示","version":"1.2.3",` +
+			`"frontend":{"entry":"assets/plugin.js"},` +
+			`"backend":{"lang":"python","exec":["python3","server_v4.py"]}}`,
+		"repo-abc123/demo/server_v4.py": "print('hi')",
 	})
 	s.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return httpResp(200, zipball), nil
@@ -283,5 +287,150 @@ func mkPluginJson(t *testing.T, pluginsDir, name string) {
 	if err := SaveFileText(dir+"/plugin.json",
 		[]byte(`{"name":"`+name+`","label":"test"}`), 1024); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestStoreInstallPrecheckBlocks 预检不通过时中止安装, 且**不落盘**。
+//
+// 这是"先预检后落盘"的意义: 端口被别人占这类硬冲突, 如果先装上再报,
+// 用户会得到一个装了却用不了的插件, 还得自己回头卸载。
+func TestStoreInstallPrecheckBlocks(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(newMockNS(), dir, nil)
+	zipball := fakeZipball(t, map[string]string{
+		"repo-abc123/demo/plugin.json": `{"name":"demo","label":"演示","version":"1.2.3",` +
+			`"frontend":{"entry":"assets/plugin.js"},` +
+			`"backend":{"lang":"python","exec":["python3","server_v4.py"]}}`,
+		"repo-abc123/demo/server_v4.py": "print('hi')",
+	})
+	s.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return httpResp(200, zipball), nil
+	})}
+	s.SetEnvHooks(func(string) (bool, string) {
+		return false, "端口 8080 被 nginx 占用"
+	}, nil)
+
+	ts := NewTaskStore(newMockNS())
+	if _, err := s.InstallPlugin("demo", ts); err != nil {
+		t.Fatalf("InstallPlugin: %v", err)
+	}
+	task := waitStoreTask(t, ts)
+	if task.Status != "failed" {
+		t.Fatalf("预检不通过时任务应为 failed, 实为 %q", task.Status)
+	}
+	if !strings.Contains(task.Message, "预检未通过") {
+		t.Fatalf("message 应说明预检未通过, 得 %q", task.Message)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "demo")); err == nil {
+		t.Fatal("预检不通过时不应留下插件目录")
+	}
+}
+
+// TestStoreInstallPhasesReachesVerify 阶段枚举要真的推进到 verify。
+//
+// phase 之前一直传空串 —— 前端拿不到"现在到哪一步", 时间轴只能空转。
+func TestStoreInstallPhasesReachesVerify(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(newMockNS(), dir, nil)
+	zipball := fakeZipball(t, map[string]string{
+		"repo-abc123/demo/plugin.json": `{"name":"demo","label":"演示","version":"1.2.3",` +
+			`"frontend":{"entry":"assets/plugin.js"},` +
+			`"backend":{"lang":"python","exec":["python3","server_v4.py"]}}`,
+		"repo-abc123/demo/server_v4.py": "print('hi')",
+	})
+	s.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return httpResp(200, zipball), nil
+	})}
+
+	ts := NewTaskStore(newMockNS())
+	if _, err := s.InstallPlugin("demo", ts); err != nil {
+		t.Fatalf("InstallPlugin: %v", err)
+	}
+	task := waitStoreTask(t, ts)
+	if task.Status != "done" {
+		t.Fatalf("安装应成功, 实为 %q (%s)", task.Status, task.Error)
+	}
+	// 终态停在 verify 阶段
+	if task.Phase != PhaseVerify {
+		t.Fatalf("终态 phase 应为 %q, 得 %q", PhaseVerify, task.Phase)
+	}
+}
+
+// TestStoreInstallStartsPlugin 装完要启动插件 ——
+// "装上却不跑"是最常见的困惑来源。
+func TestStoreInstallStartsPlugin(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(newMockNS(), dir, nil)
+	zipball := fakeZipball(t, map[string]string{
+		"repo-abc123/demo/plugin.json": `{"name":"demo","label":"演示","version":"1.2.3",` +
+			`"frontend":{"entry":"assets/plugin.js"},` +
+			`"backend":{"lang":"python","exec":["python3","server_v4.py"]}}`,
+		"repo-abc123/demo/server_v4.py": "print('hi')",
+	})
+	s.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return httpResp(200, zipball), nil
+	})}
+	var started string
+	s.SetStartHook(func(name string) { started = name })
+
+	ts := NewTaskStore(newMockNS())
+	if _, err := s.InstallPlugin("demo", ts); err != nil {
+		t.Fatalf("InstallPlugin: %v", err)
+	}
+	task := waitStoreTask(t, ts)
+	if task.Status != "done" {
+		t.Fatalf("安装应成功, 实为 %q", task.Status)
+	}
+	if started != "demo" {
+		t.Fatalf("装完应启动插件, 实得启动 %q", started)
+	}
+}
+
+// TestStoreInstallEnvReportInMeta 环境报告要挂到任务 meta 上。
+//
+// 前端的安装浮窗靠这个字段一次拿全环境报告 —— 不必装完再单独查一次接口。
+func TestStoreInstallEnvReportInMeta(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(newMockNS(), dir, nil)
+	zipball := fakeZipball(t, map[string]string{
+		"repo-abc123/demo/plugin.json": `{"name":"demo","label":"演示","version":"1.2.3",` +
+			`"frontend":{"entry":"assets/plugin.js"},` +
+			`"backend":{"lang":"python","exec":["python3","server_v4.py"]}}`,
+		"repo-abc123/demo/server_v4.py": "print('hi')",
+	})
+	s.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return httpResp(200, zipball), nil
+	})}
+	s.SetEnvHooks(nil, func(string) map[string]interface{} {
+		return map[string]interface{}{
+			"ready":   false,
+			"pending": 2,
+			"items": []map[string]interface{}{
+				{"id": "dep", "status": "missing"},
+				{"id": "ext", "status": "missing"},
+			},
+		}
+	})
+
+	ts := NewTaskStore(newMockNS())
+	if _, err := s.InstallPlugin("demo", ts); err != nil {
+		t.Fatalf("InstallPlugin: %v", err)
+	}
+	task := waitStoreTask(t, ts)
+	if task.Status != "done" {
+		t.Fatalf("安装应成功, 实为 %q (%s)", task.Status, task.Error)
+	}
+	if task.Meta == nil || task.Meta["env"] == nil {
+		t.Fatal("任务 meta 里应有环境报告")
+	}
+	env, ok := task.Meta["env"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("meta.env 类型不对: %T", task.Meta["env"])
+	}
+	if env["pending"] != 2 {
+		t.Fatalf("meta.env.pending 应为 2, 得 %v", env["pending"])
+	}
+	if !strings.Contains(task.Message, "还需 2 步环境准备") {
+		t.Fatalf("完成消息应说明还需几步, 得 %q", task.Message)
 	}
 }

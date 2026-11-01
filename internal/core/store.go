@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"raincough/internal/pluginx"
 )
 
 // ---- 插件市场(与旧面板 store.py 契约兼容) ----
@@ -43,6 +45,30 @@ type StorePlugin struct {
 	InstalledV  string `json:"installed_version,omitempty"`
 	// Lang 后端语言(python/php/java/go/node/…)。前端用于"语言是否受支持"提示。
 	Lang string `json:"lang,omitempty"`
+	// Environment 插件的环境要求摘要(来自 registry.json)。
+	//
+	// 让市场列表在**装之前**就说明前置条件: 要占哪些端口、哪些能由面板代劳、
+	// 哪些只能用户自己弄(第三方客户端、扫码)。不然用户装完才发现少东西。
+	Environment *StoreEnv `json:"environment,omitempty"`
+}
+
+// StoreEnv 插件的环境要求摘要。
+type StoreEnv struct {
+	Level string `json:"level,omitempty"`
+	Ports []struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+		Port  int    `json:"port"`
+		Bind  string `json:"bind,omitempty"`
+	} `json:"ports,omitempty"`
+	// Auto 面板能在用户确认后代为准备的检查项 id
+	Auto []string `json:"auto,omitempty"`
+	// Manual 只能用户自己弄的检查项
+	Manual []struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+		Guide string `json:"guide,omitempty"`
+	} `json:"manual,omitempty"`
 }
 
 // Store 插件市场: GitHub 私有仓库 registry 拉取/安装/更新/卸载。
@@ -57,7 +83,17 @@ type Store struct {
 	// onBeforeRemove 卸载前回调(宿主注入: supervisor.RemovePlugin 停进程)。
 	// 必须先停进程再删目录, 否则插件进程会变成持有已删文件的孤儿。
 	onBeforeRemove func(name string)
-	mu             chan struct{} // 并发控制(1)
+	// onStart 装完后启动插件(宿主注入)。
+	// 装上却不跑是最常见的困惑来源: 用户看到插件"已安装"却没有任何反应,
+	// 还得自己去管理面板点启动。
+	onStart func(name string)
+	// envPrecheck 落盘前的环境预检(宿主注入: pluginrt.EnvRunner)。
+	// 返回 ok=false 时中止安装 —— 只对"硬冲突"这么做(端口被别人占),
+	// 缺依赖/缺外部客户端不中止: 装上去至少列表里能看到、能看到缺什么。
+	envPrecheck func(dir string) (bool, string)
+	// envReport 落盘后的环境报告(宿主注入), 随任务 meta 带出给前端。
+	envReport func(dir string) map[string]interface{}
+	mu        chan struct{} // 并发控制(1)
 }
 
 // NewStore 创建插件市场。
@@ -73,6 +109,21 @@ func NewStore(ns Namespacelike, pluginsDir string, onInstalled func()) *Store {
 
 // SetRemoveHook 注入"卸载前停进程"回调(宿主启动时调用)。
 func (s *Store) SetRemoveHook(fn func(name string)) { s.onBeforeRemove = fn }
+
+// SetStartHook 注入"装完启动插件"回调(宿主启动时调用)。
+func (s *Store) SetStartHook(fn func(name string)) { s.onStart = fn }
+
+// SetEnvHooks 注入环境预检与报告回调(宿主启动时调用)。
+//
+// 用注入而不是直接依赖 pluginrt: core 只管编排, 跑 shell 命令的具体实现
+// 留在 pluginrt 里 —— 与 onInstalled/onBeforeRemove 同一个模式。
+func (s *Store) SetEnvHooks(
+	precheck func(dir string) (bool, string),
+	report func(dir string) map[string]interface{},
+) {
+	s.envPrecheck = precheck
+	s.envReport = report
+}
 
 // PluginsDir 插件根目录(只读; 供上层做版本/清单校验)。
 func (s *Store) PluginsDir() string { return s.pluginsDir }
@@ -198,6 +249,8 @@ func (s *Store) RegistryWithSource() ([]StorePlugin, string, error) {
 							// Lang 后端语言(registry.json 可选字段)。
 							// 前端据此判断"语言是否受支持"; 缺省时前端不拦(按二进制处理)。
 							Lang string `json:"lang"`
+							// Environment 环境要求摘要(可选)。装之前就告诉用户还差什么。
+							Environment *StoreEnv `json:"environment"`
 						} `json:"plugins"`
 					}
 					if err := json.Unmarshal(raw, &reg); err == nil {
@@ -213,8 +266,9 @@ func (s *Store) RegistryWithSource() ([]StorePlugin, string, error) {
 							out = append(out, StorePlugin{
 								Name: p.Name, Label: p.Label, Version: p.Version,
 								Author: p.Author, Path: p.Path, Description: p.Description,
-								Lang:      lang,
-								Installed: installed, InstalledV: ver,
+								Lang:        lang,
+								Environment: p.Environment,
+								Installed:   installed, InstalledV: ver,
 							})
 						}
 						return out, "github", nil
@@ -294,9 +348,12 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 	default:
 		return "", fmt.Errorf("已有安装任务进行中")
 	}
+	// 任务在 goroutine 之外创建, 这样调用方能拿到 task id 去跟踪进度。
+	// 之前放在 goroutine 里, 前端只能靠名字猜哪个任务是自己的 ——
+	// 一次装两个插件就会串。
+	tid := task.Begin("store", "安装插件 "+name, "install", nil)
 	go func() {
 		defer func() { <-s.mu }()
-		tid := task.Begin("store", "安装插件 "+name, "install", nil)
 		// 失败兜底收尾: 仅当没走到成功 Finish 时才置失败。
 		// 旧版用 `defer task.Finish(tid, false, ..., 0)` 直接收尾 — 任务成功后 defer
 		// 仍会执行, 把 status=done 翻回 failed、error=安装失败、progress 100 归 0,
@@ -307,17 +364,18 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 				task.Finish(tid, false, "", "安装失败", 0)
 			}
 		}()
-		task.Update(tid, "", 20, "拉取插件仓库...")
+		task.Update(tid, PhaseDownload, 10, "拉取插件仓库...")
 		// 下载 zipball
 		repo := s.config.PluginRepo
 		url := fmt.Sprintf("https://api.github.com/repos/%s/%s/zipball/%s",
 			repo.Owner, repo.Repo, repo.Branch)
 		data, err := s.ghDownload(url)
 		if err != nil {
-			task.Update(tid, "", 0, "下载失败: "+err.Error())
+			task.Update(tid, PhaseDownload, 0, "下载失败: "+err.Error())
 			return
 		}
-		task.Update(tid, "", 50, "解压安装...")
+
+		task.Update(tid, PhaseExtract, 30, "解压定位插件目录...")
 
 		// ★ 已装同名插件 = 更新。更新必须先停进程:
 		//   插件正在运行时, 我们马上要替换它的目录; 不停进程会得到
@@ -326,25 +384,77 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 		//   更新路径之前漏了 —— 2026-10-17 检查时发现。
 		alreadyInstalled, _ := s.installedVersion(name)
 		if alreadyInstalled && s.onBeforeRemove != nil {
-			task.Update(tid, "", 55, "停止旧版本进程...")
+			task.Update(tid, PhaseExtract, 35, "停止旧版本进程...")
 			s.onBeforeRemove(name)
 		}
-		// 从 zip 提取插件目录
-		if _, err = extractPluginFromZip(data, name, s.pluginsDir); err != nil {
-			task.Update(tid, "", 0, "安装失败: "+err.Error())
+
+		// ★ 先解到暂存目录, 预检通过后才落盘。
+		//   预检不过就留下一个装了却用不了的插件(端口被别人占是最典型的),
+		//   用户还得自己回头卸载 —— 不如一开始就别装。
+		stage, err := stagePluginFromZip(data, name)
+		if err != nil {
+			task.Update(tid, PhaseExtract, 0, "安装失败: "+err.Error())
+			return
+		}
+		defer os.RemoveAll(filepath.Dir(stage)) // 暂存目录的父目录
+
+		task.Update(tid, PhaseValidate, 45, "校验清单...")
+		if _, err := pluginx.LoadManifestV4(stage); err != nil {
+			task.Update(tid, PhaseValidate, 0, "清单无效: "+err.Error())
+			return
+		}
+
+		// 环境预检(落盘前)。只有硬冲突才中止。
+		if s.envPrecheck != nil {
+			task.Update(tid, PhasePrecheck, 55, "环境预检...")
+			if ok, reason := s.envPrecheck(stage); !ok {
+				task.Update(tid, PhasePrecheck, 0, "预检未通过: "+reason)
+				return
+			}
+		}
+
+		task.Update(tid, PhaseWrite, 70, "写入插件目录...")
+		if err := commitPluginDir(stage, name, s.pluginsDir); err != nil {
+			task.Update(tid, PhaseWrite, 0, "安装失败: "+err.Error())
 			return
 		}
 		if s.onInstalled != nil {
 			s.onInstalled()
 		}
-		done = true
+
+		// 环境报告: 装完立刻给一份, 用户马上知道"还差什么"。
+		// 注意只报告不执行 —— apply 会改系统, 必须由用户在浮窗里确认过才做。
+		if s.envReport != nil {
+			task.Update(tid, PhaseEnv, 80, "生成环境报告...")
+			if rep := s.envReport(filepath.Join(s.pluginsDir, name)); rep != nil {
+				task.SetMeta(tid, "env", rep)
+			}
+		}
+
+		// 装完启动: 插件"装上却不跑"是最常见的困惑来源。
 		verb := "安装"
 		if alreadyInstalled {
 			verb = "更新"
 		}
-		task.Finish(tid, true, "插件"+verb+"成功: "+name, "", 100)
+		if s.onStart != nil {
+			task.Update(tid, PhaseStart, 88, "启动插件...")
+			s.onStart(name)
+		}
+
+		task.Update(tid, PhaseVerify, 96, "验证插件可用...")
+		msg := "插件" + verb + "成功: " + name
+		if s.envReport != nil {
+			if rep := s.envReport(filepath.Join(s.pluginsDir, name)); rep != nil {
+				if pending, _ := rep["pending"].(int); pending > 0 {
+					msg += fmt.Sprintf("，还需 %d 步环境准备", pending)
+				}
+			}
+		}
+		done = true
+		task.Finish(tid, true, msg, "", 100)
 	}()
-	return "queued", nil
+	// 返回任务 id: 前端靠它把浮窗时间轴和这条任务对上
+	return tid, nil
 }
 
 // validPluginName 插件名校验: 防空名/路径穿越(空名会让 filepath.Join 指向插件根目录,
@@ -607,49 +717,58 @@ func (s *Store) installedVersion(name string) (bool, string) {
 	return false, ""
 }
 
-// extractPluginFromZip 从 GitHub zipball 提取插件目录。
+// stagePluginFromZip 从 GitHub zipball 解出插件目录到**暂存位置**(不落盘到 pluginsDir)。
+//
 // zipball 结构: <repo>-<sha>/<plugin_dir>/...
-func extractPluginFromZip(data []byte, name, pluginsDir string) (string, error) {
+//
+// 拆成"暂存 + 落盘"两步是为了让环境预检能插在中间: 预检不过就不该留下
+// 一个装了却用不了的插件。返回的目录由调用方负责清理(用 RemoveAll 删它的父目录)。
+func stagePluginFromZip(data []byte, name string) (string, error) {
 	tmp, err := os.MkdirTemp("", "rc-store-*")
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tmp)
 	zipPath := filepath.Join(tmp, "repo.zip")
 	if err := os.WriteFile(zipPath, data, 0o644); err != nil {
+		os.RemoveAll(tmp)
 		return "", err
 	}
 	if err := extractArchive(zipPath, tmp); err != nil {
+		os.RemoveAll(tmp)
 		return "", err
 	}
 	// 顶层是 <repo>-<sha> 目录, 插件在其下 <name>/
 	entries, err := os.ReadDir(tmp)
 	if err != nil {
+		os.RemoveAll(tmp)
 		return "", err
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		// 检查该顶层目录下是否有 <name> 目录(带 registry.json 或插件文件)
 		root := filepath.Join(tmp, e.Name())
 		src := filepath.Join(root, name)
 		if st, err := os.Stat(src); err == nil && st.IsDir() {
-			dst := filepath.Join(pluginsDir, name)
-			if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
-				return "", err
-			}
-			// ★ 用 replaceDir 而不是 Copy:
-			//   Copy 是"合并"语义 —— 旧版本有、新版本没删掉的文件会残留下来。
-			//   插件更新时这会留下废弃的 .py/.js/二进制, 甚至让旧前端产物继续被加载。
-			//   replaceDir 做"整目录替换 + 备份 + 失败回滚"(与面板内上传安装同一条路径)。
-			if _, err := replaceDir(src, dst); err != nil {
-				return "", err
-			}
-			return dst, nil
+			return src, nil
 		}
 	}
+	os.RemoveAll(tmp)
 	return "", fmt.Errorf("zip 中未找到插件目录: %s", name)
+}
+
+// commitPluginDir 把暂存的插件目录原子替换到 pluginsDir/<name>。
+func commitPluginDir(stage, name, pluginsDir string) error {
+	dst := filepath.Join(pluginsDir, name)
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		return err
+	}
+	// ★ 用 replaceDir 而不是 Copy:
+	//   Copy 是"合并"语义 —— 旧版本有、新版本没删掉的文件会残留下来。
+	//   插件更新时这会留下废弃的 .py/.js/二进制, 甚至让旧前端产物继续被加载。
+	//   replaceDir 做"整目录替换 + 备份 + 失败回滚"(与面板内上传安装同一条路径)。
+	_, err := replaceDir(stage, dst)
+	return err
 }
 
 // ---- token 加密(AES-GCM, 密钥存文件) ----

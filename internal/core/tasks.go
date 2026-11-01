@@ -12,6 +12,22 @@ import (
 
 // ---- 统一任务队列(与旧面板 tasks.py 契约兼容) ----
 
+// 安装阶段枚举。
+//
+// 前端安装浮窗的时间轴按**同样的 key** 逐段点亮。
+// 约定成英文 key 而不是中文: 显示文案归前端管, 后端换措辞不用同步改前端;
+// 而且 key 稳定, 前端才能把"当前到第几步"映射成"前面哪些已完成"。
+const (
+	PhaseDownload = "download" // 下载仓库 zipball
+	PhaseExtract  = "extract"  // 解压并定位插件目录
+	PhaseValidate = "validate" // 校验清单
+	PhasePrecheck = "precheck" // 环境预检(落盘前)
+	PhaseWrite    = "write"    // 写入插件目录
+	PhaseEnv      = "env"      // 生成环境报告
+	PhaseStart    = "start"    // 启动插件
+	PhaseVerify   = "verify"   // 验证插件可用
+)
+
 // Task 统一任务条目。
 type Task struct {
 	ID        string                 `json:"id"`
@@ -90,6 +106,24 @@ func (ts *TaskStore) Update(id, phase string, progress int, message string) {
 		t.Message = message
 		t.Status = "running"
 	}
+	t.UpdatedAt = time.Now().Unix()
+	ts.persist(t)
+}
+
+// SetMeta 给任务挂一个附加数据(随任务一起持久化)。
+//
+// 用途: 安装任务把环境报告挂在 meta 上, 前端一次拿全, 不用再单独查一遍。
+func (ts *TaskStore) SetMeta(id, key string, value interface{}) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	t, ok := ts.tasks[id]
+	if !ok {
+		return
+	}
+	if t.Meta == nil {
+		t.Meta = map[string]interface{}{}
+	}
+	t.Meta[key] = value
 	t.UpdatedAt = time.Now().Unix()
 	ts.persist(t)
 }

@@ -213,6 +213,53 @@ func main() {
 			log.Printf("[store] 卸载前停止 %s 失败: %v", name, err)
 		}
 	})
+	// 装完启动插件: 插件"装上却不跑"是最常见的困惑来源 ——
+	// 用户看到"已安装"却没有任何反应, 还得自己去管理面板点启动。
+	// 同时打开开机自启, 否则面板一重启它又静默停掉(踩过的坑)。
+	globalStore.SetStartHook(func(name string) {
+		if globalSUP == nil {
+			return
+		}
+		if err := globalSUP.SetAutostart(name, true); err != nil {
+			log.Printf("[store] %s 设置开机自启失败: %v", name, err)
+		}
+		if err := globalSUP.StartPlugin(name); err != nil {
+			log.Printf("[store] %s 启动失败: %v", name, err)
+		}
+	})
+	// 环境预检与报告: 落盘前查一遍(硬冲突就不装), 落盘后给一份报告。
+	// 具体跑 shell 的实现留在 pluginrt 里, core 只管编排。
+	globalStore.SetEnvHooks(
+		func(dir string) (bool, string) {
+			rep := buildEnvReportFor(dir, 0)
+			if rep == nil {
+				return true, ""
+			}
+			// 只有"端口被别人占"这种硬冲突才中止安装;
+			// 缺依赖、缺外部客户端不中止 —— 装上去至少列表里能看到、能看懂缺什么。
+			for _, it := range rep.Items {
+				if it.Required && it.Status == pluginrt.StatusMissing && it.Kind == "port" {
+					return false, fmt.Sprintf("%s: %s", it.Label, it.Detail)
+				}
+			}
+			return true, ""
+		},
+		func(dir string) map[string]interface{} {
+			rep := buildEnvReportFor(dir, 0)
+			if rep == nil {
+				return nil
+			}
+			b, err := json.Marshal(rep)
+			if err != nil {
+				return nil
+			}
+			var m map[string]interface{}
+			if err := json.Unmarshal(b, &m); err != nil {
+				return nil
+			}
+			return m
+		},
+	)
 
 	// 移动端 REST 访问密钥: /<插件名>/api/... 这条前缀通道不走登录中间件,
 	// 此前是裸奔的。现在一律要求密钥(App 携带), 密钥存 KV、可在设置里重置。
