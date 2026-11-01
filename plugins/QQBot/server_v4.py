@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rcplugin as rc  # noqa: E402
 
 NAME = "QQBot"          # ★ 必须与插件目录名一致
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(DIR, "data")
