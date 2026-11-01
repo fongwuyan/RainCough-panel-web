@@ -231,6 +231,94 @@ const CSS = `
 .rcq-hint{font-size:11.5px;color:var(--m)}
 .rcq-warn{border-color:var(--warn);color:var(--warn)}
 
+/* ---- 多实例（QQ 账户） ---- */
+.rcq-inst{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.rcq-icard{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:14px 15px}
+.rcq-icard.on{border-color:var(--ac)}
+.rcq-itop{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.rcq-itop .nm{flex:1;min-width:0}
+.rcq-itop .nm b{display:block;font-size:13.5px;font-weight:600;overflow:hidden;
+ text-overflow:ellipsis;white-space:nowrap}
+.rcq-itop .nm span{font-size:11.5px;color:var(--m);font-family:var(--font-mono)}
+.rcq-imeta{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:11.5px;
+ margin-bottom:10px}
+.rcq-imeta .k{color:var(--m)}
+.rcq-imeta .v{font-family:var(--font-mono);word-break:break-all}
+.rcq-iacts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+
+/* ---- 聊天记录三栏 ---- */
+.rcq-chats{display:grid;grid-template-columns:150px 250px minmax(0,1fr);gap:12px;align-items:start}
+.rcq-chatcol{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);
+ display:flex;flex-direction:column;overflow:hidden;max-height:min(74vh,720px)}
+.rcq-chatcol .hd{padding:10px 12px;border-bottom:1px solid var(--bd);flex:none;
+ display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.rcq-chatcol .hd b{font-size:12.5px;font-weight:600}
+.rcq-chatcol .bd{flex:1;overflow:auto;min-height:0}
+.rcq-chatcol .ft{flex:none;padding:9px 12px;border-top:1px solid var(--bd)}
+.rcq-cpick{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;
+ border-left:2px solid transparent}
+.rcq-cpick:hover{background:var(--sf2)}
+.rcq-cpick.on{background:var(--sf2);border-left-color:var(--ac)}
+.rcq-cpick .av{width:26px;height:26px;border-radius:50%;object-fit:cover;flex:none;
+ background:var(--sf3);border:1px solid var(--bd)}
+.rcq-cpick .tx{flex:1;min-width:0}
+.rcq-cpick .tx b{display:block;font-size:12px;font-weight:600;overflow:hidden;
+ text-overflow:ellipsis;white-space:nowrap}
+.rcq-cpick .tx span{font-size:11px;color:var(--m)}
+.rcq-cgrp{padding:8px 12px 4px;font-size:11px;color:var(--f);font-weight:600;
+ letter-spacing:.02em;background:var(--sf)}
+.rcq-csess{padding:8px 12px;cursor:pointer;border-left:2px solid transparent}
+.rcq-csess:hover{background:var(--sf2)}
+.rcq-csess.on{background:var(--sf2);border-left-color:var(--ac)}
+.rcq-csess .t{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:6px}
+.rcq-csess .t span{font-size:10.5px;color:var(--m);font-weight:400;margin-left:auto}
+.rcq-csess .d{font-size:11px;color:var(--m);overflow:hidden;text-overflow:ellipsis;
+ white-space:nowrap;margin-top:1px}
+
+/* 消息窗格 */
+.rcq-thread{padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.rcq-day{align-self:center;font-size:11px;color:var(--f);margin:10px 0 6px;
+ background:var(--sf2);padding:2px 10px;border-radius:999px}
+.rcq-bub{display:flex;gap:8px;max-width:86%;align-items:flex-start}
+.rcq-bub.me{align-self:flex-end;flex-direction:row-reverse}
+.rcq-bub .ava{width:30px;height:30px;border-radius:50%;object-fit:cover;flex:none;
+ background:var(--sf3);border:1px solid var(--bd);font-size:11px;color:var(--m);
+ display:flex;align-items:center;justify-content:center}
+.rcq-bub .col{min-width:0}
+.rcq-bub .who{font-size:11px;color:var(--m);margin-bottom:3px}
+.rcq-bub.me .who{text-align:right}
+.rcq-bub .bd{background:var(--sf2);border:1px solid var(--bd);border-radius:10px;
+ padding:7px 11px;font-size:12.5px;white-space:pre-wrap;word-break:break-word;
+ line-height:1.6}
+.rcq-bub.me .bd{background:var(--acbg);border-color:transparent}
+.rcq-bub .bd.recalled{opacity:.62}
+.rcq-bub .bd img{max-width:230px;max-height:230px;border-radius:7px;display:block;
+ cursor:zoom-in}
+.rcq-bub .bd video{max-width:280px;border-radius:7px;display:block}
+.rcq-bub .bd audio{max-width:250px;display:block;margin-top:3px}
+.rcq-bub .bd .rcq-file{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
+ padding:4px 9px;border:1px solid var(--bd);border-radius:7px;background:var(--sf);
+ color:var(--t);text-decoration:none}
+.rcq-rtag{display:inline-block;margin-top:4px;font-size:10.5px;color:var(--warn);
+ border:1px solid var(--warn);border-radius:999px;padding:0 7px}
+.rcq-empty2{padding:30px 14px;text-align:center;color:var(--f);font-size:12.5px}
+.rcq-loadmore{padding:9px;text-align:center;font-size:11.5px;color:var(--m);cursor:pointer}
+.rcq-loadmore:hover{color:var(--ac)}
+.rcq-media{flex-wrap:wrap;gap:5px;margin-top:5px}
+
+/* 大图查看 */
+.rcq-light{position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.82);
+ display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
+.rcq-light img{max-width:100%;max-height:100%;border-radius:8px}
+.rcq-light .x{position:absolute;top:16px;right:20px;color:#fff;font-size:24px;
+ background:none;border:none;cursor:pointer;line-height:1}
+
+/* 水位条 */
+.rcq-wl{height:6px;background:var(--sf3);border-radius:3px;overflow:hidden;margin-top:6px}
+.rcq-wl i{display:block;height:100%;background:var(--ok);border-radius:3px}
+.rcq-wl i.hi{background:var(--warn)}
+.rcq-wl i.max{background:var(--bad)}
+
 /* toast */
 .rcq-toast{position:fixed;right:24px;bottom:24px;z-index:9999;max-width:420px;
  padding:10px 15px;font-size:12.5px;background:var(--surface-3);color:var(--text);
@@ -406,70 +494,109 @@ const Overview = {
   </div>`,
 }
 
-// ------------------------------------------------------------------ QQ 账户（NapCat 账号登录）
+// ------------------------------------------------------------------ QQ 账户（多实例）
+//
+// 一个 QQ 号 = 一个 NapCat 实例 = 一套 systemd 单元。
+// 端口：WebUI = 6099+index，OneBot = 6700+2*index（避开 rcbot 的 6710）。
 
-const Account = {
+const Accounts = {
   data() {
-    return { S, d: null, busy: '', qr: '', lastUrl: '', err: '', timer: null, tick: 0 }
+    return {
+      S, items: [], busy: '', err: '', qrUin: '', qr: '', qrBusy: false,
+      addOpen: false, addForm: { uin: '' }, adding: false,
+    }
   },
   computed: {
-    st() { return (this.d && this.d.status) || {} },
-    quick() { return (this.d && this.d.quick) || [] },
-    login() { return !!this.st.login && !this.st.offline },
-    phaseText() {
-      const p = this.st.phase || ''
-      if (this.login) return '已登录'
-      if (p === 'waiting_qrcode') return '等待扫码'
-      if (p === 'waiting_confirm') return '已扫码，等待手机确认'
-      if (p === 'restarting') return '登录服务重启中'
-      return p || '未登录'
-    },
+    onlineCount() { return this.items.filter((x) => x.online).length },
   },
-  async mounted() {
-    await this.load()
-    this.timer = setInterval(() => {
-      if (!this.login) this.load(true)
-    }, 2600)
-  },
-  beforeUnmount() { if (this.timer) clearInterval(this.timer) },
+  async mounted() { await this.load() },
   methods: {
     async load(silent) {
       if (!silent) this.busy = 'load'
       try {
-        const d = await call('qqbot.nc.account')
-        this.d = d
-        this.err = (d.errors || []).join('；')
-        if (d.qrcode && d.qrcode !== this.lastUrl) {
-          this.lastUrl = d.qrcode
-          this.qr = makeQr(d.qrcode)
-        }
+        const d = await callData('qqbot.inst.list')
+        this.items = (d && d.items) || []
+        this.err = ''
       } catch (e) {
         this.err = errText(e)
       } finally {
         this.busy = ''
       }
     },
-    async act(a, extra) {
-      this.busy = a
+    stateText(x) {
+      if (x.online) return '已登录'
+      if (x.state === 'active') return '运行中（未登录）'
+      if (x.state === 'failed') return '启动失败'
+      if (x.state === 'inactive') return '已停止'
+      return x.state || '未知'
+    },
+    stateCls(x) {
+      if (x.online) return 'ok'
+      if (x.state === 'failed') return 'off'
+      return ''
+    },
+    async act(x, action) {
+      this.busy = action + x.uin
       try {
-        await call('qqbot.nc.action', Object.assign({ action: a }, extra || {}))
-        const msg = { refresh: '已刷新二维码', restart: '已重启 NapCat 登录',
-          restart_process: '已重启 NapCat 进程' }[a] || '已执行'
-        toast(msg, 'ok')
-        this.lastUrl = ''
-        setTimeout(() => this.load(true), a === 'refresh' ? 1200 : 600)
+        await call('qqbot.inst.action', { uin: x.uin, action })
+        const msg = {
+          start: '已启动', stop: '已停止', restart: '已重启',
+          quick_login: '已发起快登', remove: '已删除实例',
+        }[action] || '已执行'
+        toast(msg + '：' + (x.nick || x.uin), 'ok')
+        this.qrUin = ''
+        await this.load(true)
+        if (action === 'quick_login') setTimeout(() => this.load(true), 2500)
       } catch (e) {
         toast(errText(e), 'err')
       } finally {
         this.busy = ''
       }
     },
-    async quickLogin(q) {
-      this.busy = 'q' + q.uin
+    async showQr(x) {
+      this.qrBusy = true
+      this.qrUin = x.uin
+      this.qr = ''
       try {
-        await call('qqbot.nc.action', { action: 'quick_login', uin: q.uin })
-        toast('已发起快速登录：' + (q.nick || q.uin), 'ok')
-        setTimeout(() => this.load(true), 2500)
+        const d = await callData('qqbot.inst.action', { uin: x.uin, action: 'qrcode' })
+        if (d && d.qrcode) {
+          this.qr = makeQr(d.qrcode)
+        } else {
+          toast('这个实例已经登录了，不需要扫码', 'ok')
+          this.qrUin = ''
+        }
+      } catch (e) {
+        toast(errText(e), 'err')
+        this.qrUin = ''
+      } finally {
+        this.qrBusy = false
+      }
+    },
+    async addInstance() {
+      const uin = String(this.addForm.uin || '').trim()
+      if (!uin) { toast('填 QQ 号', 'err'); return }
+      if (!/^\d{5,12}$/.test(uin)) { toast('QQ 号格式不对', 'err'); return }
+      this.adding = true
+      try {
+        await call('qqbot.inst.add', { uin })
+        toast('实例已创建，正在启动…', 'ok')
+        this.addOpen = false
+        this.addForm.uin = ''
+        await this.load(true)
+        setTimeout(() => this.load(true), 4000)
+      } catch (e) {
+        toast(errText(e), 'err')
+      } finally {
+        this.adding = false
+      }
+    },
+    async remove(x) {
+      if (!confirm('删除实例 ' + (x.nick || x.uin) + '？\n会停掉服务并删掉它的登录态和配置（聊天记录保留在数据库里）。')) return
+      this.busy = 'rm' + x.uin
+      try {
+        await call('qqbot.inst.action', { uin: x.uin, action: 'remove' })
+        toast('已删除', 'ok')
+        await this.load(true)
       } catch (e) {
         toast(errText(e), 'err')
       } finally {
@@ -478,11 +605,278 @@ const Account = {
     },
     copy(text) {
       if (!text) return
+      try { navigator.clipboard.writeText(text); toast('已复制', 'ok') }
+      catch (e) { toast('复制失败', 'err') }
+    },
+  },
+  template: `
+  <div>
+    <div v-if="err" class="rcq-pnl rcq-warn" style="font-size:12px">{{ err }}</div>
+
+    <div class="rcq-pnl">
+      <div class="rcq-ph">
+        <b>QQ 实例</b>
+        <span class="rcq-hint">共 {{ items.length }} 个 · 在线 {{ onlineCount }} 个</span>
+        <span class="sp"></span>
+        <button class="btn btn-sm btn-primary" :disabled="adding" @click="addOpen = !addOpen">
+          {{ addOpen ? '取消' : '+ 添加 QQ 号' }}
+        </button>
+        <button class="btn btn-sm" :disabled="!!busy" @click="load()">刷新</button>
+      </div>
+
+      <div v-if="addOpen" class="rcq-form" style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--bd)">
+        <label class="rcq-fi">
+          <span>QQ 号</span>
+          <input class="input" v-model="addForm.uin" placeholder="例如 1132096843"
+            @keyup.enter="addInstance" />
+        </label>
+        <div class="rcq-fi" style="justify-content:flex-end">
+          <span>&nbsp;</span>
+          <button class="btn btn-primary btn-sm" :disabled="adding" @click="addInstance">
+            {{ adding ? '创建中…' : '创建并启动' }}
+          </button>
+        </div>
+        <div class="rcq-note" style="grid-column:1/-1">
+          每个号是一个独立的 NapCat 实例（独立配置、登录态、显示、端口）。
+          新号第一次必须扫一次码 —— 这是 QQ 客户端的规矩，躲不掉。
+          端口会自动分配（WebUI 6099 起、OneBot 6700 起，避开 rcbot 用的 6710）。
+        </div>
+      </div>
+
+      <div v-if="!items.length" class="rcq-empty"><b>◇</b>还没有实例，点右上角「添加 QQ 号」</div>
+
+      <div class="rcq-inst" v-else>
+        <div class="rcq-icard" v-for="x in items" :key="x.uin" :class="{ on: x.online }">
+          <div class="rcq-itop">
+            <img class="rcq-ava" :src="x.avatar" alt="" v-if="x.avatar" />
+            <div class="rcq-ava" v-else style="width:38px;height:38px"></div>
+            <div class="nm">
+              <b>{{ x.nick || ('QQ ' + x.uin) }}</b>
+              <span>{{ x.uin }}</span>
+            </div>
+            <span class="rcq-pill" :class="stateCls(x)">{{ stateText(x) }}</span>
+          </div>
+
+          <div class="rcq-imeta">
+            <div class="k">WebUI</div><div class="v">{{ x.webui_port || '—' }}</div>
+            <div class="k">OneBot</div><div class="v">{{ x.onebot_port || '—' }}</div>
+            <div class="k">显示</div><div class="v">{{ x.display || '—' }}</div>
+            <div class="k">服务</div><div class="v">{{ x.unit }}</div>
+          </div>
+
+          <div class="rcq-iacts">
+            <button class="btn btn-sm btn-primary" :disabled="!!busy" v-if="!x.online"
+              @click="showQr(x)">{{ qrUin === x.uin ? '加载中…' : '扫码登录' }}</button>
+            <button class="btn btn-sm" :disabled="!!busy" v-if="!x.online"
+              @click="act(x, 'quick_login')">快登</button>
+            <button class="btn btn-sm" :disabled="!!busy" v-if="x.online"
+              @click="act(x, 'restart')">重启</button>
+            <button class="btn btn-sm" :disabled="!!busy"
+              @click="act(x, x.state === 'active' ? 'stop' : 'start')">
+              {{ x.state === 'active' ? '停止' : '启动' }}
+            </button>
+            <button class="btn btn-sm btn-danger" :disabled="!!busy"
+              @click="remove(x)">删除</button>
+          </div>
+
+          <div v-if="qrUin === x.uin" style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
+            <div class="rcq-qr" style="width:150px;height:150px">
+              <div v-html="qr" v-if="qr" style="width:100%;height:100%"></div>
+              <div class="ph" v-else>二维码加载中…</div>
+            </div>
+            <div style="flex:1;min-width:0;font-size:11.5px;color:var(--m);line-height:1.6">
+              用手机 QQ 扫这个码。<br />
+              扫完点「刷新」看状态。<br />
+              每个号第一次都要扫一次。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rcq-pnl">
+      <div class="rcq-ph"><b>怎么跑起来的</b></div>
+      <div class="rcq-note" style="line-height:1.8">
+        每个实例是独立的 systemd 服务 <code class="rcq-mono">napcat@&lt;QQ号&gt;</code>，
+        配一个专属的虚拟显示 <code class="rcq-mono">xvfb@&lt;N&gt;</code>。
+        <br />
+        QQ 本体只有一份，所有实例共享 —— 隔离靠的是各自独立的配置目录、登录态目录和端口。
+        <br />
+        机器人侧（rcbot）为每个号建一条 OneBot 连接，事件按账号归属，聊天记录也按账号分开存。
+      </div>
+    </div>
+  </div>`,
+}
+
+// ------------------------------------------------------------------ 聊天记录
+//
+// 三栏：账号 → 会话 → 消息。目标是不依赖 QQ 客户端也能原样回看。
+
+const Chats = {
+  data() {
+    return {
+      S, accounts: [], sess: [], msgs: [], stats: null,
+      curAcc: '', curSess: '', kw: '', beforeId: 0, more: false,
+      busy: '', err: '', light: '', loadingMore: false,
+    }
+  },
+  computed: {
+    groups() {
+      const g = { group: [], private: [] }
+      for (const s of this.sess) {
+        if (s.kind === 'group') g.group.push(s)
+        else g.private.push(s)
+      }
+      return g
+    },
+    accLabel() {
+      if (!this.curAcc) return '全部账号'
+      const a = this.accounts.find((x) => x.uin === this.curAcc)
+      return a ? (a.nick || a.uin) : this.curAcc
+    },
+    mediaBytes() {
+      return ((this.stats || {}).media || {}).bytes || 0
+    },
+    diskPct() {
+      return ((this.stats || {}).disk || {}).used_pct || 0
+    },
+    diskFree() {
+      return ((this.stats || {}).disk || {}).free || 0
+    },
+  },
+  async mounted() {
+    await this.loadAccounts()
+    await this.loadSessions()
+    await this.loadStats()
+  },
+  methods: {
+    fmtTime, fmtFull, fmtNum,
+    bytes(n) {
+      n = Number(n) || 0
+      if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' G'
+      if (n >= 1048576) return (n / 1048576).toFixed(1) + ' M'
+      if (n >= 1024) return (n / 1024).toFixed(0) + ' K'
+      return n + ' B'
+    },
+    async loadAccounts() {
       try {
-        navigator.clipboard.writeText(text)
-        toast('链接已复制', 'ok')
+        const d = await callData('rcbot.accounts')
+        this.accounts = (d && d.items) || []
+      } catch (e) { /* 账号拿不到不影响看记录 */ }
+    },
+    async loadStats() {
+      try {
+        this.stats = await callData('qqbot.chat.stats', { account_id: this.curAcc })
+      } catch (e) { this.stats = null }
+    },
+    async loadSessions() {
+      this.busy = 'sess'
+      try {
+        const d = await callData('qqbot.chat.sessions', {
+          account_id: this.curAcc, kw: this.kw, limit: 300,
+        })
+        this.sess = (d && d.items) || []
+        if (this.curSess && !this.sess.some((x) => x.session_id === this.curSess)) {
+          this.curSess = ''
+          this.msgs = []
+        }
       } catch (e) {
-        toast('复制失败，手动选中吧', 'err')
+        this.err = errText(e)
+      } finally {
+        this.busy = ''
+      }
+    },
+    async pickAcc(uin) {
+      this.curAcc = uin || ''
+      this.curSess = ''
+      this.msgs = []
+      await this.loadSessions()
+      await this.loadStats()
+    },
+    async pickSess(id) {
+      this.curSess = id
+      this.msgs = []
+      this.beforeId = 0
+      await this.loadMore(true)
+    },
+    async loadMore(reset) {
+      if (!this.curSess) return
+      if (this.loadingMore) return
+      this.loadingMore = true
+      try {
+        const d = await callData('qqbot.chat.messages', {
+          session_id: this.curSess,
+          before_id: reset ? 0 : this.beforeId,
+          limit: 50,
+        })
+        const items = (d && d.items) || []
+        if (reset) this.msgs = items
+        else this.msgs = items.concat(this.msgs)
+        this.more = items.length >= 50
+        if (items.length) this.beforeId = items[0].id
+      } catch (e) {
+        toast(errText(e), 'err')
+      } finally {
+        this.loadingMore = false
+      }
+    },
+    async exportJson() {
+      this.busy = 'exp'
+      try {
+        const d = await callData('qqbot.chat.export', {
+          account_id: this.curAcc, session_id: this.curSess,
+        })
+        const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = 'chat-export-' + Date.now() + '.json'
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 3000)
+        toast('已导出', 'ok')
+      } catch (e) {
+        toast(errText(e), 'err')
+      } finally {
+        this.busy = ''
+      }
+    },
+    mediaUrl(m) {
+      if (!m || !m.rel) return ''
+      // 媒体副本落在 /opt/rcbot/media/<账号>/<日期>/…，
+      // 面板的文件预览通道能直接读任意路径（fmRoots 默认 /），零面板改动。
+      return '/api/fm/preview?path=' + encodeURIComponent('/opt/rcbot/media/' + m.rel)
+    },
+    dayOf(ts) {
+      const d = new Date((ts || 0) * 1000)
+      return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate())
+    },
+    isNewDay(i) {
+      if (i === 0) return true
+      return this.dayOf(this.msgs[i].created_at) !== this.dayOf(this.msgs[i - 1].created_at)
+    },
+    segsOf(m) { return m.segs || [] },
+    mediaOf(m) { return m.media || [] },
+    textOf(m) {
+      if (m.text) return m.text
+      return ''
+    },
+    openLight(m) {
+      const u = this.mediaUrl(m)
+      if (u) this.light = u
+    },
+    async purge() {
+      if (!confirm('清理媒体文件？\n\n只删图片/语音/视频等媒体副本，聊天记录文本一条不删。')) return
+      this.busy = 'purge'
+      try {
+        const r = await callData('qqbot.chat.purge_media', {
+          account_id: this.curAcc, session_id: this.curSess, confirm: true,
+        })
+        toast('已清理 ' + (r.files || 0) + ' 个文件，释放 ' + this.bytes(r.bytes || 0), 'ok')
+        await this.loadStats()
+        await this.loadSessions()
+      } catch (e) {
+        toast(errText(e), 'err')
+      } finally {
+        this.busy = ''
       }
     },
   },
@@ -490,81 +884,148 @@ const Account = {
   <div>
     <div v-if="err" class="rcq-pnl rcq-warn" style="font-size:12px">{{ err }}</div>
 
-    <div class="rcq-split">
-      <div>
-        <div class="rcq-pnl">
-          <div class="rcq-ph"><b>账号状态</b><span class="sp"></span>
-            <span class="rcq-pill" :class="login ? 'ok' : ''">{{ phaseText }}</span>
-          </div>
-          <div class="rcq-acct" style="padding:0 0 12px">
-            <img class="rcq-ava" :src="st.avatar" alt="" v-if="st.avatar" />
-            <div class="rcq-ava" v-else></div>
-            <div style="min-width:0">
-              <div class="rcq-nick">{{ st.nick || '未登录' }}
-                <span class="rcq-dot" :class="login ? 'on' : 'off'"></span></div>
-              <div class="rcq-uin">{{ st.uin || '—' }}</div>
-            </div>
-          </div>
-          <div class="rcq-kv">
-            <div class="k">核心</div><div class="v">{{ st.coreReady ? '就绪' : '未就绪' }}</div>
-            <div class="k">登录错误</div><div class="v">{{ st.err || '无' }}</div>
-          </div>
-          <div class="rcq-flex" style="margin-top:14px">
-            <button class="btn btn-sm" :disabled="!!busy" @click="load()">刷新状态</button>
-            <button class="btn btn-sm" :disabled="!!busy" @click="act('refresh')">刷新二维码</button>
-            <button class="btn btn-sm" :disabled="!!busy" @click="act('restart')">重启登录</button>
-          </div>
-        </div>
+    <div v-if="stats" class="rcq-pnl">
+      <div class="rcq-flex">
+        <div class="rcq-fld"><span class="k">消息</span>
+          <span class="v">{{ fmtNum(stats.chat.messages) }} 条</span></div>
+        <div class="rcq-fld"><span class="k">撤回</span>
+          <span class="v">{{ fmtNum(stats.chat.recalled) }} 条</span></div>
+        <div class="rcq-fld"><span class="k">媒体</span>
+          <span class="v">{{ bytes(mediaBytes) }}</span></div>
+        <div class="rcq-fld"><span class="k">磁盘可用</span>
+          <span class="v">{{ bytes(diskFree) }}</span></div>
+        <span class="sp" style="margin-left:auto"></span>
+        <button class="btn btn-sm" :disabled="!!busy" @click="exportJson">导出 JSON</button>
+        <button class="btn btn-sm" :disabled="!!busy" @click="purge">清理媒体</button>
+      </div>
+      <div class="rcq-wl" title="磁盘占用 {{ diskPct }}%">
+        <i :class="diskPct >= 95 ? 'max' : (diskPct >= 85 ? 'hi' : '')" :style="{ width: diskPct + '%' }"></i>
+      </div>
+      <div class="rcq-note">
+        聊天记录永久保留，不会自动删除。磁盘占用超过 85% 会有提醒，
+        届时可以「清理媒体」腾空间 —— 只删媒体文件，文字记录一条不动。
+      </div>
+    </div>
 
-        <div class="rcq-pnl">
-          <div class="rcq-ph"><b>快速登录</b><span class="sp"></span>
-            <span class="rcq-hint">{{ quick.length }} 个已保存账号</span></div>
-          <div v-if="!quick.length" class="rcq-empty"><b>⇥</b>没有保存过的账号</div>
-          <div class="rcq-list" v-else>
-            <div class="rcq-row" v-for="q in quick" :key="q.uin">
-              <img class="rcq-ava" :src="q.avatar" alt="" style="width:34px;height:34px" v-if="q.avatar" />
-              <div class="rcq-ava" v-else style="width:34px;height:34px"></div>
-              <div class="main">
-                <div class="t">{{ q.nick || q.uin }}</div>
-                <div class="d">{{ q.uin }}</div>
-              </div>
-              <div class="acts">
-                <button class="btn btn-sm btn-primary" :disabled="!!busy" @click="quickLogin(q)">登录</button>
-              </div>
+    <div class="rcq-chats">
+      <!-- 账号栏 -->
+      <div class="rcq-chatcol">
+        <div class="hd"><b>账号</b></div>
+        <div class="bd">
+          <div class="rcq-cpick" :class="{ on: !curAcc }" @click="pickAcc('')">
+            <div class="av" style="display:flex;align-items:center;justify-content:center;font-size:11px">全</div>
+            <div class="tx"><b>全部账号</b></div>
+          </div>
+          <div class="rcq-cpick" v-for="a in accounts" :key="a.uin"
+            :class="{ on: curAcc === a.uin }" @click="pickAcc(a.uin)">
+            <img class="av" :src="a.avatar" alt="" v-if="a.avatar" />
+            <div class="av" v-else style="display:flex;align-items:center;justify-content:center;font-size:11px">
+              {{ (a.nick || a.uin || '?').slice(0, 1) }}
+            </div>
+            <div class="tx">
+              <b>{{ a.nick || a.uin }}</b>
+              <span>{{ a.uin }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="rcq-pnl">
-        <div class="rcq-ph"><b>扫码登录</b><span class="sp"></span>
-          <span class="rcq-hint" v-if="!login">二维码 2 秒自动刷新</span>
-          <span class="rcq-pill ok" v-else>已登录，无需扫码</span>
+      <!-- 会话栏 -->
+      <div class="rcq-chatcol">
+        <div class="hd">
+          <b>会话</b>
+          <span class="rcq-hint" style="margin-left:auto">{{ sess.length }}</span>
         </div>
-        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
-          <div class="rcq-qr" v-if="!login">
-            <div v-html="qr" v-if="qr" style="width:100%;height:100%"></div>
-            <div class="ph" v-else>二维码加载中…</div>
+        <div class="ft">
+          <input class="input" v-model="kw" placeholder="搜索内容/发送者"
+            style="width:100%" @keyup.enter="loadSessions()" />
+        </div>
+        <div class="bd">
+          <div v-if="!sess.length" class="rcq-empty2">还没有聊天记录</div>
+          <template v-else>
+            <div v-if="groups.group.length" class="rcq-cgrp">群聊</div>
+            <div class="rcq-csess" v-for="s in groups.group" :key="s.session_id"
+              :class="{ on: curSess === s.session_id }" @click="pickSess(s.session_id)">
+              <div class="t">{{ s.display || s.target_id }}
+                <span>{{ fmtTime(s.last_at) }}</span></div>
+              <div class="d">{{ s.msg_count }} 条{{ s.recalled_count ? ' · 撤回 ' + s.recalled_count : '' }}</div>
+            </div>
+            <div v-if="groups.private.length" class="rcq-cgrp">私信</div>
+            <div class="rcq-csess" v-for="s in groups.private" :key="s.session_id"
+              :class="{ on: curSess === s.session_id }" @click="pickSess(s.session_id)">
+              <div class="t">{{ s.display || s.target_id }}
+                <span>{{ fmtTime(s.last_at) }}</span></div>
+              <div class="d">{{ s.msg_count }} 条{{ s.recalled_count ? ' · 撤回 ' + s.recalled_count : '' }}</div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- 消息窗格 -->
+      <div class="rcq-chatcol">
+        <div class="hd">
+          <b>{{ curSess ? (accLabel) : '聊天记录' }}</b>
+          <span class="rcq-hint" style="margin-left:auto">
+            {{ curSess ? msgs.length + ' 条' : '左边选一个会话' }}
+          </span>
+        </div>
+        <div class="bd" ref="thread">
+          <div v-if="!curSess" class="rcq-empty2">
+            选一个会话看完整聊天内容<br />
+            包含文本、表情、图片、视频、语音<br />
+            撤回的消息会保留原文并标注
           </div>
-          <div class="rcq-qr" v-else style="background:var(--sf2)">
-            <div class="rcq-qr-ok"><b>✓</b>已登录<br />{{ st.nick || st.uin }}</div>
-          </div>
-          <div style="flex:1;min-width:200px">
-            <div class="rcq-kv">
-              <div class="k">登录方式</div><div class="v">手机 QQ 扫码</div>
-              <div class="k">状态</div><div class="v">{{ phaseText }}</div>
+          <div v-else class="rcq-thread">
+            <div class="rcq-loadmore" v-if="more" @click="loadMore(false)">
+              {{ loadingMore ? '加载中…' : '向上加载更多' }}
             </div>
-            <div class="rcq-flex" style="margin-top:12px">
-              <button class="btn btn-sm" :disabled="!!busy" @click="act('refresh')">换一张</button>
-              <button class="btn btn-sm" :disabled="!!busy || !(d && d.qrcode)" @click="copy(d && d.qrcode)">复制链接</button>
-            </div>
-            <div class="rcq-note">
-              二维码是本地画的（NapCat 只给跳转链接，不是图片）。
-              扫码后手机会弹确认，确认完这里会自动变成「已登录」。
-            </div>
+            <template v-for="(m, i) in msgs" :key="m.id">
+              <div class="rcq-day" v-if="isNewDay(i)">{{ dayOf(m.created_at) }}</div>
+              <div class="rcq-bub" :class="{ me: m.role === 'assistant' }">
+                <div class="ava" v-if="m.role !== 'assistant'">
+                  {{ (m.sender_name || m.sender_id || '?').slice(0, 1) }}
+                </div>
+                <div class="col">
+                  <div class="who" v-if="m.role !== 'assistant'">
+                    {{ m.sender_name || m.sender_id }}
+                    <span style="opacity:.7">{{ fmtFull(m.created_at).slice(11) }}</span>
+                  </div>
+                  <div class="bd" :class="{ recalled: m.recalled }">
+                    <span v-if="m.role === 'system'" style="color:var(--f);font-style:italic">
+                      {{ textOf(m) }}
+                    </span>
+                    <span v-else>{{ textOf(m) }}</span>
+
+                    <template v-for="md in mediaOf(m)" :key="md.seg">
+                      <img v-if="md.kind === 'image' && md.local" :src="mediaUrl(md)"
+                        @click="openLight(md)" />
+                      <img v-else-if="md.kind === 'face' && md.local" :src="mediaUrl(md)"
+                        style="width:26px;height:26px" />
+                      <video v-else-if="md.kind === 'video' && md.local" controls
+                        :src="mediaUrl(md)"></video>
+                      <audio v-else-if="md.kind === 'record' && md.local" controls
+                        :src="mediaUrl(md)"></audio>
+                      <a v-else-if="md.local" class="rcq-file" :href="mediaUrl(md)" download>
+                        {{ md.name || (md.kind + ' 文件') }}
+                      </a>
+                      <span v-else class="rcq-note">
+                        [{{ md.kind }} 已失效]
+                      </span>
+                    </template>
+                  </div>
+                  <span class="rcq-rtag" v-if="m.recalled">已被撤回</span>
+                </div>
+              </div>
+            </template>
+            <div v-if="curSess && !msgs.length" class="rcq-empty2">这个会话还没有记录</div>
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="light" class="rcq-light" @click="light = ''">
+      <button class="x" @click.stop="light = ''">×</button>
+      <img :src="light" alt="" />
     </div>
   </div>`,
 }
@@ -1509,7 +1970,8 @@ const Settings = {
 
 const TABS = [
   { id: 'overview', label: '概览', comp: Overview },
-  { id: 'account', label: 'QQ 账户', comp: Account },
+  { id: 'account', label: 'QQ 账户', comp: Accounts },
+  { id: 'chats', label: '聊天记录', comp: Chats },
   { id: 'persona', label: '人格', comp: Persona },
   { id: 'sessions', label: '会话管理', comp: Sessions },
   { id: 'providers', label: '模型提供商', comp: Providers },
