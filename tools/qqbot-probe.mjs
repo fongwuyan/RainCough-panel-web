@@ -18,7 +18,7 @@ const shotsDir = argOf('--shots', '')
 const fails = []
 const ok = (c, l, e) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${l}${e ? '  ' + e : ''}`); if (!c) fails.push(l) }
 
-const TABS = ['概览', 'QQ 账户', '人格', '会话管理', '模型提供商', '运行日志', '设置']
+const TABS = ['概览', 'QQ 账户', '聊天记录', '查询', '媒体库', '人格', '会话管理', '模型提供商', '运行日志', '设置']
 
 const targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json()
 const page = targets.find((t) => t.type === 'page')
@@ -36,7 +36,13 @@ ws.onmessage = (e) => {
     const d = m.params && m.params.exceptionDetails
     jsErrors.push((d && (d.text || (d.exception && d.exception.description))) || 'unknown')
   }
-  if (m.method === 'Network.loadingFailed') failedReqs.push(m.params.errorText + ' ' + (m.params.type || ''))
+  if (m.method === 'Network.loadingFailed') {
+    // ERR_ABORTED 是浏览器主动中止（切页签时卸载组件会中止正在加载的媒体），
+    // 不是请求失败 —— 不该算进失败列表。
+    const err = m.params.errorText || ''
+    if (err.includes('ERR_ABORTED')) return
+    failedReqs.push(err + ' ' + (m.params.type || ''))
+  }
   if (m.method === 'Network.responseReceived') {
     const r = m.params.response
     if (r.status >= 400 && r.url.includes('/api/')) failedReqs.push(`HTTP ${r.status} ${r.url}`)
@@ -112,7 +118,9 @@ for (let i = 0; i < TABS.length; i++) {
       cards: document.querySelectorAll('.rcq-pnl').length,
     }
   })()`)
-  const good = clicked && info && info.len > 40 && info.onTab === name
+  // 配置类页签（人格/模型提供商）本来就没数据，空列表是正常状态
+  const EMPTY_OK = new Set(['人格', '模型提供商'])
+  const good = clicked && info && (info.len > 40 || (EMPTY_OK.has(name) && info.cards > 0)) && info.onTab === name
   ok(good, `选项卡 ${name}`,
     `len=${info && info.len} 卡片=${info && info.cards} 高亮=${info && info.onTab}` +
     (info && info.warn ? ` 警告=${info.warn.slice(0, 80)}` : ''))

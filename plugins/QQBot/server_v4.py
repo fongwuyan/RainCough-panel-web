@@ -26,6 +26,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rcplugin as rc  # noqa: E402
+from rcbot import single  # noqa: E402  单账户：NapCat 实例管理
 
 NAME = "QQBot"          # ★ 必须与插件目录名一致（目录名即插件身份，不改）
 VERSION = "1.3.0"
@@ -156,7 +157,12 @@ def _nc(path, body=None, method="POST", timeout=15, retry=True):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
+            out = json.loads(r.read().decode("utf-8", "replace"))
+        # 同 _nc_at：HTTP 200 + body Unauthorized 也要重登重试
+        if retry and _is_unauthorized(out):
+            _nc_login(force=True)
+            return _nc(path, body, method, timeout, retry=False)
+        return out
     except urllib.error.HTTPError as e:
         if retry and e.code in (401, 403):
             _nc_login(force=True)
@@ -214,6 +220,27 @@ def _nc_login_at(base, token, force=False):
         return cred
 
 
+def _is_unauthorized(r):
+    """判断 NapCat 响应是不是「凭据失效」。
+
+    ★ NapCat 的 Unauthorized 有两种形态，必须都认：
+      ① HTTP 401/403（urlopen 抛 HTTPError）
+      ② **HTTP 200 + body 里 {"code":-1,"message":"Unauthorized"}**
+         —— 实测新版 NapCat 走的是这种：HTTP 层是成功的，
+         只是 body 说没登录。只处理 ① 的话，重登逻辑永远不触发，
+         插件会一直拿 50 分钟前缓存的旧 credential 去请求，
+         报 "NapCat /QQLogin/CheckLoginStatus 失败：Unauthorized"，
+         而实际只要重新登录一次 WebUI 就能好。
+    """
+    if not isinstance(r, dict):
+        return False
+    code = r.get("code")
+    msg = str(r.get("message") or r.get("msg") or "")
+    if code == -1 and "unauthorized" in msg.lower():
+        return True
+    return False
+
+
 def _nc_at(base, token, path, body=None, method="POST", timeout=15, retry=True):
     url = base.rstrip("/") + "/api" + path
     data = json.dumps(body if body is not None else {}).encode("utf-8") if method == "POST" else None
@@ -222,7 +249,12 @@ def _nc_at(base, token, path, body=None, method="POST", timeout=15, retry=True):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
+            out = json.loads(r.read().decode("utf-8", "replace"))
+        # ② HTTP 200 但 body 是 Unauthorized → 重新登录后重试一次
+        if retry and _is_unauthorized(out):
+            _nc_login_at(base, token, force=True)
+            return _nc_at(base, token, path, body, method, timeout, retry=False)
+        return out
     except urllib.error.HTTPError as e:
         if retry and e.code in (401, 403):
             _nc_login_at(base, token, force=True)
@@ -383,6 +415,54 @@ def conn_save(params):
 
 # ---------------------------------------------------------------- 概览（NapCat 基础信息）
 
+def _qa_avatar(uin, size=100):
+    """按 QQ 号拼头像 URL。
+
+    ★ OneBot 的 get_login_info 只返回 {user_id, nickname}，**没有头像**；
+      NapCat 的 GetQuickLoginListNew 有 faceUrl，但只有登录过的号才有。
+      头像是腾讯的独立服务 knowing QQ 号就能取：
+          https://q1.qlogo.cn/g?b=qq&nk=<QQ号>&s=<边长>
+      所以只要知道号就能显示头像，不必等登录成功。
+    """
+    u = str(uin or '').strip()
+    if not u.isdigit() or len(u) < 5 or len(u) > 12:
+        return ''
+    return "https://q1.qlogo.cn/g?b=qq&nk=%s&s=%d" % (u, int(size))
+
+
+def _nc_login_profile(webui_port):
+    """取当前实例已登录账号的资料 {uin, nick, avatar}。
+
+    ★ GetQQLoginInfo 是唯一可靠的来源：
+      - GetQuickLoginListNew 扫码刚登录时是空的（实测返回 []）
+      - OneBot 的 get_login_info 要等 6700 起来，而 OneBot 端口
+        是登录后才监听的，时机上不一定赶得上
+
+    返回空 dict 表示还没登录。
+    """
+    try:
+        wp = int(webui_port or 0)
+    except Exception:
+        return {}
+    if wp <= 0:
+        return {}
+    base = "http://127.0.0.1:%d" % wp
+    token = cfg_napcat_token()
+    try:
+        info = _nc_data_at(base, token, "/QQLogin/GetQQLoginInfo", timeout=8) or {}
+    except Exception:
+        return {}
+    uin = str(info.get("uin") or "")
+    if not uin:
+        return {}
+    nick = info.get("nick") or info.get("nickName") or ""
+    return {
+        "uin": uin,
+        "nick": nick,
+        "avatar": info.get("faceUrl") or info.get("avatar") or _qa_avatar(uin),
+    }
+
+
 def _sysinfo_sse(timeout=7):
     """NapCat 的 /base/GetSysStatusRealTime 是 SSE，取第一帧就够。"""
     cfg = _cfg()["napcat"]
@@ -430,42 +510,90 @@ def nc_overview(params):
     out = {"ok": True, "account": {}, "versions": {}, "sys": None,
            "counters": {}, "proc": None, "errors": []}
 
+    # ★ 单账户：只有一个 NapCat 实例（目录固定 main）。
+    #   QQ 号问 NapCat 要（GetQQLoginInfo），没登录时是空串 ——
+    #   但概览照样要显示"运行中/等待扫码"，不能因为没登录就整页空白。
+    single.ensure_running()
+    uin = single.pick_instance()
+    wp = single.webui_port()
+    base = "http://127.0.0.1:%d" % wp if wp else ""
+    token = cfg_napcat_token()
+    out["instances"] = [{"uin": uin, "webui": base, "unit": single.UNIT}]
+    if not uin:
+        out["errors"].append("还没有登录 QQ 账户，去「QQ 账户」扫码登录")
+
+    def nc(path, body=None, method="POST", timeout=15):
+        r = _nc_at(base, token, path, body, method, timeout)
+        if r.get("code") not in (0, None):
+            raise RuntimeError("NapCat %s 失败：%s" % (path, r.get("message") or r.get("code")))
+        return r.get("data")
+
     # 账号
     try:
-        st = _nc_data("/QQLogin/CheckLoginStatus") or {}
+        st = nc("/QQLogin/CheckLoginStatus") or {}
         out["account"].update({
             "login": bool(st.get("isLogin")),
             "offline": bool(st.get("isOffline")),
             "phase": st.get("loginPhase") or "",
             "qrcode": st.get("qrcodeurl") or "",
+            "uin": uin,
         })
     except Exception as e:
         out["errors"].append("账号状态：%s" % str(e)[:120])
 
+    # ★ 账号资料：优先 GetQQLoginInfo（当前登录会话，一定准）。
+    #   GetQuickLoginListNew 是"本机历史登录过的号列表"，
+    #   扫码刚登录时它是空的（实测登录成功后返回 []）——
+    #   靠它取昵称/头像会导致概览页账号信息全空。
     try:
-        ql = _nc_data("/QQLogin/GetQuickLoginListNew") or []
+        prof = nc("/QQLogin/GetQQLoginInfo") or {}
+        if prof.get("uin"):
+            out["account"].update({
+                "uin": str(prof.get("uin") or uin),
+                "nick": prof.get("nick") or prof.get("nickName") or "",
+                "avatar": prof.get("faceUrl") or prof.get("avatar") or "",
+            })
+    except Exception as e:
+        out["errors"].append("账号资料：%s" % str(e)[:120])
+
+    # 快登列表（可能有多个历史号）
+    try:
+        ql = nc("/QQLogin/GetQuickLoginListNew") or []
         if isinstance(ql, dict):
             ql = ql.get("list") or []
-        if ql:
-            cur = ql[0]
-            out["account"].update({
-                "uin": str(cur.get("uin") or ""),
-                "nick": cur.get("nickName") or "",
-                "avatar": cur.get("faceUrl") or "",
-            })
         out["quick"] = [{"uin": str(x.get("uin") or ""), "nick": x.get("nickName") or "",
                          "avatar": x.get("faceUrl") or ""} for x in ql]
     except Exception as e:
         out["errors"].append("快速登录：%s" % str(e)[:120])
 
+    # ★ 头像兜底：GetQuickLoginListNew 只有登录过才有数据，
+    #   没登录时概览的头像/昵称就全是空的（界面上一片灰圆圈）。
+    #   QQ 头像是独立服务，只要知道 QQ 号就能取：
+    #       https://q1.qlogo.cn/g?b=qq&nk=<QQ号>&s=100
+    #   昵称再从 rcbot 侧兜底（它连上 OneBot 后会拿 get_login_info）。
+    uin_now = str(out["account"].get("uin") or "")
+    if not out["account"].get("avatar") and uin_now:
+        out["account"]["avatar"] = _qa_avatar(uin_now)
+    if not out["account"].get("nick") and uin_now:
+        try:
+            bot = _data("/api/status", timeout=8) or {}
+            for a in (bot.get("accounts") or []):
+                if str(a.get("uin") or "") == uin_now:
+                    out["account"]["nick"] = a.get("nick") or ""
+                    if not out["account"].get("avatar"):
+                        out["account"]["avatar"] = a.get("avatar") or _qa_avatar(uin_now)
+                    break
+        except Exception:
+            pass
+
     # 版本
     try:
-        v = _nc_data("/base/GetNapCatVersion", method="GET")
+        v = nc("/base/GetNapCatVersion", method="GET")
         out["versions"]["napcat"] = (v or {}).get("version") if isinstance(v, dict) else str(v)
     except Exception as e:
         out["errors"].append("NapCat 版本：%s" % str(e)[:120])
     try:
-        qv = _nc_data("/base/QQVersion", method="GET")
+        qv = nc("/base/QQVersion", method="GET")
         out["versions"]["qq"] = qv if isinstance(qv, str) else (qv or {}).get("version")
     except Exception as e:
         out["errors"].append("QQ 版本：%s" % str(e)[:120])
@@ -477,7 +605,7 @@ def nc_overview(params):
 
     # 网络计数
     try:
-        ob = _nc_data("/OB11Config/GetConfig") or {}
+        ob = nc("/OB11Config/GetConfig") or {}
         net = ob.get("network") or {}
         out["counters"] = {
             "configs": len([1 for k in ("httpServers", "httpClients", "websocketServers",
@@ -503,7 +631,6 @@ def nc_overview(params):
 
 # ---------------------------------------------------------------- QQ 账户
 
-@rc.interface("qqbot.nc.account")
 def nc_account(params):
     out = {"ok": True, "status": {}, "quick": [], "qrcode": "", "errors": []}
     try:
@@ -519,6 +646,19 @@ def nc_account(params):
     except Exception as e:
         out["errors"].append("账号状态：%s" % str(e)[:140])
 
+    # 当前登录账号的资料（GetQQLoginInfo 才是准的，快登列表扫码后是空的）
+    try:
+        info = _nc_data("/QQLogin/GetQQLoginInfo") or {}
+        if info.get("uin"):
+            out["status"].update({
+                "uin": str(info.get("uin")),
+                "nick": info.get("nick") or info.get("nickName") or "",
+                "avatar": info.get("faceUrl") or info.get("avatar")
+                          or _qa_avatar(info.get("uin")),
+            })
+    except Exception as e:
+        out["errors"].append("账号资料：%s" % str(e)[:140])
+
     try:
         ql = _nc_data("/QQLogin/GetQuickLoginListNew") or []
         if isinstance(ql, dict):
@@ -526,7 +666,8 @@ def nc_account(params):
         out["quick"] = [{"uin": str(x.get("uin") or ""), "nick": x.get("nickName") or "",
                          "avatar": x.get("faceUrl") or "",
                          "online": bool(x.get("isQuickLogin"))} for x in ql]
-        if out["quick"] and not out["status"].get("login") is None:
+        # 快登列表非空但状态里还没有 uin 时，用它兜底
+        if out["quick"] and not out["status"].get("uin"):
             out["status"]["uin"] = out["quick"][0]["uin"]
             out["status"]["nick"] = out["quick"][0]["nick"]
             out["status"]["avatar"] = out["quick"][0]["avatar"]
@@ -543,7 +684,6 @@ def nc_account(params):
     return out
 
 
-@rc.interface("qqbot.nc.action")
 def nc_action(params):
     act = (params or {}).get("action") or ""
     if act == "qrcode":
@@ -564,7 +704,6 @@ def nc_action(params):
 
 # ---------------------------------------------------------------- 运行日志（NapCat）
 
-@rc.interface("qqbot.nc.logs")
 def nc_logs(params):
     p = params or {}
     n = max(50, min(2000, int(p.get("lines") or 400)))
@@ -599,7 +738,6 @@ def nc_logs(params):
                 "读不到 systemd 日志（可能不是 systemd 起的，或当前用户没权限）")}
 
 
-@rc.interface("qqbot.nc.logs.clear")
 def nc_logs_clear(params):
     with _LOG_LOCK:
         _LOG_BUF.clear()
@@ -612,10 +750,6 @@ def nc_logs_clear(params):
 # 端口：WebUI = 6099+index，OneBot = 6700+2*index（避开 rcbot 的 6710）。
 
 
-def _inst_cfg():
-    return _cfg().get("instances") or {}
-
-
 def _run(cmd, timeout=60):
     """跑一条命令，返回 (rc, 输出)。"""
     try:
@@ -623,40 +757,6 @@ def _run(cmd, timeout=60):
         return p.returncode, ((p.stdout or b"") + (p.stderr or b"")).decode("utf-8", "replace")
     except Exception as e:
         return 1, str(e)
-
-
-def _inst_dir(uin):
-    base = (_inst_cfg().get("base_dir") or "/opt/napcat/instances").rstrip("/")
-    return os.path.join(base, str(uin))
-
-
-def _inst_env(uin):
-    """读实例的 env 文件（端口/display）。"""
-    out = {}
-    try:
-        with open(os.path.join(_inst_dir(uin), "env"), "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    out[k.strip()] = v.strip()
-    except Exception:
-        pass
-    return out
-
-
-def _inst_list():
-    """列出所有实例目录。"""
-    base = (_inst_cfg().get("base_dir") or "/opt/napcat/instances").rstrip("/")
-    out = []
-    try:
-        for n in sorted(os.listdir(base)):
-            d = os.path.join(base, n)
-            if os.path.isdir(d):
-                out.append(n)
-    except Exception:
-        pass
-    return out
 
 
 def _unit_state(unit):
@@ -669,159 +769,260 @@ def _unit_enabled(unit):
     return (o or "").strip() or "unknown"
 
 
-def _legacy_instance():
-    """旧式 napcat.service（升级前就有的单实例）也要出现在列表里。
+@rc.interface("qqbot.account.info")
+def account_info(params):
+    """当前账户信息（单账户）。
 
-    早期部署只有���个 napcat.service，它不在 instances/ 目录下，
-    面板扫不到 → 用户以为自己的号"不见了"。这里把它补进来。
+    登录状态、QQ 号、昵称一律问 NapCat 的接口拿，这里不自己推断。
+    返回 {uin, nick, avatar, login, accepted, core_ready, phase,
+          state, webui_port, onebot_port, webui, error}。
     """
-    unit = (_cfg().get("napcat") or {}).get("unit") or "napcat"
-    if not unit or unit.startswith("napcat@"):
-        return None
-    state = _unit_state(unit)
-    if state in ("unknown", "not-found", ""):
-        return None
-    base = (_cfg().get("napcat") or {}).get("base") or "http://127.0.0.1:6099"
-    port = 0
+    out = {"uin": "", "nick": "", "avatar": "", "login": False,
+           "accepted": False, "core_ready": False, "phase": "",
+           "state": "unknown", "webui_port": 0, "onebot_port": 0,
+           "webui": "", "online": False, "connected": False, "error": ""}
+    ok, st = single.ensure_running()
+    out["state"] = st
+    wp = single.webui_port()
+    op = single.onebot_port()
+    out["webui_port"] = wp
+    out["onebot_port"] = op
+    out["webui"] = "http://127.0.0.1:%d" % wp
+
+    # ① 登录状态 —— NapCat /QQLogin/CheckLoginStatus
     try:
-        port = int(base.rsplit(":", 1)[-1])
+        s = _nc_data_at(out["webui"], cfg_napcat_token(),
+                         "/QQLogin/CheckLoginStatus", timeout=8) or {}
+        out["login"] = bool(s.get("isLogin"))
+        out["accepted"] = bool(s.get("qrLoginAccepted"))
+        out["core_ready"] = bool(s.get("coreReady"))
+        out["phase"] = s.get("loginPhase") or ""
+        out["qrcode"] = s.get("qrcodeurl") or ""
+    except Exception as e:
+        out["error"] = str(e)[:160]
+
+    # ② 当前登录号 —— NapCat /QQLogin/GetQQLoginInfo
+    #    ★ 未登录时它返回 {uid:"",uin:"",nick:""}（不是报错），别当异常
+    if out["login"]:
+        try:
+            info = _nc_data_at(out["webui"], cfg_napcat_token(),
+                               "/QQLogin/GetQQLoginInfo", timeout=8) or {}
+            out["uin"] = str(info.get("uin") or "")
+            out["nick"] = info.get("nick") or ""
+            out["avatar"] = info.get("faceUrl") or info.get("avatar") or ""
+        except Exception:
+            pass
+    if not out["avatar"]:
+        out["avatar"] = _qa_avatar(out["uin"])
+
+    # ③ rcbot 侧连接状态
+    try:
+        st2 = _data("/api/status", timeout=8) or {}
+        accs = st2.get("accounts") or []
+        a = accs[0] if accs else None
+        if a:
+            out["online"] = bool(a.get("online"))
+            out["connected"] = bool(a.get("connected"))
+            if not out["uin"]:
+                out["uin"] = str(a.get("uin") or "")
+            if not out["nick"]:
+                out["nick"] = a.get("nick") or ""
+            if not out["avatar"]:
+                out["avatar"] = a.get("avatar") or _qa_avatar(out["uin"])
     except Exception:
         pass
-    return {"uin": "", "unit": unit, "xvfb_unit": "", "state": state,
-            "enabled": _unit_enabled(unit), "webui_port": port,
-            "onebot_port": 0, "display": "", "dir": "", "webui": base,
-            "legacy": True}
+    return {"ok": True, "data": out}
 
 
-@rc.interface("qqbot.inst.list")
-def inst_list(params):
-    """实例列表：每个 QQ 号一个 NapCat 实例。"""
-    cfg = _cfg()
-    icfg = _inst_cfg()
-    base = (icfg.get("base_dir") or "/opt/napcat/instances").rstrip("/")
-    items = []
-    legacy = _legacy_instance()
-    if legacy:
-        items.append(legacy)
-    for uin in _inst_list():
-        env = _inst_env(uin)
-        webui_port = env.get("WEBUI_PORT") or ""
-        ob_port = env.get("ONEBOT_PORT") or ""
-        disp = env.get("DISPLAY") or ""
-        items.append({
-            "uin": uin,
-            "unit": "napcat@%s" % uin,
-            "xvfb_unit": ("xvfb-rcbot-%s" % disp.lstrip(":")) if disp.lstrip(":").isdigit() else "",
-            "state": _unit_state("napcat@%s" % uin),
-            "enabled": _unit_enabled("napcat@%s" % uin),
-            "webui_port": int(webui_port) if webui_port.isdigit() else 0,
-            "onebot_port": int(ob_port) if ob_port.isdigit() else 0,
-            "display": disp,
-            "dir": _inst_dir(uin),
-            "webui": ("http://127.0.0.1:%s" % webui_port) if webui_port else "",
-        })
-    # rcbot 侧的实际连接状态（哪些号真的连上了）
-    try:
-        st = _data("/api/accounts", timeout=15) or {}
-        live = {str(a.get("uin") or ""): a for a in (st.get("items") or [])}
-    except Exception:
-        live = {}
-    for it in items:
-        a = live.get(str(it["uin"]))
-        if a:
-            it["online"] = bool(a.get("online"))
-            it["nick"] = a.get("nick") or ""
-            it["avatar"] = a.get("avatar") or ""
-            it["account_id"] = a.get("id") or ""
-            it["connected"] = bool(a.get("connected"))
-        else:
-            it["online"] = False
-            it["nick"] = ""
-            it["avatar"] = ""
-    return {"ok": True, "data": {"items": items, "base_dir": base,
-                                 "count": len(items)}}
+@rc.interface("qqbot.account.qrcode")
+def account_qrcode(params):
+    """取登录二维码 —— 直接问 NapCat 要。
 
-
-@rc.interface("qqbot.inst.add")
-def inst_add(params):
-    """新增实例：建目录 + 写 env + 写 systemd 模板 + 启动 + 取二维码。
-
-    需要 root（非 root 面板会明确拒绝，不 sudo）。
+    已登录 → 返回空码 + 当前账号（前端提示"已经登录了"）。
+    未登录 → 返回二维码地址；顺便让 NapCat 出一张新的。
     """
-    p = params or {}
-    uin = str(p.get("uin") or "").strip()
-    if not uin.isdigit():
-        raise RuntimeError("uin 必须是数字")
     if os.geteuid() != 0:
-        raise RuntimeError("新增实例需要 root 权限（当前面板不是 root 运行）")
-    if os.path.isdir(_inst_dir(uin)):
-        raise RuntimeError("这个 QQ 号的实例已经存在了")
-
-    base = (_inst_cfg().get("base_dir") or "/opt/napcat/instances").rstrip("/")
-    d = os.path.join(base, uin)
-    for sub in ("home", "work", "logs"):
-        os.makedirs(os.path.join(d, sub), exist_ok=True)
-    os.makedirs(os.path.join(d, "work", "config"), exist_ok=True)
-
-    idx, wp, op, disp = _alloc_instance(_reserved_ports(), _used_displays())
-
-    with open(os.path.join(d, "env"), "w", encoding="utf-8") as f:
-        f.write("# 由雨咯Bot 面板生成 —— 每个实例一份\n")
-        f.write("# 显示号必须是纯数字：Xvfb 只认 :N，用 QQ 号会报 Bad display name\n")
-        f.write("DISPLAY=:%d\n" % disp)
-        f.write("WEBUI_PORT=%d\n" % wp)
-        f.write("ONEBOT_PORT=%d\n" % op)
-        f.write("INDEX=%d\n" % idx)
-
+        raise RuntimeError("扫码登录需要 root 权限（当前面板不是 root 运行）")
+    single.ensure_running()
+    base = "http://127.0.0.1:%d" % single.webui_port()
     token = cfg_napcat_token()
-    wcfg = os.path.join(d, "work", "config", "webui.json")
-    if not os.path.exists(wcfg):
-        with open(wcfg, "w", encoding="utf-8") as f:
-            json.dump({"host": "0.0.0.0", "port": wp, "token": token,
-                       "loginRate": 100}, f, ensure_ascii=False)
-    # OneBot 配置也要提前写好(端口不能撞)
-    _write_ob11_config(d, uin, op, wp)
 
-    # systemd：模板 + 该实例专属的 xvfb 单元
-    _write_units()
-    xvfb_path = os.path.join("/etc/systemd/system", "xvfb-rcbot-%d.service" % disp)
-    with open(xvfb_path, "w", encoding="utf-8") as f:
-        f.write(_XVFB_UNIT.replace("%i", str(disp)))
-    _run("systemctl daemon-reload", timeout=30)
+    st = _nc_data_at(base, token, "/QQLogin/CheckLoginStatus", timeout=10) or {}
+    if st.get("isLogin"):
+        info = _nc_data_at(base, token, "/QQLogin/GetQQLoginInfo", timeout=8) or {}
+        return {"ok": True, "data": {
+            "qrcode": "", "login": True, "phase": st.get("loginPhase") or "",
+            "uin": str(info.get("uin") or ""), "nick": info.get("nick") or "",
+            "hint": "已经登录了"}}
 
-    # 启动顺序：先 Xvfb，再 QQ（QQ 起来就要连 X）
-    _run("systemctl enable xvfb-rcbot-%d" % disp, timeout=30)
-    _run("systemctl start xvfb-rcbot-%d" % disp, timeout=30)
-    _run("systemctl enable napcat@%s" % uin, timeout=30)
-    _run("systemctl stop %s 2>/dev/null" % unit, timeout=45)
-    _run("systemctl reset-failed %s 2>/dev/null" % unit, timeout=15)
-    _run("systemctl start %s" % unit, timeout=90)
+    # ★ 优先用状态里带的 qrcodeurl（NapCat 已经在 waiting_qrcode 时就出好了），
+    #   没有再向它要一张新的。
+    qr = st.get("qrcodeurl") or ""
+    if not qr:
+        try:
+            q = _nc_data_at(base, token, "/QQLogin/GetQQLoginQrcode", timeout=10) or {}
+            qr = q.get("qrcode") or ""
+        except Exception:
+            qr = ""
+    return {"ok": True, "data": {
+        "qrcode": qr, "login": False, "phase": st.get("loginPhase") or "",
+        "hint": "用手机 QQ 扫描下面的二维码授权登录"}}
 
-    # 等 WebUI 真正监听 —— 之前没等就返回，前端立刻取二维码只会拿到
-    # "connection refused"（用户第一次反馈的就是这个）
-    ready, st = _wait_ready(unit, wp)
 
-    err = ""
+@rc.interface("qqbot.account.refresh_qrcode")
+def account_refresh_qrcode(params):
+    """刷新二维码 —— NapCat /QQLogin/RefreshQRcode。"""
+    base = "http://127.0.0.1:%d" % single.webui_port()
+    r = _nc_data_at(base, cfg_napcat_token(), "/QQLogin/RefreshQRcode", timeout=10) or {}
+    return {"ok": True, "data": {"qrcode": r.get("qrcodeurl") or r.get("qrcode") or ""}}
+
+
+@rc.interface("qqbot.account.status")
+def account_status(params):
+    """查登录进度 —— 只读 NapCat 的状态，不做任何推断。
+
+    返回 {done, uin, nick, avatar, phase, accepted, logged, core_ready,
+          onebot_ready, error}。
+    """
+    base = "http://127.0.0.1:%d" % single.webui_port()
+    token = cfg_napcat_token()
+    out = {"done": False, "uin": "", "nick": "", "avatar": "",
+           "phase": "", "accepted": False, "logged": False,
+           "core_ready": False, "onebot_ready": False, "error": ""}
+    try:
+        st = _nc_data_at(base, token, "/QQLogin/CheckLoginStatus", timeout=10) or {}
+    except Exception as e:
+        out["error"] = str(e)[:160]
+        return {"ok": True, "data": out}
+
+    out["phase"] = st.get("loginPhase") or ""
+    # 登录态三层：手机已确认 / QQ 已登录 / 核心就绪
+    out["accepted"] = bool(st.get("qrLoginAccepted"))
+    out["logged"] = bool(st.get("isLogin"))
+    out["core_ready"] = bool(st.get("coreReady"))
+    if not st.get("isLogin"):
+        return {"ok": True, "data": out}
+
+    # 已登录 → NapCat /QQLogin/GetQQLoginInfo 拿 QQ 号与昵称
+    try:
+        info = _nc_data_at(base, token, "/QQLogin/GetQQLoginInfo", timeout=8) or {}
+    except Exception:
+        info = {}
+    out["uin"] = str(info.get("uin") or "")
+    out["nick"] = info.get("nick") or ""
+    out["avatar"] = info.get("faceUrl") or info.get("avatar") or _qa_avatar(out["uin"])
+    if not out["uin"]:
+        out["error"] = "已登录但还没拿到 QQ 号，稍后再试"
+        return {"ok": True, "data": out}
+
+    # OneBot 端口起来才算账户可用
+    out["onebot_ready"] = single.port_listening(single.onebot_port())
+
+    # 同步 rcbot 账号表（单账号）
     try:
         _data("/api/accounts", "POST", {
-            "action": "add", "uin": uin,
-            "ws_url": "ws://127.0.0.1:%d" % op,
-            "webui": "http://127.0.0.1:%d" % wp,
-            "unit": "napcat@%s" % uin,
-            "instance_dir": d,
+            "action": "add", "uin": out["uin"],
+            "ws_url": "ws://127.0.0.1:%d" % single.onebot_port(),
+            "webui": base,
+            "unit": single.UNIT,
+            "instance_dir": single.inst_dir(),
         }, timeout=25)
-    except Exception as e:
-        err = "加进 rcbot 失败：%s" % str(e)[:200]
-
-    out = {"uin": uin, "webui_port": wp, "onebot_port": op,
-           "display": ":%d" % disp, "dir": d, "unit": "napcat@%s" % uin,
-           "ready": ready}
-    if not ready:
-        out["hint"] = ("实例已创建但 WebUI 没监听 %d。看日志："
-                       "journalctl -u napcat@%s -n 50" % (wp, uin))
-    if err:
-        out["error"] = err
+    except Exception:
+        pass
+    out["done"] = True
     return {"ok": True, "data": out}
+
+
+@rc.interface("qqbot.account.action")
+def account_action(params):
+    """账户操作：start / stop / restart / quick_login / logout。
+
+    logout = 换号：清掉登录态（NapCat 没有 LogoutQQ 接口，
+    它提供的 SetQuickLogin 只设快登号，所以这一步只能自己清目录）。
+    """
+    if os.geteuid() != 0:
+        raise RuntimeError("操作账户需要 root 权限（当前面板不是 root 运行）")
+    act = str((params or {}).get("action") or "").lower()
+
+    if act == "logout":
+        single.logout()
+        single.restart()
+        return {"ok": True, "data": {"action": act, "removed": True}}
+
+    if act in ("start", "stop", "restart"):
+        if act == "start":
+            single.ensure_running()
+        elif act == "stop":
+            single.stop()
+        else:
+            single.ensure_running()
+            single.restart()
+        return {"ok": True, "data": {"action": act, "state": single.unit_state()}}
+
+    if act == "quick_login":
+        base = "http://127.0.0.1:%d" % single.webui_port()
+        info = _nc_data_at(base, cfg_napcat_token(),
+                           "/QQLogin/GetQQLoginInfo", timeout=8) or {}
+        uin = str(info.get("uin") or "")
+        if not uin:
+            raise RuntimeError("还没登录，没有可快登的号")
+        r = _nc_data_at(base, cfg_napcat_token(),
+                        "/QQLogin/SetQuickLogin", {"uin": uin})
+        return {"ok": True, "data": r}
+
+    raise RuntimeError("不认识的动作：%s" % act)
+
+
+@rc.interface("qqbot.account.logs")
+def account_logs(params):
+    """NapCat 运行日志。
+
+    mode=live    —— 走 NapCat WebUI 的 SSE 实时日志（_LOG_BUF）
+    mode=history —— 读 systemd journalctl
+
+    ★ 返回结构与前端「运行日志」页一致：{items, source, total, connected, hint}。
+      这里**不能**套 data —— 前端用 call() 直接取 result。
+    """
+    p = params or {}
+    n = max(50, min(2000, int(p.get("lines") or 400)))
+    mode = p.get("mode") or "live"
+    level = (p.get("level") or "").lower()
+    _log_ensure()
+
+    unit = single.UNIT
+    if mode == "history":
+        raw = _journal(unit, n)
+        source = "journal"
+        items = [{"level": _guess_level(x), "text": x, "ts": 0} for x in raw]
+        if not items:
+            with _LOG_LOCK:
+                items = list(_LOG_BUF)[-n:]
+            source = "webui"
+    else:
+        with _LOG_LOCK:
+            items = list(_LOG_BUF)[-n:]
+        source = "webui"
+
+    if level:
+        items = [x for x in items if x["level"] == level]
+
+    with _LOG_LOCK:
+        total = len(_LOG_BUF)
+    return {"ok": True, "items": items, "source": source, "total": total,
+            "connected": _LOG_STATE["connected"], "err": _LOG_STATE["err"],
+            "unit": unit,
+            "hint": "" if items else (
+                "还没有日志。NapCat 的实时日志走 SSE，连上后新产生的日志会出现在这里"
+                if source == "webui" else
+                "读不到 systemd 日志（可能不是 systemd 起的，或当前用户没权限）")}
+
+
+@rc.interface("qqbot.account.logs.clear")
+def account_logs_clear(params):
+    """清空实时日志缓冲。"""
+    with _LOG_LOCK:
+        _LOG_BUF.clear()
+    return {"ok": True}
 
 
 def cfg_napcat_token():
@@ -900,426 +1101,28 @@ def _write_units():
             pass
 
 
-def _reserved_ports():
-    """已被占用的端口 = 其它实例 env 里已登记的 + 真正在监听的。
+def _wait_onebot(onebot_port, tries=25):
+    """等 OneBot 端口真正监听。
 
-    ★ 必须把"其它实例 env 登记的"也算进去 ——
-      只看 ss 会把同一个端口分给两个实例（实测踩过：两个实例都是 6100/6702）。
+    ★ 这是"账户真的可用"的标志：
+      NapCat 的 coreReady 变 true 之后，OneBot 的 WS 端口才会开始监听；
+      在此之前 rcbot 连不上、聊天记录也不通。
+      认领完等它一下，能保证"添加完立刻就能用"，而不是要等下一次重连。
     """
-    used = set()
-    for uin in _inst_list():
-        env = _inst_env(uin)
-        for k in ("WEBUI_PORT", "ONEBOT_PORT"):
-            v = env.get(k) or ""
-            if v.isdigit():
-                used.add(int(v))
-    _, out = _run("ss -ltn 2>/dev/null | awk 'NR>1{print $4}'", timeout=15)
-    for line in (out or "").splitlines():
-        m = re.search(r":(\d+)\s*$", line.strip())
-        if m:
-            used.add(int(m.group(1)))
-    return used
-
-
-def _used_displays():
-    """已被占用的 X 显示号（实例 env 登记的 + 正在跑的 Xvfb）。"""
-    used = set()
-    for uin in _inst_list():
-        env = _inst_env(uin)
-        d = (env.get("DISPLAY") or "").lstrip(":")
-        if d.isdigit():
-            used.add(int(d))
-    _, out = _run("ps aux 2>/dev/null | grep -o 'Xvfb :[0-9]*'", timeout=15)
-    for x in re.findall(r":(\d+)", out or ""):
-        used.add(int(x))
-    return used
-
-
-def _enable_quick_login(uin, env):
-    """登录态建立后，把 NAPCAT_QUICK_ACCOUNT 写进实例 env。
-
-    没这一步的话,实例每次重启都会拿 NAPCAT_QUICK_ACCOUNT 去快登,
-    而"登录态已失效"时 NapCat 会直接退出 → systemd 拉起 → 死循环。
-    写了这个变量,重启时 NapCat 才知道该用哪个号的登录态。
-    """
-    if (env or {}).get("NAPCAT_QUICK_ACCOUNT") == uin:
-        return
-    d = _inst_dir(uin)
-    ep = os.path.join(d, "env")
     try:
-        lines = []
-        if os.path.exists(ep):
-            with open(ep, "r", encoding="utf-8") as f:
-                lines = [l.rstrip("\n") for l in f
-                         if l.strip() and not l.strip().startswith("NAPCAT_QUICK_ACCOUNT=")]
-        lines.append("NAPCAT_QUICK_ACCOUNT=%s" % uin)
-        with open(ep, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+        port = int(onebot_port or 0)
     except Exception:
-        pass
-
-
-def icfg_webui_base():
-    return int(_inst_cfg().get("webui_base") or 6099)
-
-
-def icfg_onebot_base():
-    return int(_inst_cfg().get("onebot_base") or 6700)
-
-
-def _write_ob11_config(inst_dir, uin, onebot_port, webui_port):
-    """预置实例的 OneBot 配置。
-
-    ★ 必须提前写 —— NapCat 是在**首次登录成功时**才生成 onebot11_<uin>.json,
-      里面默认的 WS 端口是 6700。多个实例同时登录会撞端口,
-      后登录的那个会把先登录的挤掉(两边都想监听 6700)。
-      所以这里先按分配好的端口写好, NapCat 登录时会沿用。
-    """
-    cfg_dir = os.path.join(inst_dir, "work", "config")
-    os.makedirs(cfg_dir, exist_ok=True)
-    path = os.path.join(cfg_dir, "onebot11_%s.json" % uin)
-    cfg = {
-        "network": {
-            "httpServers": [],
-            "httpSseServers": [],
-            "httpClients": [],
-            "websocketServers": [{
-                "debug": False,
-                "enable": True,
-                "heartInterval": 30000,
-                "host": "127.0.0.1",
-                "messagePostFormat": "array",
-                "name": "rc-core",
-                "port": int(onebot_port),
-                "reportSelfMessage": False,
-                "token": "",
-                "enableForcePushEvent": True,
-            }],
-            "websocketClients": [],
-            "plugins": [],
-        },
-        "musicSignUrl": "",
-        "enableLocalFile2Url": False,
-        "parseMultMsg": False,
-        "imageDownloadProxy": "",
-        "timeout": {
-            "baseTimeout": 10000,
-            "uploadSpeedKBps": 256,
-            "downloadSpeedKBps": 256,
-            "maxTimeout": 1800000,
-        },
-    }
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-        return path
-    except Exception:
-        return ""
-
-
-def _sync_instance_ports(uin, env):
-    """把 env 里的端口同步到 NapCat 真正读的配置。
-
-    NapCat 读 work/config/webui.json 和 work/config/onebot11_<uin>.json，
-    env 文件只是给 systemd 看的。两者不一致时 NapCat 会按旧端口监听，
-    面板按 env 里的端口去连 → connection refused。
-    """
-    wp = (env or {}).get("WEBUI_PORT") or ""
-    op = (env or {}).get("ONEBOT_PORT") or ""
-    if not wp.isdigit():
-        return
-    d = _inst_dir(uin)
-    wcfg = os.path.join(d, "work", "config", "webui.json")
-    try:
-        w = {}
-        if os.path.exists(wcfg):
-            with open(wcfg, "r", encoding="utf-8") as f:
-                w = json.load(f)
-        if int(w.get("port") or 0) != int(wp):
-            w["host"] = w.get("host") or "0.0.0.0"
-            w["port"] = int(wp)
-            w["token"] = w.get("token") or cfg_napcat_token()
-            w.setdefault("loginRate", 100)
-            with open(wcfg, "w", encoding="utf-8") as f:
-                json.dump(w, f, ensure_ascii=False)
-    except Exception:
-        pass
-    if op.isdigit():
-        _write_ob11_config(d, uin, int(op), int(wp))
-
-
-def _wait_ready(unit, webui_port, tries=45):
-    """等实例真正可用。
-
-    ★ 不能只看"端口在监听" —— 进程可能正在反复重启
-      (NapCat 快登失败 → 退出 → systemd 拉起 → 每 3 秒一轮)。
-      所以要同时确认: 端口在监听 且 单元是 active(不是 activating/auto-restart)。
-    """
+        return False
+    if port <= 0:
+        return False
     for _ in range(tries):
-        _, o = _run("ss -ltn 2>/dev/null | grep -c ':%s '" % webui_port, timeout=10)
-        listening = "1" in (o or "")
-        st = _unit_state(unit)
-        if listening and st == "active":
-            return True, st
-        if st in ("failed", "inactive"):
-            return False, st
+        _, o = _run("ss -ltn 2>/dev/null | grep -c ':%s '" % port, timeout=10)
+        if "1" in (o or ""):
+            return True
         time.sleep(1)
-    return False, _unit_state(unit)
+    return False
 
 
-def _alloc_instance(used_ports, used_displays):
-    """给新实例分配 index / 端口 / 显示号。
-
-    端口：WebUI = base+index，OneBot = base+2*index（避开 rcbot 的 6710）
-    显示：:1 起，跳过已占用的（:1 通常被旧的 napcat.service 占着）
-    """
-    icfg = _inst_cfg()
-    wb = int(icfg.get("webui_base") or 6099)
-    ob = int(icfg.get("onebot_base") or 6700)
-    idx = 0
-    while True:
-        wp = wb + idx
-        op = ob + 2 * idx
-        if op != 6710 and wp not in used_ports and op not in used_ports:
-            break
-        idx += 1
-    disp = 1
-    while disp in used_displays:
-        disp += 1
-    return idx, wp, op, disp
-
-
-@rc.interface("qqbot.inst.action")
-def inst_action(params):
-    """实例操作：start / stop / restart / qrcode / quick_login / remove。"""
-    p = params or {}
-    uin = str(p.get("uin") or "").strip()
-    act = (p.get("action") or "").lower()
-    if not uin:
-        raise RuntimeError("缺少 uin")
-    env = _inst_env(uin)
-    wp = env.get("WEBUI_PORT") or ""
-    unit = "napcat@%s" % uin
-    token = cfg_napcat_token()
-
-    disp = (env.get("DISPLAY") or "").lstrip(":")
-    xvfb = "xvfb-rcbot-%s" % disp if disp.isdigit() else ""
-
-    if act in ("start", "stop", "restart"):
-        # 启动前把 webui.json 与 env 对齐（NapCat 读的是前者）
-        _sync_instance_ports(uin, env)
-        # Xvfb 要跟着一起管 —— QQ 起来就要连 X，Xvfb 没起来 QQ 会
-        # "Missing X server or $DISPLAY" 然后无限重启
-        if act == "stop":
-            _run("systemctl stop %s" % unit, timeout=60)
-            if xvfb:
-                _run("systemctl stop %s" % xvfb, timeout=30)
-            return {"ok": True, "data": {"uin": uin, "action": act,
-                                         "state": _unit_state(unit)}}
-        if act == "start":
-            # ★ 已经在跑就别再 stop→start 一遍。
-            #   QQ 是 Electron,被 SIGTERM 杀掉后要 3 秒重新初始化,
-            #   这期间 WebUI 不监听 → 用户点"扫码"就撞上 connection refused。
-            #   只有真的要重启(用户显式点"重启")才走 restart。
-            cur = _unit_state(unit)
-            if cur == "active":
-                ready, st = _wait_ready(unit, env.get("WEBUI_PORT") or "")
-                return {"ok": True, "data": {"uin": uin, "action": act,
-                                             "state": st, "ready": ready,
-                                             "hint": "实例已在运行"}}
-        if xvfb:
-            _run("systemctl start %s" % xvfb, timeout=30)
-        if act == "restart":
-            _run("systemctl restart %s" % unit, timeout=90)
-        else:
-            _run("systemctl start %s" % unit, timeout=90)
-        st = _unit_state(unit)
-        out = {"uin": uin, "action": act, "state": st}
-        if act in ("start", "restart"):
-            # 等 WebUI 起来再返回，否则前端立刻取二维码只会拿到 connection refused
-            wp_ = env.get("WEBUI_PORT") or ""
-            ready, _ = _wait_ready(unit, wp_)
-            out["ready"] = ready
-            if not ready:
-                out["hint"] = ("WebUI 没监听 %s。看日志：journalctl -u %s -n 50"
-                               % (wp_ or "?", unit))
-        return {"ok": True, "data": out}
-
-    if act == "repair":
-        """修复实例：重写 env（修端口/显示号）+ 重写单元 + 重启。
-
-        用于早期版本建的坏实例（显示号用了 QQ 号、端口撞车）。
-        """
-        if os.geteuid() != 0:
-            raise RuntimeError("修复实例需要 root 权限")
-        d = _inst_dir(uin)
-        if not os.path.isdir(d):
-            raise RuntimeError("实例不存在：%s" % uin)
-        for sub in ("home", "work", "logs"):
-            os.makedirs(os.path.join(d, sub), exist_ok=True)
-        os.makedirs(os.path.join(d, "work", "config"), exist_ok=True)
-
-        # 端口/显示重新分配：排除自己和别的实例
-        others = [u for u in _inst_list() if u != uin]
-        used_ports, used_disp = set(), set()
-        for u in others:
-            e = _inst_env(u)
-            for k in ("WEBUI_PORT", "ONEBOT_PORT"):
-                if (e.get(k) or "").isdigit():
-                    used_ports.add(int(e[k]))
-            dd = (e.get("DISPLAY") or "").lstrip(":")
-            if dd.isdigit():
-                used_disp.add(int(dd))
-        _, o = _run("ss -ltn 2>/dev/null | awk 'NR>1{print $4}'", timeout=15)
-        for line in (o or "").splitlines():
-            m = re.search(r":(\d+)\s*$", line.strip())
-            if m:
-                used_ports.add(int(m.group(1)))
-        _, o = _run("ps aux 2>/dev/null | grep -o 'Xvfb :[0-9]*'", timeout=15)
-        for x in re.findall(r":(\d+)", o or ""):
-            used_disp.add(int(x))
-        # ★ 自己原来占的端口**不算**已用 —— 否则每次 repair 都会重新分配,
-        #   端口一路往上飘(实测 6100→6101→6102…), 旧链接全废。
-        #   只有当自己的端口被别人(别的实例/别的进程)也占着时才让出去。
-        own_webui = (env.get("WEBUI_PORT") or "")
-        own_ob = (env.get("ONEBOT_PORT") or "")
-        own_disp = (env.get("DISPLAY") or "").lstrip(":")
-        # 从"已用"里把自己的去掉,再单独检查是否真的被别人占了
-        for v in (own_webui, own_ob):
-            if v.isdigit():
-                used_ports.discard(int(v))
-        if own_disp.isdigit():
-            used_disp.discard(int(own_disp))
-        # 别人的实例登记过的端口仍然占着(上面已经加进去了),这里只排除自己
-
-        # ★ 优先保留自己原来的端口/显示号(只要没被别人占)——
-        #   否则每次 repair 都重新分配,端口一路往上飘,旧链接全废。
-        wp = int(own_webui) if own_webui.isdigit() else 0
-        op = int(own_ob) if own_ob.isdigit() else 0
-        nd = int(own_disp) if own_disp.isdigit() else 0
-        if not (wp and op and op != 6710 and wp not in used_ports and op not in used_ports):
-            idx, wp, op, nd = _alloc_instance(used_ports, used_disp)
-        else:
-            # 端口保留,但显示号可能被占 → 另分配
-            if nd in used_disp:
-                nd = 1
-                while nd in used_disp:
-                    nd += 1
-            # index 从端口反推（WebUI = base+index）
-            idx = max(0, wp - icfg_webui_base())
-        with open(os.path.join(d, "env"), "w", encoding="utf-8") as f:
-            f.write("# 由雨咯Bot 修复 —— 显示号与端口\n")
-            f.write("DISPLAY=:%d\n" % nd)
-            f.write("WEBUI_PORT=%d\n" % wp)
-            f.write("ONEBOT_PORT=%d\n" % op)
-            f.write("INDEX=%d\n" % idx)
-        # ★ NapCat 实际读的是 work/config/webui.json 和 onebot11_<uin>.json,
-        #   不是 env 文件 —— env 只是给 systemd 看的。
-        #   两边必须同步,否则 NapCat 会用旧端口监听(实测:env 写 6100,
-        #   webui.json 还是 6101 → 前端连 6100 直接 connection refused)。
-        wcfg = os.path.join(d, "work", "config", "webui.json")
-        try:
-            with open(wcfg, "w", encoding="utf-8") as f:
-                json.dump({"host": "0.0.0.0", "port": wp,
-                           "token": cfg_napcat_token(), "loginRate": 100},
-                          f, ensure_ascii=False)
-        except Exception:
-            pass
-        _write_ob11_config(d, uin, op, wp)
-        _write_units()
-        # 清理掉用 QQ 号当显示号的旧单元。
-        # ★ 用 stop 而不是 disable --now —— 后者会与紧接着的 restart 打架,
-        #   结果卡在 deactivating(stop-sigterm): QQ 收到 SIGTERM 不退出。
-        _run("systemctl stop xvfb-rcbot-%s 2>/dev/null" % uin, timeout=30)
-        _run("systemctl stop %s 2>/dev/null" % unit, timeout=45)
-        _run("systemctl reset-failed %s 2>/dev/null" % unit, timeout=15)
-        xv = os.path.join("/etc/systemd/system", "xvfb-rcbot-%d.service" % nd)
-        with open(xv, "w", encoding="utf-8") as f:
-            f.write(_XVFB_UNIT.replace("%i", str(nd)))
-        _run("systemctl daemon-reload", timeout=30)
-        _run("systemctl enable xvfb-rcbot-%d" % nd, timeout=30)
-        _run("systemctl start xvfb-rcbot-%d" % nd, timeout=30)
-        _run("systemctl enable %s" % unit, timeout=30)
-        _run("systemctl stop %s 2>/dev/null" % unit, timeout=45)
-        _run("systemctl reset-failed %s 2>/dev/null" % unit, timeout=15)
-        _run("systemctl start %s" % unit, timeout=90)
-        ready, st = _wait_ready(unit, wp)
-        # 同步 rcbot 侧的账号配置
-        try:
-            _data("/api/accounts", "POST", {
-                "action": "update", "id": "a%s" % uin, "uin": uin,
-                "ws_url": "ws://127.0.0.1:%d" % op,
-                "webui": "http://127.0.0.1:%d" % wp,
-                "unit": unit, "instance_dir": d,
-            }, timeout=25)
-        except Exception:
-            pass
-        return {"ok": True, "data": {"uin": uin, "webui_port": wp,
-                                     "onebot_port": op, "display": ":%d" % nd,
-                                     "ready": ready}}
-
-    if act == "remove":
-        if os.geteuid() != 0:
-            raise RuntimeError("删除实例需要 root 权限")
-        _run("systemctl disable --now %s" % unit, timeout=60)
-        if xvfb:
-            _run("systemctl disable --now %s" % xvfb, timeout=30)
-        try:
-            _data("/api/accounts", "POST", {"action": "remove", "id": "a%s" % uin},
-                  timeout=25)
-        except Exception:
-            pass
-        import shutil
-        d = _inst_dir(uin)
-        if os.path.isdir(d) and not p.get("keep_data"):
-            shutil.rmtree(d, ignore_errors=True)
-        return {"ok": True, "data": {"uin": uin, "removed": True}}
-
-    # 下面的都要连 WebUI，先确认端口
-    if not wp:
-        raise RuntimeError("这个实例没有 env 文件，端口未知")
-    base = "http://127.0.0.1:%s" % wp
-    if act == "qrcode":
-        st = _nc_data_at(base, token, "/QQLogin/CheckLoginStatus") or {}
-        logged = bool(st.get("isLogin"))
-        if logged:
-            # 登录态建立了 → 写 NAPCAT_QUICK_ACCOUNT, 以后重启免扫码
-            _enable_quick_login(uin, env)
-            return {"ok": True, "data": {"qrcode": "", "login": True,
-                                         "phase": st.get("loginPhase") or "",
-                                         "webui": base}}
-        # ★ 先用状态里带的 qrcodeurl —— NapCat 在 waiting_qrcode 阶段
-        #   已经把二维码生成好了,再调 GetQQLoginQrcode 会返回
-        #   "QRCode Get Error"(那个接口是"要一张新码",不是"给我现在的码")。
-        qr = st.get("qrcodeurl") or ""
-        if not qr:
-            try:
-                q = _nc_data_at(base, token, "/QQLogin/GetQQLoginQrcode") or {}
-                qr = q.get("qrcode") or ""
-            except Exception:
-                qr = ""
-        return {"ok": True, "data": {"qrcode": qr,
-                                     "login": logged,
-                                     "phase": st.get("loginPhase") or "",
-                                     "webui": base}}
-
-    if act == "quick_login":
-        r = _nc_data_at(base, token, "/QQLogin/SetQuickLogin", {"uin": uin})
-        return {"ok": True, "data": r}
-
-    if act == "status":
-        st = _nc_data_at(base, token, "/QQLogin/CheckLoginStatus") or {}
-        logged = bool(st.get("isLogin"))
-        if logged:
-            _enable_quick_login(uin, env)
-        return {"ok": True, "data": {"login": logged,
-                                     "phase": st.get("loginPhase") or "",
-                                     "coreReady": bool(st.get("coreReady"))}}
-
-    raise RuntimeError("不认识的动作：%s" % act)
-
-
-@rc.interface("qqbot.inst.logs")
 def inst_logs(params):
     """实例日志（journalctl）。"""
     p = params or {}
@@ -1420,6 +1223,124 @@ def chat_purge_media(params):
         "to": int(p.get("to") or 0),
         "confirm": True,
     }, timeout=300)}
+
+
+# ---------------------------------------------------------------- 查询
+
+@rc.interface("qqbot.chat.query")
+def chat_query(params):
+    """按条件查消息。
+
+    可叠加的条件（都是「与」关系）：
+      sender   —— QQ 号（精确）或昵称（模糊）
+      recalled —— '' 全部 / 'yes' 已撤回 / 'no' 未撤回
+      kind     —— '' 全部 / text 文本 / image 图片 / video 视频 / record 语音
+                  / face 表情 / file 文件
+      kw       —— 文本关键词
+      session_id / from / to —— 限定会话与日期范围
+    """
+    p = params or {}
+    q = {}
+    for k in ("sender", "recalled", "kind", "session_id", "account_id"):
+        if p.get(k) not in (None, ""):
+            q[k] = p[k]
+    if p.get("kw"):
+        q["kw"] = p["kw"]
+    if p.get("from"):
+        q["from"] = int(p["from"])
+    if p.get("to"):
+        q["to"] = int(p["to"])
+    q["limit"] = int(p.get("limit") or 50)
+    if p.get("before_id"):
+        q["before_id"] = int(p["before_id"])
+    qs = urllib.parse.urlencode(q)
+    return {"ok": True, "data": _data("/api/chat/query?" + qs, timeout=60)}
+
+
+@rc.interface("qqbot.chat.senders")
+def chat_senders(params):
+    """聊天里出现过的发送者（查询界面做自动补全）。"""
+    p = params or {}
+    qs = urllib.parse.urlencode({"kw": p.get("kw") or ""})
+    return {"ok": True, "data": _data("/api/chat/senders?" + qs, timeout=30)}
+
+
+# ---------------------------------------------------------------- 一键清空会话
+
+@rc.interface("qqbot.chat.clear_session")
+def chat_clear_session(params):
+    """一键清空会话。
+
+    with_media=True 时连媒体文件一起删（默认只删消息记录）。
+    """
+    p = params or {}
+    if p.get("confirm") is not True:
+        raise RuntimeError("需要 confirm=true")
+    sid = str(p.get("session_id") or "").strip()
+    if not sid:
+        raise RuntimeError("缺少 session_id")
+    return {"ok": True, "data": _data("/api/chat/session-clear", "POST", {
+        "session_id": sid,
+        "account_id": p.get("account_id") or "",
+        "with_media": bool(p.get("with_media")),
+        "confirm": True,
+    }, timeout=300)}
+
+
+# ---------------------------------------------------------------- 媒体库
+
+@rc.interface("qqbot.chat.media_list")
+def chat_media_list(params):
+    """媒体库列表 + 统计。"""
+    p = params or {}
+    q = {}
+    for k in ("kind", "sender", "session_id", "account_id"):
+        if p.get(k) not in (None, ""):
+            q[k] = p[k]
+    if p.get("kw"):
+        q["kw"] = p["kw"]
+    q["limit"] = int(p.get("limit") or 100)
+    q["offset"] = int(p.get("offset") or 0)
+    qs = urllib.parse.urlencode(q)
+    return {"ok": True, "data": _data("/api/chat/media?" + qs, timeout=60)}
+
+
+@rc.interface("qqbot.chat.media_delete")
+def chat_media_delete(params):
+    """删除媒体文件。"""
+    p = params or {}
+    if p.get("confirm") is not True:
+        raise RuntimeError("需要 confirm=true")
+    return {"ok": True, "data": _data("/api/chat/media/delete", "POST", {
+        "ids": p.get("ids") or [],
+        "rels": p.get("rels") or [],
+        "kind": p.get("kind") or "",
+        "session_id": p.get("session_id") or "",
+        "confirm": True,
+    }, timeout=300)}
+
+
+@rc.interface("qqbot.chat.media_transcode")
+def chat_media_transcode(params):
+    """把 HEVC 视频 / AMR 语音转成浏览器能播的格式。"""
+    p = params or {}
+    return {"ok": True, "data": _data("/api/chat/media/transcode", "POST", {
+        "ids": p.get("ids") or [],
+    }, timeout=1800)}
+
+
+@rc.interface("qqbot.chat.media_reindex")
+def chat_media_reindex(params):
+    """重建媒体索引（补齐历史数据）。"""
+    return {"ok": True, "data": _data("/api/chat/media/reindex", "POST", {},
+                                     timeout=300)}
+
+
+@rc.interface("qqbot.chat.media_repair")
+def chat_media_repair(params):
+    """修复媒体引用（转码后消息里还指向旧文件名 → 前端取不到文件）。"""
+    return {"ok": True, "data": _data("/api/chat/media/repair", "POST", {},
+                                      timeout=300)}
 
 
 @rc.interface("rcbot.accounts")
@@ -1549,11 +1470,18 @@ def test_chat(params):
 
 IFACES = [
     "qqbot.health", "qqbot.conn.get", "qqbot.conn.save",
-    "qqbot.nc.overview", "qqbot.nc.account", "qqbot.nc.action",
-    "qqbot.nc.logs", "qqbot.nc.logs.clear",
-    "qqbot.inst.list", "qqbot.inst.add", "qqbot.inst.action", "qqbot.inst.logs",
+    "qqbot.nc.overview",
+    # 单账户（2026-11-02 从多账户回退）
+    "qqbot.account.info", "qqbot.account.qrcode", "qqbot.account.refresh_qrcode",
+    "qqbot.account.status", "qqbot.account.action", "qqbot.account.logs",
+    "qqbot.account.logs.clear",
     "qqbot.chat.sessions", "qqbot.chat.messages", "qqbot.chat.stats",
     "qqbot.chat.export", "qqbot.chat.purge_media",
+    # 查询 / 清空会话 / 媒体库
+    "qqbot.chat.query", "qqbot.chat.senders", "qqbot.chat.clear_session",
+    "qqbot.chat.media_list", "qqbot.chat.media_delete",
+    "qqbot.chat.media_transcode", "qqbot.chat.media_reindex",
+    "qqbot.chat.media_repair",
     "rcbot.status", "rcbot.accounts", "rcbot.account.save",
     "rcbot.config.get", "rcbot.config.save", "rcbot.tools.search",
     "rcbot.providers", "rcbot.provider.save", "rcbot.provider.delete",

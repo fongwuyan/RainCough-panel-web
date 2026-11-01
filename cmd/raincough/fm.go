@@ -283,7 +283,10 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// 媒体类型直接流式返回
-		w.Header().Set("Content-Type", mimeFor(ctype))
+		// ★ Content-Type 要按**真实扩展名**给，不能按大类统一给。
+		//   之前 image 一律返回 image/jpeg —— QQ 的图片里有 PNG/WebP，
+		//   用错 MIME 会被浏览器拒绝渲染（显示裂图）。
+		w.Header().Set("Content-Type", mimeFor(abs))
 		http.ServeFile(w, r, abs)
 
 	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/hash":
@@ -375,8 +378,55 @@ func isFile(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
-func mimeFor(ctype string) string {
-	switch ctype {
+func mimeFor(path string) string {
+	// 按扩展名给准确的 MIME —— 浏览器对 <img>/<video>/<audio> 的 Content-Type
+	// 很敏感，给错了会直接拒绝渲染。
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".mp4", ".m4v":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".mov":
+		return "video/quicktime"
+	case ".avi":
+		return "video/x-msvideo"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".flac":
+		return "audio/flac"
+	case ".ogg", ".oga":
+		return "audio/ogg"
+	case ".opus":
+		return "audio/opus"
+	case ".m4a":
+		return "audio/mp4"
+	case ".aac":
+		return "audio/aac"
+	case ".amr":
+		return "audio/amr"
+	case ".silk":
+		return "audio/silk"
+	case ".pdf":
+		return "application/pdf"
+	}
+	// 认不出来的按大类兜底
+	switch core.PreviewType(path) {
 	case "image":
 		return "image/jpeg"
 	case "video":

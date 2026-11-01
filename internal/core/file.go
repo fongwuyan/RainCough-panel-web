@@ -268,7 +268,10 @@ func PreviewType(name string) string {
 		return "image"
 	case ".mp4", ".webm", ".mkv", ".mov", ".avi":
 		return "video"
-	case ".mp3", ".wav", ".flac", ".ogg", ".m4a":
+	case ".mp3", ".wav", ".flac", ".ogg", ".oga", ".m4a", ".opus", ".aac",
+		".amr", ".silk":
+		// ★ amr/silk 是 QQ 语音的原始格式，浏览器放不了但要能下载，
+		//   所以必须归到 audio —— 归到 text 会被当文本读出来返回 JSON。
 		return "audio"
 	case ".pdf":
 		return "pdf"
