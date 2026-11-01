@@ -1,8 +1,8 @@
 {
   "name": "QQBot",
-  "label": "QQ Bot",
-  "version": "1.2.0",
-  "description": "NapCat 协议端 + RainCough Bot 统一控制台",
+  "label": "雨咯Bot",
+  "version": "1.3.0",
+  "description": "NapCat 多实例 + RainCough Bot 统一控制台",
   "author": "RainCough",
   "icon": "",
   "requirements": [],
@@ -12,7 +12,7 @@
     "pages": [
       {
         "path": "",
-        "title": "QQ Bot"
+        "title": "雨咯Bot"
       }
     ]
   },
@@ -190,6 +190,72 @@
       "visibility": "main",
       "version": "1",
       "description": "试聊（不经过 QQ）"
+    },
+    {
+      "id": "qqbot.inst.list",
+      "visibility": "all",
+      "version": "1",
+      "description": "NapCat 实例列表（每个 QQ 号一个实例）"
+    },
+    {
+      "id": "qqbot.inst.add",
+      "visibility": "main",
+      "version": "1",
+      "description": "新增 NapCat 实例（建目录/写 systemd/启动）"
+    },
+    {
+      "id": "qqbot.inst.action",
+      "visibility": "main",
+      "version": "1",
+      "description": "实例操作：启停/重启/扫码/快登/删除"
+    },
+    {
+      "id": "qqbot.inst.logs",
+      "visibility": "all",
+      "version": "1",
+      "description": "实例运行日志（journalctl）"
+    },
+    {
+      "id": "qqbot.chat.sessions",
+      "visibility": "all",
+      "version": "1",
+      "description": "聊天记录会话列表"
+    },
+    {
+      "id": "qqbot.chat.messages",
+      "visibility": "all",
+      "version": "1",
+      "description": "聊天记录消息分页"
+    },
+    {
+      "id": "qqbot.chat.stats",
+      "visibility": "all",
+      "version": "1",
+      "description": "聊天记录统计与磁盘水位"
+    },
+    {
+      "id": "qqbot.chat.export",
+      "visibility": "main",
+      "version": "1",
+      "description": "导出聊天记录 JSON"
+    },
+    {
+      "id": "qqbot.chat.purge_media",
+      "visibility": "main",
+      "version": "1",
+      "description": "清理媒体文件（保留消息文本）"
+    },
+    {
+      "id": "rcbot.accounts",
+      "visibility": "all",
+      "version": "1",
+      "description": "机器人侧账号列表与连接状态"
+    },
+    {
+      "id": "rcbot.account.save",
+      "visibility": "main",
+      "version": "1",
+      "description": "新增/修改/删除机器人账号"
     }
   ],
   "environment": {
@@ -237,6 +303,20 @@
           "unit": "rcbot.service"
         },
         "required": true
+      },
+      {
+        "id": "mediadir",
+        "label": "媒体目录可写",
+        "required": true,
+        "run": "d=/opt/rcbot/media; mkdir -p \"$d\" 2>/dev/null || { echo '建不了媒体目录'; exit 1; }; [ -w \"$d\" ] || { echo '媒体目录不可写'; exit 1; }; echo writable",
+        "hint": "rcbot 存聊天记录媒体副本的目录，磁盘满或权限不对会记不下媒体"
+      },
+      {
+        "id": "silk",
+        "label": "语音转码器（可选，缺了语音只能下载不能播放）",
+        "required": false,
+        "run": "[ -x /opt/rcbot/bin/silk_v3_decoder ] || { echo '没有 silk_v3_decoder，语音无法转码'; exit 1; }; echo ok",
+        "hint": "在「环境准备」里执行「编译 silk_v3_decoder」即可补上"
       }
     ],
     "apply": [
@@ -255,6 +335,14 @@
         "needs": "root",
         "timeout": 180,
         "run": "set -e\ninstall -d -m 0755 /opt/rcbot /opt/rcbot/data /opt/rcbot/logs /opt/rcbot/rcbot\nrm -f /opt/rcbot/rcbot/*.py\ncp -rf rcbot/. /opt/rcbot/rcbot/\ninstall -m 0644 rcbot.py /opt/rcbot/rcbot.py\n# 源码要可读: 非 root 的面板也要能比对版本, 否则检查只会说\"读不到\"\nchmod 0644 /opt/rcbot/rcbot/*.py\ncat > /etc/systemd/system/rcbot.service <<'RCBOT_UNIT'\n[Unit]\nDescription=RainCough Bot (rcbot)\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=/opt/rcbot\nExecStart=/opt/rcbot/venv/bin/python /opt/rcbot/rcbot.py\nRestart=always\nRestartSec=5\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=RCBOT_LOG_LEVEL=INFO\n\n[Install]\nWantedBy=multi-user.target\nRCBOT_UNIT\nsystemctl daemon-reload\nsystemctl enable rcbot\nsystemctl restart rcbot"
+      },
+      {
+        "id": "silk",
+        "label": "编译 silk_v3_decoder（QQ 语音 SILK → mp3，浏览器才能播放）",
+        "check": "silk",
+        "needs": "root",
+        "timeout": 900,
+        "run": "set -e\n# QQ 语音是 SILK，浏览器放不了；ffmpeg 没有 silk 解码器（实测 5.1.9），apt 也没有。\n# 这里编译一份 silk_v3_decoder，rcbot 用它把语音转成 mp3。\nmkdir -p /opt/rcbot/bin\nif [ -x /opt/rcbot/bin/silk_v3_decoder ]; then echo already; exit 0; fi\ncommand -v git >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq git build-essential cmake; }\ncommand -v cmake >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq build-essential cmake; }\ntmp=$(mktemp -d)\ncd \"$tmp\"\ngit clone --depth 1 https://github.com/foyoux/pilk.git 2>/dev/null || {\n  git clone --depth 1 https://github.com/xiangyuecn/Silk.git . 2>/dev/null || {\n    echo '拉不到 silk_v3_decoder 源码'; exit 1; }\n}\nif [ -d silk ]; then cd silk; fi\nif [ -f CMakeLists.txt ]; then\n  cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null\n  cmake --build build -j2 >/dev/null\n  find . -name 'silk_v3_decoder' -type f -perm -u+x | head -1 | xargs -r -I{} cp {} /opt/rcbot/bin/silk_v3_decoder\nelif [ -f Makefile ]; then\n  make -s >/dev/null\n  cp silk_v3_decoder /opt/rcbot/bin/silk_v3_decoder 2>/dev/null || true\nfi\nchmod +x /opt/rcbot/bin/silk_v3_decoder\n[ -x /opt/rcbot/bin/silk_v3_decoder ] || { echo '编译没出可执行文件'; exit 1; }\necho ok"
       }
     ]
   }

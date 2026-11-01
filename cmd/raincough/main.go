@@ -447,6 +447,7 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	// ---- 插件 ----
 	mux.HandleFunc("/api/plugins", s.handlePlugins) // 列表
+	mux.HandleFunc("/api/plugins/rescan", s.handlePlugins) // 重新扫描插件目录
 	// 运行时能力(支持哪些语言 / 各解释器是否就绪)。前端据此判断"语言是否受支持",
 	// 不再自己硬编码白名单 —— 两处各写一份必然脱节(曾导致 JMComic 被误标"不兼容 v6")。
 	mux.HandleFunc("/api/plugins/runtime", s.handlePluginsRuntime)
@@ -531,6 +532,24 @@ func (s *server) rewritePluginPrefix(w http.ResponseWriter, r *http.Request) boo
 }
 
 func (s *server) handlePlugins(w http.ResponseWriter, r *http.Request) {
+	// POST /api/plugins/rescan —— 重新扫描插件目录。
+	//
+	// ★ 为什么需要: 插件目录被外部改动(手工改文件、部署脚本覆盖、
+	//   面板重启时正好在写文件)后, supervisor 里的登记是旧的,
+	//   新装的插件不会出现、消失的插件也还在 —— 只能重启面板才自愈。
+	//   实测踩过: 面板重启时插件文件写到一半 → 启动扫描跳过了它 →
+	//   之后插件一直"不存在", 但文件是好的。
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rescan") {
+		globalPX.Reload()
+		if globalSUP != nil {
+			globalSUP.Rescan()
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":     true,
+			"reload": globalPX.ListPlugins(),
+		})
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "仅支持 GET"})
 		return

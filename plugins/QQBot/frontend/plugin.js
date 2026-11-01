@@ -527,8 +527,15 @@ const Accounts = {
       if (x.online) return '已登录'
       if (x.state === 'active') return '运行中（未登录）'
       if (x.state === 'failed') return '启动失败'
+      if (x.state === 'activating') return '启动中'
+      if (x.state === 'auto-restart') return '反复重启（点「修复」）'
       if (x.state === 'inactive') return '已停止'
       return x.state || '未知'
+    },
+    // 起不来的时候给出可操作的提示，而不是干巴巴一句 connection refused
+    broken(x) {
+      return x.state === 'failed' || x.state === 'auto-restart' ||
+             x.state === 'activating'
     },
     stateCls(x) {
       if (x.online) return 'ok'
@@ -541,7 +548,7 @@ const Accounts = {
         await call('qqbot.inst.action', { uin: x.uin, action })
         const msg = {
           start: '已启动', stop: '已停止', restart: '已重启',
-          quick_login: '已发起快登', remove: '已删除实例',
+          quick_login: '已发起快登', remove: '已删除实例', repair: '已修复',
         }[action] || '已执行'
         toast(msg + '：' + (x.nick || x.uin), 'ok')
         this.qrUin = ''
@@ -657,6 +664,12 @@ const Accounts = {
             <span class="rcq-pill" :class="stateCls(x)">{{ stateText(x) }}</span>
           </div>
 
+          <div v-if="broken(x)" class="rcq-pnl rcq-warn"
+            style="font-size:11.5px;margin:0 0 10px;padding:8px 10px">
+            这个实例没能正常启动（多半是显示号或端口分配有问题）。
+            点「修复」会自动重新分配端口和显示号并重启。
+          </div>
+
           <div class="rcq-imeta">
             <div class="k">WebUI</div><div class="v">{{ x.webui_port || '—' }}</div>
             <div class="k">OneBot</div><div class="v">{{ x.onebot_port || '—' }}</div>
@@ -675,6 +688,8 @@ const Accounts = {
               @click="act(x, x.state === 'active' ? 'stop' : 'start')">
               {{ x.state === 'active' ? '停止' : '启动' }}
             </button>
+            <button class="btn btn-sm" :disabled="!!busy"
+              @click="act(x, 'repair')">修复</button>
             <button class="btn btn-sm btn-danger" :disabled="!!busy"
               @click="remove(x)">删除</button>
           </div>
