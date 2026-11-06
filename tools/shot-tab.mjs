@@ -65,6 +65,10 @@ if (await ev(`!!document.querySelector('.login-card')`)) {
 }
 
 await send('Page.navigate', { url: base + '/#/plugin/QQBot' })
+await sleep(1500)
+// ★ 必须强刷一次：面板给插件 JS 发的是 max-age=3600，
+//   只改哈希不重新加载文档时，浏览器会用旧的那份（页面看着"没更新"）。
+await send('Page.reload', { ignoreCache: true })
 await sleep(4200)
 await ev(`(() => {
   const el = [...document.querySelectorAll('.rcq-tab')].find(x => x.textContent.trim() === ${JSON.stringify(tab)})
@@ -81,6 +85,17 @@ if (clickSel) {
     return !!el
   })()`)
   console.log('点击', clickSel, ok)
+}
+// 按文字点（如 --click-text "QQ互通群"）
+const clickText = argOf('--click-text', '')
+if (clickText) {
+  const ok = await ev(`(() => {
+    const el = [...document.querySelectorAll('.rcq-csess,.rcq-item,.rcq-tab,button')]
+      .find(x => x.innerText && x.innerText.indexOf(${JSON.stringify(clickText)}) >= 0)
+    if (el) el.click()
+    return !!el
+  })()`)
+  console.log('按文字点击', clickText, ok)
 }
 await sleep(argOf('--after-wait', '4000') * 1)
 

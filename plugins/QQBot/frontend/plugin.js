@@ -615,6 +615,15 @@ const Accounts = {
     // 当前是不是 SnowLuma（扫码要靠 noVNC 远程桌面，不是二维码图片）
     isSL() { return (this.acc && this.acc.backend === 'snowluma') },
     beKind() { return (this.be && this.be.kind) || (this.acc && this.acc.backend) || 'napcat' },
+    // 框架下拉项：后端会告诉我们哪个"没装"（比如 NapCat 已被卸载），
+    // 没装的就置灰，免得切过去报"服务不存在"
+    beOpts() {
+      const list = (this.be && this.be.options) || []
+      if (list.length) return list
+      return [{ value: 'napcat', label: 'NapCat（原生安装）' },
+              { value: 'snowluma', label: 'SnowLuma（Docker）' }]
+    },
+    napcatOk() { return (this.beOpts.find((o) => o.value === 'napcat') || {}).installed !== false },
     ready() { return !!(this.acc && this.acc.core_ready) },
     online() { return !!(this.acc && (this.acc.online || this.acc.connected)) },
     uin() { return (this.acc && this.acc.uin) || '' },
@@ -647,6 +656,9 @@ const Accounts = {
     },
   },
   async mounted() {
+    // ★ 必须先把后端信息拉回来：框架下拉要用 options（哪个装没装），
+    //   不拉的话 beOpts 走兜底，"NapCat（未安装）"就不会出现。
+    await this.loadBackend()
     await this.load()
     this.timer = setInterval(() => this.load(true), 5000)
   },
@@ -669,6 +681,11 @@ const Accounts = {
     },
     async loadBackend() {
       try { this.be = await callData('qqbot.backend.get') } catch (e) { this.be = null }
+    },
+    // 下拉里只显示短名（"NapCat（原生安装）" → "NapCat"），没装的加后缀
+    optLabel(o) {
+      const short = String((o && o.label) || (o && o.value) || '').split('（')[0]
+      return (o && o.installed === false) ? short + '（未安装）' : short
     },
     // noVNC 地址：主机名用当前页面的（后端不知道面板对外的 IP），
     // 端口与路径由后端给（含远程桌面密码，打开即自动连）
@@ -807,8 +824,8 @@ const Accounts = {
         <span class="rcq-hint">框架</span>
         <select class="input" style="width:auto;font-size:12px" :disabled="switching"
           :value="beKind" @change="switchBackend($event.target.value)">
-          <option value="napcat">NapCat</option>
-          <option value="snowluma">SnowLuma</option>
+          <option v-for="o in beOpts" :key="o.value" :value="o.value"
+            :disabled="o.installed === false">{{ optLabel(o) }}</option>
         </select>
         <button class="btn btn-sm btn-primary" :disabled="qrBusy" @click="showQr()">
           {{ qrBusy ? '准备中…' : (login ? '重新登录' : '扫码登录') }}
@@ -910,7 +927,8 @@ const Accounts = {
         </template>
         <br />
         换号时点「退出登录」清掉登录态，再重新扫码即可。
-        两套框架的开关在上面的「框架」下拉里，随时可以切回。
+        <template v-if="napcatOk">两套框架的开关在上面的「框架」下拉里，随时可以切回。</template>
+        <template v-else>本机只装了 SnowLuma（NapCat 已卸载），框架下拉里 NapCat 显示为不可选。</template>
       </div>
     </div>
   </div>`,
