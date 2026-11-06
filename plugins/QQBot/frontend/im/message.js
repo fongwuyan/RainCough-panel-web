@@ -156,17 +156,17 @@ export const ImMessageRow = {
         </div>
 
         <!-- 媒体区（放在气泡外，避免圆角与内边距打架） -->
-        <div class="im-grid" :class="gridCls(images.length)" v-if="images.length">
+        <div class="im-grid" :class="gridCls(images.length)" v-if="images.length && !recalled">
           <img v-for="(m,i) in images" :key="i" :src="mediaUrl(m)" loading="lazy"
             @click="openImg(m)" alt="图片" />
         </div>
-        <div class="im-video" v-for="(m,i) in videos" :key="'v'+i">
+        <div class="im-video" v-for="(m,i) in (recalled ? [] : videos)" :key="'v'+i">
           <video :src="mediaUrl(m)" controls preload="metadata" playsinline></video>
         </div>
-        <div class="im-bub" v-for="(m,i) in voices" :key="'r'+i" style="padding:6px 10px">
+        <div class="im-bub" v-for="(m,i) in (recalled ? [] : voices)" :key="'r'+i" style="padding:6px 10px">
           <im-voice :m="m" :me="me" />
         </div>
-        <div class="im-bub" v-for="(m,i) in files" :key="'f'+i" style="padding:8px 12px">
+        <div class="im-bub" v-for="(m,i) in (recalled ? [] : files)" :key="'f'+i" style="padding:8px 12px">
           <div class="im-file">
             <div class="fi">{{ (m.name || 'FILE').split('.').pop().slice(0,4).toUpperCase() }}</div>
             <div style="min-width:0">

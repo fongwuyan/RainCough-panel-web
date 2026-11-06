@@ -6,7 +6,10 @@ import {
   S, loadSessions, loadSelf, openSession, loadMessages, current,
   sendText, retrySend, sendImage, lastRead, markRead, callData,
 } from './store.js'
-import { fmtListTime, fmtDayLabel, fmtNum, faceUrl } from './util.js'
+import {
+  fmtListTime, fmtDayLabel, fmtNum, faceUrl,
+  FACE_IDS, FACE_NAMES, recentFaces, pushRecentFace,
+} from './util.js'
 import { ImMessageRow } from './message.js'
 
 const RAIL = [
@@ -34,7 +37,8 @@ export const IM = {
       toastMsg: '',
       showFace: false,
       showAt: false,
-      faceIds: Array.from({ length: 200 }, (_, i) => i),
+      faceIds: FACE_IDS,
+      recent: [],
       canSend: false,
     }
   },
@@ -122,7 +126,27 @@ export const IM = {
     // 用 contenteditable 而不是 textarea：QQ 的表情和 @ 是"行内对象"，
     // 纯文本表达不了。发送时再把 DOM 走一遍还原成 OneBot 段数组。
     faceUrl,
-    toggleFace() { this.showFace = !this.showFace; if (this.showFace) this.showAt = false },
+    toggleFace() {
+      this.showFace = !this.showFace
+      if (this.showFace) {
+        this.showAt = false
+        this.recent = recentFaces()
+        // 每次打开都回到顶部（否则会停在上一轮的滚动位置，看着像"表情少了"）
+        this.$nextTick(() => {
+          const el = this.$el && this.$el.querySelector('.im-facepanel')
+          if (el) el.scrollTop = 0
+        })
+      }
+    },
+    faceName(id) { return FACE_NAMES[id] || ('表情 ' + id) },
+    // 表情图偶发 404/中断：带时间戳重试一次，还失败就藏起来（不留破图）
+    faceRetry(e) {
+      const el = e && e.target
+      if (!el) return
+      if (el.dataset && el.dataset.retried) { el.style.visibility = 'hidden'; return }
+      if (el.dataset) el.dataset.retried = '1'
+      el.src = String(el.src || '').split('?')[0] + '?r=' + Date.now()
+    },
     toggleAt() { this.showAt = !this.showAt; if (this.showAt) this.showFace = false },
 
     hasContent() {
@@ -172,11 +196,14 @@ export const IM = {
       this.onInput()
     },
     addFace(id) {
+      pushRecentFace(id)
+      this.recent = recentFaces()
       const img = document.createElement('img')
       img.className = 'face'
       img.setAttribute('data-face', String(id))
       img.src = faceUrl(id)
       img.alt = '[表情]'
+      img.onerror = () => this.faceRetry({ target: img })
       this.insertNode(img)
     },
     addAt(p) {
@@ -238,6 +265,18 @@ export const IM = {
       let html = ''
       try { html = localStorage.getItem('rcq.im.draft.' + sid) || '' } catch (e) {}
       el.innerHTML = html
+      // 草稿里的表情是 innerHTML 带回来的，没挂过 onerror；
+      // 之前加载失败过的，这里补一次重试，否则会一直显示破图
+      el.querySelectorAll('img.face').forEach((img) => {
+        // ★ 草稿存的是 innerHTML，会把上一轮的"已隐藏/已重试"状态一起存回来。
+        //   这里一律按 data-face 重新拼 src，并把状态标记清掉 ——
+        //   否则一个曾经失败的表情会永远卡在破图（实测踩到）。
+        img.style.visibility = ''
+        if (img.dataset) delete img.dataset.retried
+        const id = img.getAttribute('data-face')
+        if (id !== null) img.src = faceUrl(id)
+        img.onerror = () => this.faceRetry({ target: img })
+      })
       this.canSend = this.hasContent()
     },
 
@@ -528,9 +567,19 @@ export const IM = {
 
         <!-- 表情面板 -->
         <div class="im-facepanel" v-if="showFace" @click.stop>
+          <template v-if="recent.length">
+            <div class="im-facelbl">最近使用</div>
+            <div class="im-facegrid">
+              <img v-for="id in recent" :key="'r' + id" :src="faceUrl(id)" loading="lazy"
+                :title="faceName(id)" :alt="faceName(id)" @click="addFace(id)"
+                @error="faceRetry" />
+            </div>
+          </template>
+          <div class="im-facelbl">全部表情</div>
           <div class="im-facegrid">
             <img v-for="id in faceIds" :key="id" :src="faceUrl(id)" loading="lazy"
-              :alt="'表情' + id" @click="addFace(id)" />
+              :title="faceName(id)" :alt="faceName(id)" @click="addFace(id)"
+              @error="faceRetry" />
           </div>
         </div>
 

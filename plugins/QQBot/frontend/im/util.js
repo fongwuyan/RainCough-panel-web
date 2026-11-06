@@ -58,7 +58,9 @@ export function mediaAlive(m) {
 
 /** QQ 经典表情：id → 官方表情图。取不到的由 <img onerror> 兜底 */
 export function faceUrl(id) {
-  const n = String(id || '').trim()
+  // ★ 不能用 id || ''：表情 id 0 是老实的 0，被当成空值会返回空串 →
+  //   面板第一个表情（惊讶）永远是破图。
+  const n = String(id === 0 ? 0 : (id || '')).trim()
   if (!/^\d+$/.test(n)) return ''
   return 'https://qzonestyle.gtimg.cn/qzone/em/e' + n + '.gif'
 }
@@ -179,4 +181,55 @@ export function guessSec(m) {
   const n = Number((m && m.bytes) || 0)
   if (!n) return 2
   return Math.max(1, Math.min(60, Math.round(n / 3000)))
+}
+
+
+// ---------------------------------------------------------------- QQ 表情
+//
+// ★ 这里的 id 是**实测**出来的：逐个打 https://qzonestyle.gtimg.cn/qzone/em/e{id}.gif，
+//   只保留返回 200 的号段。QQ 的表情 id 并不连续（91–99、210、371–399 是空的），
+//   直接把 0..400 全铺出来会出现一片破图。
+export const FACE_RANGES = [[0, 90], [100, 209], [211, 370], [400, 410]]
+
+export const FACE_IDS = (() => {
+  const out = []
+  for (const [a, b] of FACE_RANGES) {
+    for (let i = a; i <= b; i++) out.push(i)
+  }
+  return out
+})()
+
+// 经典表情的名字（QQ 桌面端就是这么叫的），只覆盖 0–90；
+// 后面的新表情没有公开命名，tooltip 就显示编号，不瞎编。
+export const FACE_NAMES = {
+  0: '惊讶', 1: '撇嘴', 2: '色', 3: '发呆', 4: '得意', 5: '流泪', 6: '害羞', 7: '闭嘴',
+  8: '睡', 9: '大哭', 10: '尴尬', 11: '发怒', 12: '调皮', 13: '呲牙', 14: '微笑',
+  15: '难过', 16: '酷', 17: '抓狂', 18: '吐', 19: '偷笑', 20: '可爱', 21: '白眼',
+  22: '傲慢', 23: '饥饿', 24: '困', 25: '惊恐', 26: '流汗', 27: '憨笑', 28: '悠闲',
+  29: '奋斗', 30: '咒骂', 31: '疑问', 32: '嘘', 33: '晕', 34: '疯了', 35: '衰',
+  36: '骷髅', 37: '敲打', 38: '再见', 39: '发抖', 40: '抠鼻', 41: '鼓掌', 42: '糗大了',
+  43: '坏笑', 44: '左哼哼', 45: '右哼哼', 46: '哈欠', 47: '鄙视', 48: '委屈',
+  49: '快哭了', 50: '左亲亲', 51: '吓', 52: '可怜', 53: '菜刀', 54: '西瓜', 55: '啤酒',
+  56: '篮球', 57: '乒乓', 58: '咖啡', 59: '饭', 60: '猪头', 61: '玫瑰', 62: '凋谢',
+  63: '吻', 64: '爱心', 65: '心碎', 66: '蛋糕', 67: '闪电', 68: '炸弹', 69: '刀',
+  70: '足球', 71: '瓢虫', 72: '便便', 73: '月亮', 74: '太阳', 75: '礼物', 76: '拥抱',
+  77: '强', 78: '弱', 79: '握手', 80: '胜利', 81: '抱拳', 82: '勾引', 83: '拳头',
+  84: '差劲', 85: '爱你', 86: 'NO', 87: 'OK', 88: '爱情', 89: '飞吻', 90: '磕头',
+}
+
+// 最近使用（QQ 桌面端面板顶部也有一栏），存本地
+const RECENT_KEY = 'rcq.im.faces'
+
+export function recentFaces() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]')
+    return Array.isArray(v) ? v.filter((x) => FACE_IDS.indexOf(x) >= 0).slice(0, 20) : []
+  } catch (e) { return [] }
+}
+
+export function pushRecentFace(id) {
+  const n = Number(id)
+  const cur = recentFaces().filter((x) => x !== n)
+  cur.unshift(n)
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(cur.slice(0, 20))) } catch (e) {}
 }

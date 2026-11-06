@@ -174,12 +174,13 @@ export const IM_CSS = `
 .im-tool.on{background:var(--im-active);color:var(--im-t1)}
 
 /* 表情面板 / @ 选择器 */
-.im-facepanel{position:absolute;left:14px;bottom:100%;margin-bottom:8px;width:432px;
-  max-height:264px;overflow:auto;background:var(--im-list);border:1px solid var(--im-line);
-  border-radius:10px;box-shadow:var(--im-shadow);padding:8px;z-index:5}
-.im-facegrid{display:grid;grid-template-columns:repeat(12,1fr);gap:2px}
-.im-facegrid img{width:28px;height:28px;cursor:pointer;border-radius:4px;padding:2px}
-.im-facegrid img:hover{background:var(--im-hover)}
+.im-facepanel{position:absolute;left:14px;bottom:100%;margin-bottom:8px;width:368px;
+  max-height:280px;overflow:auto;background:var(--im-list);border:1px solid var(--im-line);
+  border-radius:10px;box-shadow:var(--im-shadow);padding:6px 8px 10px;z-index:5}
+.im-facelbl{font-size:11px;color:var(--im-t3);margin:6px 2px 4px}
+.im-facegrid{display:grid;grid-template-columns:repeat(11,1fr);gap:1px}
+.im-facegrid img{width:26px;height:26px;cursor:pointer;border-radius:4px;padding:2px}
+.im-facegrid img:hover{background:var(--im-hover);transform:scale(1.12)}
 .im-atpanel{position:absolute;left:14px;bottom:100%;margin-bottom:8px;width:264px;
   max-height:240px;overflow:auto;background:var(--im-list);border:1px solid var(--im-line);
   border-radius:10px;box-shadow:var(--im-shadow);padding:6px;z-index:5}
