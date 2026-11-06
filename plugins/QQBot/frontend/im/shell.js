@@ -39,6 +39,7 @@ export const IM = {
       searchOpen: false,   // 聊天区搜索框展开
       msgKw: '',           // 会话内搜索关键词
       rnd: null,           // 随机挑一条回复 {loading, scope, picked, reply, provider, error}
+      rpCfg: { enabled: true, scope: 'enabled_groups' },  // 设置页里的开关与范围
       busy: '',
     }
   },
@@ -88,6 +89,15 @@ export const IM = {
   async mounted() {
     await loadSelf()
     await loadSessions()
+    // 随机挑消息回的开关与范围（设置页 → 能力）
+    try {
+      const cfg = await callData('rcbot.config.get')
+      const rp = ((cfg || {}).features || {}).random_pick || {}
+      this.rpCfg = {
+        enabled: rp.enabled !== false,
+        scope: rp.scope || 'enabled_groups',
+      }
+    } catch (e) { /* 拿不到就用默认值 */ }
     if (S.sid) {
       await openSession(S.sid)
       this.readAt = lastRead(S.sid)
@@ -139,9 +149,13 @@ export const IM = {
       })
     },
     // ---------------- 随机挑一条消息回
-    // 不是回当前这条，而是从聊天档案里随机翻一条出来，让机器人对它说点什么。
+    // 不是回当前这条，而是从**已启用的群聊**里随机翻一条出来，让机器人对它说点什么。
     openRandom() {
-      this.rnd = { loading: false, scope: (S.sid ? 'session' : 'all'),
+      if (!this.rpCfg.enabled) {
+        this.toast('随机挑消息回已关闭（设置 → 能力）')
+        return
+      }
+      this.rnd = { loading: false, scope: this.rpCfg.scope,
                    picked: null, reply: '', provider: '', error: '' }
       this.pickRandom()
     },
@@ -166,10 +180,16 @@ export const IM = {
         this.rnd.loading = false
       }
     },
+    // 临时在「当前会话」和「设置里的范围」之间切
     switchScope() {
       if (!this.rnd) return
-      this.rnd.scope = this.rnd.scope === 'all' ? 'session' : 'all'
+      this.rnd.scope = this.rnd.scope === 'session' ? this.rpCfg.scope : 'session'
       this.pickRandom()
+    },
+    scopeLabel(s) {
+      if (s === 'session') return '当前会话'
+      if (s === 'all_groups') return '所有群聊'
+      return '已启用的群聊'
     },
     // ---------------- 会话导出 / 清空（原「聊天记录」页）
     async exportSession(s) {
@@ -470,7 +490,8 @@ export const IM = {
             @input="onSearch($event.target.value)" />
           <button v-if="msgKw" class="im-hclear" title="清除" @click="onSearch('')">×</button>
         </div>
-        <button class="im-ico" title="随机挑一条消息，让机器人回它" @click="openRandom">
+        <button class="im-ico" :title="rpCfg.enabled ? '随机挑一条群里的消息，让机器人回它' : '随机挑消息回已关闭（设置 → 能力）'"
+          @click="openRandom">
           <svg viewBox="0 0 24 24"><path d="M12 2l2.2 5.6L20 9l-4.6 3.4L16.6 18 12 14.9 7.4 18l1.2-5.6L4 9l5.8-1.4L12 2z"/></svg>
         </button>
         <button class="im-ico" title="搜索本会话消息" @click="toggleSearch">
@@ -558,7 +579,7 @@ export const IM = {
         <div class="fh">
           <div class="ft">随机挑一条回复</div>
           <button class="scope" title="切换挑选范围" @click="switchScope">
-            {{ rnd.scope === 'all' ? '全部聊天' : '当前会话' }}
+            {{ scopeLabel(rnd.scope) }}
           </button>
           <button class="im-ico" title="关闭" @click="closeRandom">
             <svg viewBox="0 0 24 24"><path d="M6.4 5L5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6 6.4 5z"/></svg>

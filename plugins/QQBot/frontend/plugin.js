@@ -2431,6 +2431,7 @@ const Settings = {
     feats() { return (this.cfg && this.cfg.features) || {} },
     ws() { return this.feats.web_search || {} },
     vis() { return this.feats.vision || {} },
+    rp() { return this.feats.random_pick || {} },
   },
   async mounted() { await this.load() },
   methods: {
@@ -2493,6 +2494,10 @@ const Settings = {
             vision: {
               enabled: !!this.vis.enabled,
               max_images: Number(this.vis.max_images) || 3,
+            },
+            random_pick: {
+              enabled: this.rp.enabled !== false,
+              scope: this.rp.scope || 'enabled_groups',
             },
           },
         })
@@ -2633,8 +2638,31 @@ const Settings = {
             <label class="rcq-fi"><span>单条消息最多看几张</span>
               <input class="input rcq-num" type="number" min="1" max="6" v-model="vis.max_images" /></label>
           </div>
+<div class="rcq-note">
+          只有「当前这轮」会带图，历史里只留 [图片] 文本 —— 不然每轮都要重传图片，token 会爆。
+          </div>
+        </div>
+
+        <div class="rcq-sec">
+          <div class="switch-row">
+            <label>允许随机挑消息回
+              <div class="rcq-note">
+                消息页的 🎲：从群聊里随机翻一条别人说过的话，让机器人对它回一句。
+                <b>不会发到 QQ</b>，只在页面上预览。
+              </div>
+            </label>
+            <label class="switch"><input type="checkbox" v-model="rp.enabled" /><span class="slider"></span></label>
+          </div>
+          <div class="rcq-form" style="margin-top:6px">
+            <label class="rcq-fi"><span>从哪里挑</span>
+              <select class="input" v-model="rp.scope">
+                <option value="enabled_groups">已启用的群聊（推荐）</option>
+                <option value="all_groups">所有群聊</option>
+              </select>
+            </label>
+          </div>
           <div class="rcq-note">
-            只有「当前这轮」会带图，历史里只留 [图片] 文本 —— 不然每轮都要重传图片，token 会爆。
+            「已启用的群聊」= 在「会话管理」里打开开关的那些群。还没启用的群不参与挑选。
           </div>
         </div>
 
