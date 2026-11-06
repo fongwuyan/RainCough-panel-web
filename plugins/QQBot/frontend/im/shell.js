@@ -38,7 +38,7 @@ export const IM = {
       sessMenu: null,      // 会话右键菜单 {x,y,s}
       searchOpen: false,   // 聊天区搜索框展开
       msgKw: '',           // 会话内搜索关键词
-      rnd: null,           // 随机挑一条回复 {loading, scope, picked, reply, provider, error}
+      rnd: null,           // 随机挑一条回复 {loading, scope, picked, reply, provider, error, token, sending, sent}
       rpCfg: { enabled: true, scope: 'enabled_groups' },  // 设置页里的开关与范围
       busy: '',
     }
@@ -172,12 +172,37 @@ export const IM = {
         this.rnd.picked = (d && d.picked) || null
         this.rnd.reply = (d && d.reply) || ''
         this.rnd.provider = (d && d.provider) || ''
+        this.rnd.token = (d && d.token) || ''
+        this.rnd.sent = ''
       } catch (e) {
         this.rnd.error = String((e && e.message) || e)
         this.rnd.picked = null
         this.rnd.reply = ''
+        this.rnd.token = ''
+        this.rnd.sent = ''
       } finally {
         this.rnd.loading = false
+      }
+    },
+    // 把这条回复真的发到 QQ（发到被挑中消息所在的那个群）
+    async sendRandom() {
+      if (!this.rnd || !this.rnd.token) return
+      const p = this.rnd.picked || {}
+      const where = p.title || p.target_id || ''
+      if (!confirm('把这条回复发到「' + where + '」？\n\n会 @ 一下原说话人。')) return
+      this.rnd.sending = true
+      this.rnd.sent = ''
+      try {
+        const d = await callData('qqbot.chat.random_reply.send', { token: this.rnd.token })
+        this.rnd.token = ''    // 一条结果只发一次
+        this.rnd.sent = '已发到「' + where + '」'
+        this.toast('已发送到 QQ')
+        // 群里多了一条消息，把当前会话刷一下
+        loadMessages(false)
+      } catch (e) {
+        this.rnd.sent = '发送失败：' + String((e && e.message) || e)
+      } finally {
+        this.rnd.sending = false
       }
     },
     // 临时在「当前会话」和「设置里的范围」之间切
@@ -589,7 +614,7 @@ export const IM = {
           <div class="im-more" v-if="rnd.loading">正在挑…</div>
           <div class="im-empty" v-else-if="rnd.error">{{ rnd.error }}</div>
           <template v-else-if="rnd.picked">
-            <div class="rnd-hint">从聊天档案里随机翻了一条出来，让机器人对它说点什么。</div>
+            <div class="rnd-hint">从已启用的群聊里随机翻了一条出来，让机器人对它说点什么。满意就点「发送到 QQ」。</div>
             <div class="rnd-pick">
               <div class="rnd-pick-h">
                 <span class="rnd-who">{{ rnd.picked.sender_name || rnd.picked.sender_id }}</span>
@@ -601,19 +626,23 @@ export const IM = {
             <div class="rnd-arrow">↓ 机器人这样回</div>
             <div class="rnd-reply">{{ rnd.reply }}</div>
             <div class="rnd-foot" v-if="rnd.provider">用 {{ rnd.provider }} 生成</div>
+            <div class="rnd-sent" v-if="rnd.sent"
+              :class="rnd.sent.indexOf('失败') >= 0 ? 'bad' : 'ok'">{{ rnd.sent }}</div>
           </template>
           <div class="im-empty" v-else>没有可挑的消息</div>
         </div>
         <div class="rf">
+          <button class="primary" :disabled="rnd.loading || rnd.sending || !rnd.token"
+            @click="sendRandom">{{ rnd.sending ? '发送中…' : '发送到 QQ' }}</button>
           <button :disabled="rnd.loading" @click="pickRandom">换一个</button>
           <button @click="closeRandom">关闭</button>
         </div>
       </div>
 
-      <!-- 只读栏：本页只做浏览，发送请用 QQ 客户端 -->
+      <!-- 只读栏：本页不提供通用发送入口（随机挑回复可单独发到 QQ） -->
       <div class="im-readonly">
         <svg viewBox="0 0 24 24"><path d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
-        <span>只读模式 · 本页仅用于浏览消息，发送与回复请使用 QQ 客户端</span>
+        <span>只读模式 · 本页仅用于浏览消息；🎲 随机挑的回复可手动发到 QQ</span>
       </div>
     </div>
 

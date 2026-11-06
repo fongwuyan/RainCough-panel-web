@@ -2648,7 +2648,7 @@ const Settings = {
             <label>允许随机挑消息回
               <div class="rcq-note">
                 消息页的 🎲：从群聊里随机翻一条别人说过的话，让机器人对它回一句。
-                <b>不会发到 QQ</b>，只在页面上预览。
+                点「发送到 QQ」会真的发到那个群里（并 @ 原说话人）。
               </div>
             </label>
             <label class="switch"><input type="checkbox" v-model="rp.enabled" /><span class="slider"></span></label>

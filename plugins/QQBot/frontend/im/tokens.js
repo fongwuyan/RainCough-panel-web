@@ -224,12 +224,19 @@ export const IM_CSS = `
 .im-rnd .rnd-reply{background:var(--im-self);border-radius:8px;padding:9px 11px;
   font-size:13.5px;line-height:1.6;color:var(--im-self-t);white-space:pre-wrap;word-break:break-word}
 .im-rnd .rnd-foot{font-size:11px;color:var(--im-t3);margin-top:8px;text-align:right}
+.im-rnd .rnd-sent{font-size:11.5px;margin-top:8px;padding:5px 9px;border-radius:6px;
+  background:var(--im-hover);color:var(--im-t2)}
+.im-rnd .rnd-sent.ok{color:var(--im-self)}
+.im-rnd .rnd-sent.bad{color:#e5484d}
 .im-rnd .rf{flex:none;display:flex;gap:8px;padding:10px 14px;
   border-top:1px solid var(--im-line)}
 .im-rnd .rf button{flex:1;font-size:12.5px;border:1px solid var(--im-line);
   background:var(--im-hover);color:var(--im-t1);border-radius:6px;padding:7px 0;cursor:pointer}
 .im-rnd .rf button:hover{background:var(--im-active)}
-.im-rnd .rf button:disabled{opacity:.5;cursor:default}
+.im-rnd .rf button.primary{background:var(--im-self);border-color:var(--im-self);
+  color:var(--im-self-t)}
+.im-rnd .rf button.primary:hover{opacity:.88;background:var(--im-self)}
+.im-rnd .rf button:disabled{opacity:.45;cursor:default}
 
 /* 合并转发展开抽屉 */
 .im-fwd{position:absolute;top:0;right:0;bottom:0;width:390px;max-width:82%;
