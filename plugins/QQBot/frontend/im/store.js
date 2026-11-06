@@ -102,3 +102,53 @@ export function isMe(m) {
   const sid = String(m.sender_id || '')
   return !!(S.uin && sid && sid === S.uin)
 }
+
+
+// ---------------------------------------------------------------- 发送
+//
+// 乐观更新：先插一条 _pending 的本地消息，成功用后端记录替换，
+// 失败标记 _failed 并保留原文 —— 用户点一下就能重发。
+
+let tmpSeq = 0
+
+export async function sendText(text) {
+  const t = String(text || '')
+  if (!S.sid || !t.trim()) return
+  const tmp = {
+    id: 'tmp-' + (++tmpSeq) + '-' + Date.now(),
+    created_at: Math.floor(Date.now() / 1000),
+    sender_id: S.uin,
+    sender_name: '',
+    role: 'assistant',
+    segs: [{ type: 'text', data: { text: t } }],
+    text: t,
+    media: [],
+    recalled: 0,
+    _pending: true,
+    _text: t,
+  }
+  S.msgs.push(tmp)
+  try {
+    const d = await callData('qqbot.chat.send', { session_id: S.sid, text: t })
+    const i = S.msgs.findIndex((x) => x.id === tmp.id)
+    if (i >= 0 && d && d.id) S.msgs.splice(i, 1, d)
+    else if (i >= 0) { S.msgs[i]._pending = false; S.msgs[i]._failed = true }
+    return d
+  } catch (e) {
+    const m = S.msgs.find((x) => x.id === tmp.id)
+    if (m) {
+      m._pending = false
+      m._failed = true
+      m._err = String((e && e.message) || e)
+    }
+    throw e
+  }
+}
+
+/** 重发一条失败的消息：先移除失败的本地项，再走一次发送 */
+export async function retrySend(m) {
+  const i = S.msgs.findIndex((x) => x.id === (m && m.id))
+  const text = (m && (m._text || m.text)) || ''
+  if (i >= 0) S.msgs.splice(i, 1)
+  return sendText(text)
+}

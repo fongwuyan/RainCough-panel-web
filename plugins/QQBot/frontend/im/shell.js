@@ -4,6 +4,7 @@
 // 数据：复用 qqbot.chat.sessions / qqbot.chat.messages，与「聊天记录」页同源
 import {
   S, loadSessions, loadSelf, openSession, loadMessages, current,
+  sendText, retrySend,
 } from './store.js'
 import { fmtListTime, fmtDayLabel, fmtNum } from './util.js'
 import { ImMessageRow } from './message.js'
@@ -26,6 +27,8 @@ export const IM = {
       dragging: false,
       sideWidth: 268,
       badAva: {},
+      draft: '',
+      sending: false,
     }
   },
   computed: {
@@ -81,6 +84,31 @@ export const IM = {
       if (e.key === 'Escape') { e.stopPropagation(); this.close() }
     },
     close() { this.$emit('close') },
+    async onSend() {
+      const t = this.draft.trim()
+      if (!t || !cur || this.sending) return
+      this.sending = true
+      this.draft = ''
+      try {
+        await sendText(t)
+      } catch (e) {
+        // 失败项已经在列表里标红，这里只负责把视口拉到底让人看见
+      } finally {
+        this.sending = false
+        this.$nextTick(() => this.toBottom(true))
+      }
+    },
+    onKeydown(e) {
+      // QQ 桌面端默认：Enter 发送、Shift+Enter 换行
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault()
+        this.onSend()
+      }
+    },
+    async onRetry(m) {
+      try { await retrySend(m) } catch (e) {}
+      this.$nextTick(() => this.toBottom(true))
+    },
     avatarOf(s) { return s && s.avatar ? s.avatar : '' },
     initialOf(s) { return String((s && (s.display || s.target_id)) || '?').trim().slice(0, 1) },
     pick(s) {
@@ -198,7 +226,8 @@ export const IM = {
         </div>
         <template v-for="r in rows" :key="r.key">
           <div class="im-sys" v-if="r.type === 'sys'"><span>{{ r.text }}</span></div>
-          <im-message-row v-else :m="r.m" :compact="r.compact" :show-time="r.showTime" />
+          <im-message-row v-else :m="r.m" :compact="r.compact" :show-time="r.showTime"
+            @retry="onRetry" />
         </template>
       </div>
 
@@ -216,11 +245,13 @@ export const IM = {
             <svg viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm1 2v9l4-4 3 3 3-4 4 5V7H5zm3 1.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/></svg>
           </button>
         </div>
-        <textarea class="im-editor" rows="2" disabled
-          placeholder="发送功能将在下一阶段接入 —— 当前可以浏览全部历史消息"></textarea>
+        <textarea class="im-editor" rows="2" v-model="draft" :disabled="!cur"
+          :placeholder="cur ? '输入消息，Enter 发送，Shift+Enter 换行' : '先在左边选一个会话'"
+          @keydown="onKeydown"></textarea>
         <div class="im-send">
-          <span class="hint">只读模式</span>
-          <button class="im-btn-send" disabled>发送</button>
+          <span class="hint">{{ cur ? 'Enter 发送 · Shift+Enter 换行' : '' }}</span>
+          <button class="im-btn-send" :disabled="!draft.trim() || !cur || sending"
+            @click="onSend">{{ sending ? '发送中…' : '发送' }}</button>
         </div>
       </div>
     </div>

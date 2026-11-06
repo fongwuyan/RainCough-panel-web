@@ -173,7 +173,12 @@ export const ImMessageRow = {
           </div>
         </div>
 
-        <div class="im-meta" v-if="!compact">{{ time }}</div>
+        <div class="im-meta" v-if="!compact">
+          <span v-if="m._pending">发送中…</span>
+          <span v-else-if="m._failed" class="im-st-bad" title="点击重发"
+            @click="$emit('retry', m)">发送失败，点击重试</span>
+          <span v-else>{{ time }}</span>
+        </div>
       </div>
     </div>
 

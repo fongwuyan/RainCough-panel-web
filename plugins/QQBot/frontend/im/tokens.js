@@ -124,6 +124,7 @@ export const IM_CSS = `
   border-left-color:rgba(255,255,255,.5)}
 .im-recall{font-size:12px;color:var(--im-t3);font-style:italic}
 .im-meta{font-size:11px;color:var(--im-t3);margin-top:3px;padding:0 2px}
+.im-st-bad{color:#f5534f;cursor:pointer}
 
 /* 媒体 */
 .im-grid{display:grid;gap:4px;max-width:420px}
