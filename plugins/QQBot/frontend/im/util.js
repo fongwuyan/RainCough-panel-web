@@ -45,6 +45,7 @@ export function fmtDayLabel(ts) {
 /** 媒体文件 URL：走面板文件预览通道（支持 Range，视频能拖进度条） */
 export function mediaUrl(m) {
   if (!m) return ''
+  if (m._url) return m._url          // 本地乐观预览（blob URL）
   const p = m.abs || (m.rel ? '/opt/rcbot/media/' + m.rel : '')
   if (!p) return ''
   return '/api/fm/preview?path=' + encodeURIComponent(p)

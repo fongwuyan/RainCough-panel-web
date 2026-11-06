@@ -182,3 +182,62 @@ export function markRead(sid, id) {
   m[sid] = Number(id)
   try { localStorage.setItem(READ_KEY, JSON.stringify(m)) } catch (e) {}
 }
+
+
+// ---------------------------------------------------------------- 发图片
+//
+// 两步：① 用面板的分块上传接口把文件落到机器上的临时目录
+//      ② 把绝对路径交给 rcbot，由它读文件转 base64 发给 QQ
+// 为什么不直接传 base64 给 rcbot：图片走 JSON-RPC 会被放大 33%，
+// 而且面板本来就有上传通道，没必要重复造。
+
+async function uploadFile(file) {
+  const fd = new FormData()
+  const id = 'im' + Date.now() + Math.random().toString(36).slice(2, 8)
+  fd.append('path', '/tmp/rc-im-upload')
+  fd.append('filename', file.name && file.name !== 'image.png' ? file.name
+    : ('image-' + Date.now() + '.png'))
+  fd.append('file_id', id)
+  fd.append('chunk_index', '0')
+  fd.append('total_chunks', '1')
+  fd.append('conflict', 'rename')
+  fd.append('chunk', file)
+  const r = await fetch('/api/fm/upload/chunk', { method: 'POST', body: fd })
+  let d = {}
+  try { d = await r.json() } catch (e) { throw new Error('上传失败（' + r.status + '）') }
+  if (!d.ok || !d.path) throw new Error(d.error || '上传失败')
+  return d.path
+}
+
+export async function sendImage(file, replyId = '', quoteMeta = null) {
+  if (!S.sid || !file) return
+  const url = URL.createObjectURL(file)
+  const tmp = {
+    id: 'tmp-img-' + Date.now(),
+    created_at: Math.floor(Date.now() / 1000),
+    sender_id: S.uin,
+    sender_name: '',
+    role: 'assistant',
+    segs: [{ type: 'image', data: { summary: '[图片]' } }],
+    text: '[图片]',
+    media: [{ kind: 'image', local: 1, bytes: file.size, _url: url }],
+    recalled: 0,
+    _pending: true,
+  }
+  S.msgs.push(tmp)
+  try {
+    const path = await uploadFile(file)
+    const params = { session_id: S.sid, path }
+    if (replyId) params.reply_id = String(replyId)
+    const d = await callData('qqbot.chat.send_media', params)
+    if (d && quoteMeta && replyId) d.quote = quoteMeta
+    const i = S.msgs.findIndex((x) => x.id === tmp.id)
+    if (i >= 0 && d && d.id) S.msgs.splice(i, 1, d)
+    else throw new Error('发送失败')
+    return d
+  } catch (e) {
+    const m = S.msgs.find((x) => x.id === tmp.id)
+    if (m) { m._pending = false; m._failed = true; m._err = String((e && e.message) || e) }
+    throw e
+  }
+}

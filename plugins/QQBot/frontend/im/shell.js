@@ -4,7 +4,7 @@
 // 数据：复用 qqbot.chat.sessions / qqbot.chat.messages，与「聊天记录」页同源
 import {
   S, loadSessions, loadSelf, openSession, loadMessages, current,
-  sendText, retrySend, lastRead, markRead, callData,
+  sendText, retrySend, sendImage, lastRead, markRead, callData,
 } from './store.js'
 import { fmtListTime, fmtDayLabel, fmtNum, faceUrl } from './util.js'
 import { ImMessageRow } from './message.js'
@@ -137,9 +137,20 @@ export const IM = {
       this._dt = setTimeout(() => this.saveDraft(), 300)
     },
     onPaste(e) {
-      // 只接受纯文本：直接插入 HTML 会带一堆样式，甚至脚本
+      const cd = e.clipboardData || window.clipboardData
+      // 粘贴图片：直接发（截图工具最常见的用法）
+      const items = (cd && cd.items) || []
+      for (const it of items) {
+        if (it.kind === 'file' && /^image\//.test(it.type || '')) {
+          e.preventDefault()
+          const f = it.getAsFile()
+          if (f) this.doSendImage(f)
+          return
+        }
+      }
+      // 纯文本：直接插入 HTML 会带一堆样式，甚至脚本
       e.preventDefault()
-      const t = (e.clipboardData || window.clipboardData).getData('text') || ''
+      const t = (cd && cd.getData('text')) || ''
       document.execCommand('insertText', false, t)
     },
     insertNode(node) {
@@ -228,6 +239,35 @@ export const IM = {
       try { html = localStorage.getItem('rcq.im.draft.' + sid) || '' } catch (e) {}
       el.innerHTML = html
       this.canSend = this.hasContent()
+    },
+
+    pickImage() {
+      const el = this.$refs.fileInput
+      if (el) { el.value = ''; el.click() }
+    },
+    async onPickFile(e) {
+      const f = e.target && e.target.files && e.target.files[0]
+      if (!f) return
+      await this.doSendImage(f)
+    },
+    async onDrop(e) {
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
+      if (!f) return
+      if (!/^image\//.test(f.type || '')) { this.toast('只支持拖入图片'); return }
+      await this.doSendImage(f)
+    },
+    async doSendImage(file) {
+      if (!this.cur) return
+      const q = this.quote
+      this.quote = null
+      try {
+        await sendImage(file, q && q.msg_id, q)
+        this.toast('图片已发送')
+      } catch (err) {
+        this.toast(String((err && err.message) || err))
+      } finally {
+        this.$nextTick(() => this.toBottom(true))
+      }
     },
 
     async onSend() {
@@ -423,7 +463,7 @@ export const IM = {
     </div>
 
     <!-- 聊天区 -->
-    <div class="im-chat">
+    <div class="im-chat" @dragover.prevent @drop.prevent="onDrop">
       <div class="im-head">
         <div class="tt">{{ (cur && (cur.display || cur.target_id)) || '选择一个会话' }}</div>
         <div class="sub" v-if="cur">{{ fmtNum(total) }} 条</div>
@@ -466,7 +506,7 @@ export const IM = {
           </button>
           <button class="im-tool" :class="{ on: showAt }" title="@ 某人"
             @click="toggleAt" :disabled="!cur">@</button>
-          <button class="im-tool" title="图片（待接入上传接口）" disabled>
+          <button class="im-tool" title="发送图片" @click="pickImage" :disabled="!cur">
             <svg viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm1 2v9l4-4 3 3 3-4 4 5V7H5zm3 1.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/></svg>
           </button>
         </div>
@@ -482,6 +522,9 @@ export const IM = {
           <button class="im-btn-send" :disabled="!canSend || !cur || sending"
             @click="onSend">{{ sending ? '发送中…' : '发送' }}</button>
         </div>
+
+        <input type="file" accept="image/*" ref="fileInput" style="display:none"
+          @change="onPickFile" />
 
         <!-- 表情面板 -->
         <div class="im-facepanel" v-if="showFace" @click.stop>
