@@ -1457,8 +1457,16 @@ const Cards = {
       return 'linear-gradient(135deg, hsl(' + h + ' 58% 56%), hsl(' + ((h + 46) % 360) + ' 52% 42%))'
     },
     coverStyle(c) {
-      const cover = c && c.cover
+      const cover = this.assetSrc(c, 'cover')
       return cover ? { backgroundImage: 'url(' + cover + ')' } : { backgroundImage: this.grad((c || {}).name) }
+    },
+    // 图片字段有两种来源：
+    //   c.cover        —— 卡片里存的原始值（相对媒体目录，可移植）
+    //   c.cover_url    —— 后端算好的预览地址（本地托管的图片走这条）
+    // 优先用 *_url，没有再退回原值（外链时两者一样）。
+    assetSrc(c, key) {
+      if (!c) return ''
+      return c[key + '_url'] || c[key] || ''
     },
     async load() {
       this.busy = 'load'
@@ -1597,9 +1605,9 @@ const Cards = {
         <div class="cd-card" v-for="c in list" :key="c.id"
           :class="{ on: cur && cur.id === c.id }" @click="pick(c)">
           <div class="cdc-cover" :style="coverStyle(c)">
-            <span class="cdc-fallback" v-if="!c.cover">{{ (c.name || '?').slice(0, 1) }}</span>
+            <span class="cdc-fallback" v-if="!assetSrc(c, 'cover')">{{ (c.name || '?').slice(0, 1) }}</span>
           </div>
-          <img v-if="c.avatar" class="cdc-ava" :src="c.avatar" alt="" />
+          <img v-if="assetSrc(c, 'avatar')" class="cdc-ava" :src="assetSrc(c, 'avatar')" alt="" />
           <div class="cdc-body">
             <div class="cdc-name">{{ c.name || '未命名' }}</div>
             <div class="cdc-tag">{{ c.tagline || (c.prompt || '').slice(0, 40) }}</div>
@@ -1628,11 +1636,11 @@ const Cards = {
       </div>
 
       <!-- 卡片本体 -->
-      <div class="cd-hero" :class="{ grad: !cur.cover }">
+      <div class="cd-hero" :class="{ grad: !assetSrc(cur, 'cover') }">
         <div class="cdh-cover" :style="coverStyle(cur)"></div>
         <div class="cdh-inner">
           <div class="cdh-ava">
-            <img v-if="cur.avatar" :src="cur.avatar" alt="" />
+            <img v-if="assetSrc(cur, 'avatar')" :src="assetSrc(cur, 'avatar')" alt="" />
             <span v-else>{{ (cur.name || '?').slice(0, 1) }}</span>
           </div>
           <div class="cdh-title">
@@ -1682,17 +1690,22 @@ const Cards = {
           <input class="input" v-model="cur.tagline" @input="dirty = true"
             placeholder="列表页显示的那句话" />
         </label>
-        <label class="rcq-fi wide"><span>封面图 URL</span>
+        <label class="rcq-fi wide"><span>封面图</span>
           <input class="input" v-model="cur.cover" @input="dirty = true"
-            placeholder="https://… 建议 16:9" />
+            placeholder="https://… 或 cards/<卡片ID>/cover.jpg" />
         </label>
-        <label class="rcq-fi wide"><span>头像 URL</span>
-          <input class="input" v-model="cur.avatar" @input="dirty = true" placeholder="https://…" />
+        <label class="rcq-fi wide"><span>头像</span>
+          <input class="input" v-model="cur.avatar" @input="dirty = true"
+            placeholder="https://… 或 cards/<卡片ID>/avatar.png" />
         </label>
-        <label class="rcq-fi wide"><span>立绘 URL</span>
+        <label class="rcq-fi wide"><span>立绘</span>
           <input class="input" v-model="cur.portrait" @input="dirty = true"
-            placeholder="https://… 建议 3:4" />
+            placeholder="https://… 或 cards/<卡片ID>/portrait.png" />
         </label>
+        <div class="rcq-hint wide" style="width:100%;margin:-4px 0 6px">
+          填相对媒体目录的路径（如 cards/&lt;卡片ID&gt;/cover.jpg）＝ 图片由面板本机托管，永不失效；
+          填 http(s) 外链则每次都去网上取。保存后可在上面预览。
+        </div>
         <label class="rcq-fi"><span>状态</span>
           <select class="input" v-model="cur.status" @change="dirty = true">
             <option value="draft">草稿</option>

@@ -1270,7 +1270,7 @@
         style="width:min(520px,90vw)"></audio>
       <a v-else :href="light" download style="color:#fff">\u4E0B\u8F7D\u6587\u4EF6</a>
     </div>
-  </div>`},nm={data(){return{S:yt,list:[],def:"",cur:null,busy:"",err:"",dirty:!1,section:"basic",providers:[]}},computed:{isNew(){return!!(this.cur&&this.cur.__new)},themeColor(){return this.cur&&this.cur.style&&this.cur.style.color||""},provName(e){let t=this.providers.find(i=>i.id===e);return t?t.name||t.id:e||"\uFF08\u8DDF\u968F\u8D26\u53F7\u9ED8\u8BA4\uFF09"}},async mounted(){await this.load();try{let e=await fe("rcbot.providers");this.providers=e&&e.items||[]}catch{}},methods:{fmtNum:ps,cloneDeep(e){return JSON.parse(JSON.stringify(e||{}))},grad(e){let t=String(e||""),i=0;for(let n=0;n<t.length;n++)i=(i*31+t.charCodeAt(n))%360;return"linear-gradient(135deg, hsl("+i+" 58% 56%), hsl("+(i+46)%360+" 52% 42%))"},coverStyle(e){let t=e&&e.cover;return t?{backgroundImage:"url("+t+")"}:{backgroundImage:this.grad((e||{}).name)}},async load(){this.busy="load";try{let e=await fe("rcbot.cards");if(this.list=e&&e.items||[],this.def=e&&e.default||"",!this.cur||this.cur.__new)!this.cur&&this.list.length&&this.pick(this.list[0]);else{let t=this.list.find(i=>i.id===this.cur.id);t&&!this.dirty&&this.pick(t)}}catch(e){this.err=le(e)}finally{this.busy=""}},pick(e){this.cur=e?this.cloneDeep(e):null,this.dirty=!1},add(){this.cur={schema:2,id:"",version:1,status:"draft",name:"\u65B0\u89D2\u8272",alias:[],tagline:"",avatar:"",cover:"",portrait:"",prompt:"",greetings:[],examples:[],lorebook:[],taboos:[],style:{temperature:.8,max_tokens:512,color:""},model:{provider_id:"",model:""},context:{keep_rounds:20},__new:!0},this.dirty=!0},addGreeting(){this.cur&&(this.cur.greetings=this.cur.greetings||[],this.cur.greetings.push(""))},rmGreeting(e){this.cur&&this.cur.greetings&&this.cur.greetings.splice(e,1)},addExample(){this.cur&&(this.cur.examples=this.cur.examples||[],this.cur.examples.push({user:"",assistant:""}))},rmExample(e){this.cur&&this.cur.examples&&this.cur.examples.splice(e,1)},addLore(){this.cur&&(this.cur.lorebook=this.cur.lorebook||[],this.cur.lorebook.push({keys:[],content:""}))},rmLore(e){this.cur&&this.cur.lorebook&&this.cur.lorebook.splice(e,1)},loreKeys(e){return(e.keys||[]).join("\u3001")},setLoreKeys(e,t){e.keys=String(t||"").split(/[、,，\s]+/).filter(Boolean)},taboosText(){return(this.cur&&this.cur.taboos||[]).join(`
+  </div>`},nm={data(){return{S:yt,list:[],def:"",cur:null,busy:"",err:"",dirty:!1,section:"basic",providers:[]}},computed:{isNew(){return!!(this.cur&&this.cur.__new)},themeColor(){return this.cur&&this.cur.style&&this.cur.style.color||""},provName(e){let t=this.providers.find(i=>i.id===e);return t?t.name||t.id:e||"\uFF08\u8DDF\u968F\u8D26\u53F7\u9ED8\u8BA4\uFF09"}},async mounted(){await this.load();try{let e=await fe("rcbot.providers");this.providers=e&&e.items||[]}catch{}},methods:{fmtNum:ps,cloneDeep(e){return JSON.parse(JSON.stringify(e||{}))},grad(e){let t=String(e||""),i=0;for(let n=0;n<t.length;n++)i=(i*31+t.charCodeAt(n))%360;return"linear-gradient(135deg, hsl("+i+" 58% 56%), hsl("+(i+46)%360+" 52% 42%))"},coverStyle(e){let t=this.assetSrc(e,"cover");return t?{backgroundImage:"url("+t+")"}:{backgroundImage:this.grad((e||{}).name)}},assetSrc(e,t){return e&&(e[t+"_url"]||e[t])||""},async load(){this.busy="load";try{let e=await fe("rcbot.cards");if(this.list=e&&e.items||[],this.def=e&&e.default||"",!this.cur||this.cur.__new)!this.cur&&this.list.length&&this.pick(this.list[0]);else{let t=this.list.find(i=>i.id===this.cur.id);t&&!this.dirty&&this.pick(t)}}catch(e){this.err=le(e)}finally{this.busy=""}},pick(e){this.cur=e?this.cloneDeep(e):null,this.dirty=!1},add(){this.cur={schema:2,id:"",version:1,status:"draft",name:"\u65B0\u89D2\u8272",alias:[],tagline:"",avatar:"",cover:"",portrait:"",prompt:"",greetings:[],examples:[],lorebook:[],taboos:[],style:{temperature:.8,max_tokens:512,color:""},model:{provider_id:"",model:""},context:{keep_rounds:20},__new:!0},this.dirty=!0},addGreeting(){this.cur&&(this.cur.greetings=this.cur.greetings||[],this.cur.greetings.push(""))},rmGreeting(e){this.cur&&this.cur.greetings&&this.cur.greetings.splice(e,1)},addExample(){this.cur&&(this.cur.examples=this.cur.examples||[],this.cur.examples.push({user:"",assistant:""}))},rmExample(e){this.cur&&this.cur.examples&&this.cur.examples.splice(e,1)},addLore(){this.cur&&(this.cur.lorebook=this.cur.lorebook||[],this.cur.lorebook.push({keys:[],content:""}))},rmLore(e){this.cur&&this.cur.lorebook&&this.cur.lorebook.splice(e,1)},loreKeys(e){return(e.keys||[]).join("\u3001")},setLoreKeys(e,t){e.keys=String(t||"").split(/[、,，\s]+/).filter(Boolean)},taboosText(){return(this.cur&&this.cur.taboos||[]).join(`
 `)},setTaboosText(e){this.cur&&(this.cur.taboos=String(e||"").split(`
 `).map(t=>t.trim()).filter(Boolean))},async save(){if(!this.cur)return;let e=this.cloneDeep(this.cur);if(!String(e.name||"").trim()){X("\u89D2\u8272\u540D\u5B57\u4E0D\u80FD\u4E3A\u7A7A","err");return}delete e.__new,this.busy="save";try{let t=await fe("rcbot.card.save",{card:e});X("\u5DF2\u4FDD\u5B58","ok"),this.dirty=!1,this.cur=null,await this.load(),t&&t.id&&this.pick(this.list.find(i=>i.id===t.id)||null)}catch(t){X(le(t),"err")}finally{this.busy=""}},async setDefault(e){this.busy="def"+e.id;try{let t=this.cloneDeep(e);t.status="published",await fe("rcbot.card.save",{card:t,set_default:!0}),X("\u5DF2\u8BBE\u4E3A\u9ED8\u8BA4\u89D2\u8272","ok"),await this.load()}catch(t){X(le(t),"err")}finally{this.busy=""}},async cloneCard(e){this.busy="clone"+e.id;try{let t=await fe("rcbot.card.clone",{id:e.id});X("\u5DF2\u590D\u5236\u4E00\u4EFD","ok"),await this.load(),t&&t.id&&this.pick(this.list.find(i=>i.id===t.id)||null)}catch(t){X(le(t),"err")}finally{this.busy=""}},async del(e){if(confirm("\u5220\u9664\u89D2\u8272\u5361\u7247\u300C"+(e.name||e.id)+`\u300D\uFF1F
 
@@ -1287,9 +1287,9 @@
         <div class="cd-card" v-for="c in list" :key="c.id"
           :class="{ on: cur && cur.id === c.id }" @click="pick(c)">
           <div class="cdc-cover" :style="coverStyle(c)">
-            <span class="cdc-fallback" v-if="!c.cover">{{ (c.name || '?').slice(0, 1) }}</span>
+            <span class="cdc-fallback" v-if="!assetSrc(c, 'cover')">{{ (c.name || '?').slice(0, 1) }}</span>
           </div>
-          <img v-if="c.avatar" class="cdc-ava" :src="c.avatar" alt="" />
+          <img v-if="assetSrc(c, 'avatar')" class="cdc-ava" :src="assetSrc(c, 'avatar')" alt="" />
           <div class="cdc-body">
             <div class="cdc-name">{{ c.name || '\u672A\u547D\u540D' }}</div>
             <div class="cdc-tag">{{ c.tagline || (c.prompt || '').slice(0, 40) }}</div>
@@ -1318,11 +1318,11 @@
       </div>
 
       <!-- \u5361\u7247\u672C\u4F53 -->
-      <div class="cd-hero" :class="{ grad: !cur.cover }">
+      <div class="cd-hero" :class="{ grad: !assetSrc(cur, 'cover') }">
         <div class="cdh-cover" :style="coverStyle(cur)"></div>
         <div class="cdh-inner">
           <div class="cdh-ava">
-            <img v-if="cur.avatar" :src="cur.avatar" alt="" />
+            <img v-if="assetSrc(cur, 'avatar')" :src="assetSrc(cur, 'avatar')" alt="" />
             <span v-else>{{ (cur.name || '?').slice(0, 1) }}</span>
           </div>
           <div class="cdh-title">
@@ -1372,17 +1372,22 @@
           <input class="input" v-model="cur.tagline" @input="dirty = true"
             placeholder="\u5217\u8868\u9875\u663E\u793A\u7684\u90A3\u53E5\u8BDD" />
         </label>
-        <label class="rcq-fi wide"><span>\u5C01\u9762\u56FE URL</span>
+        <label class="rcq-fi wide"><span>\u5C01\u9762\u56FE</span>
           <input class="input" v-model="cur.cover" @input="dirty = true"
-            placeholder="https://\u2026 \u5EFA\u8BAE 16:9" />
+            placeholder="https://\u2026 \u6216 cards/<\u5361\u7247ID>/cover.jpg" />
         </label>
-        <label class="rcq-fi wide"><span>\u5934\u50CF URL</span>
-          <input class="input" v-model="cur.avatar" @input="dirty = true" placeholder="https://\u2026" />
+        <label class="rcq-fi wide"><span>\u5934\u50CF</span>
+          <input class="input" v-model="cur.avatar" @input="dirty = true"
+            placeholder="https://\u2026 \u6216 cards/<\u5361\u7247ID>/avatar.png" />
         </label>
-        <label class="rcq-fi wide"><span>\u7ACB\u7ED8 URL</span>
+        <label class="rcq-fi wide"><span>\u7ACB\u7ED8</span>
           <input class="input" v-model="cur.portrait" @input="dirty = true"
-            placeholder="https://\u2026 \u5EFA\u8BAE 3:4" />
+            placeholder="https://\u2026 \u6216 cards/<\u5361\u7247ID>/portrait.png" />
         </label>
+        <div class="rcq-hint wide" style="width:100%;margin:-4px 0 6px">
+          \u586B\u76F8\u5BF9\u5A92\u4F53\u76EE\u5F55\u7684\u8DEF\u5F84\uFF08\u5982 cards/&lt;\u5361\u7247ID&gt;/cover.jpg\uFF09\uFF1D \u56FE\u7247\u7531\u9762\u677F\u672C\u673A\u6258\u7BA1\uFF0C\u6C38\u4E0D\u5931\u6548\uFF1B
+          \u586B http(s) \u5916\u94FE\u5219\u6BCF\u6B21\u90FD\u53BB\u7F51\u4E0A\u53D6\u3002\u4FDD\u5B58\u540E\u53EF\u5728\u4E0A\u9762\u9884\u89C8\u3002
+        </div>
         <label class="rcq-fi"><span>\u72B6\u6001</span>
           <select class="input" v-model="cur.status" @change="dirty = true">
             <option value="draft">\u8349\u7A3F</option>
