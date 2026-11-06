@@ -18,7 +18,7 @@ const shotsDir = argOf('--shots', '')
 const fails = []
 const ok = (c, l, e) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${l}${e ? '  ' + e : ''}`); if (!c) fails.push(l) }
 
-const TABS = ['概览', 'QQ 账户', '聊天记录', '查询', '媒体库', '人格', '会话管理', '模型提供商', '运行日志', '设置']
+const TABS = ['消息', '概览', 'QQ 账户', '聊天记录', '查询', '媒体库', '人格', '会话管理', '模型提供商', '运行日志', '设置']
 
 const targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json()
 const page = targets.find((t) => t.type === 'page')

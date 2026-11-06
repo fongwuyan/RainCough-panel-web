@@ -7,6 +7,10 @@
 //  · ctx.invoke 已解包：成功直接返回 result，失败抛异常 → try/catch
 import { createApp, reactive } from 'vue'
 import qrcode from './qrcode.mjs'
+// 消息页（仿 QQ 桌面端）：整屏 overlay，独立样式与数据层
+import { IM } from './im/shell.js'
+import { injectIMStyle } from './im/tokens.js'
+import { setCtx as setIMCtx } from './im/store.js'
 
 const NAME = 'qqbot'
 const STYLE_ID = 'rcq-style'
@@ -2691,6 +2695,9 @@ const Settings = {
 // ------------------------------------------------------------------ 框架
 
 const TABS = [
+  // ★ 「消息」是整屏页（fixed overlay），进去后隐藏插件自己的选项卡 ——
+  //   仿 QQ 的第一印象就是"没有外层壳"，这里必须让位。
+  { id: 'im', label: '消息', comp: IM, fullscreen: true },
   { id: 'overview', label: '概览', comp: Overview },
   { id: 'account', label: 'QQ 账户', comp: Accounts },
   { id: 'chats', label: '聊天记录', comp: Chats },
@@ -2714,6 +2721,7 @@ const App = {
   },
   computed: {
     cur() { return (this.TABS.find((t) => t.id === this.tab) || this.TABS[0]).comp },
+    isFull() { const t = this.TABS.find((x) => x.id === this.tab); return !!(t && t.fullscreen) },
     ncOn() { return !!(this.conn && this.conn.napcat && this.conn.napcat.ok) },
     rbOn() { return !!(this.conn && this.conn.rcbot && this.conn.rcbot.ok) },
   },
@@ -2727,6 +2735,9 @@ const App = {
       try { localStorage.setItem(LS_TAB, id) } catch (e) {}
       this.check()
     },
+    // 消息页退出：回到概览，并把记忆的 tab 也改掉 ——
+    // 否则刷新页面又直接铺满整屏，用户会以为卡住了
+    onImClose() { this.go('overview') },
     refresh() {
       this.key++
       this.check()
@@ -2734,7 +2745,7 @@ const App = {
   },
   template: `
   <div class="rcq">
-    <div class="rcq-bar">
+    <div class="rcq-bar" v-if="!isFull">
       <div class="rcq-tab" v-for="t in TABS" :key="t.id" :class="{ on: tab === t.id }"
         @click="go(t.id)">{{ t.label }}</div>
       <div class="rcq-bar-r">
@@ -2744,7 +2755,7 @@ const App = {
       </div>
     </div>
 
-    <component :is="cur" :key="tab + '-' + key" />
+    <component :is="cur" :key="tab + '-' + key" @close="onImClose" />
 
     <div class="rcq-toast" v-if="S.toast" :class="S.toastKind">{{ S.toast }}</div>
   </div>`,
@@ -2752,7 +2763,9 @@ const App = {
 
 function mount(container, ctx) {
   injectStyle()
+  injectIMStyle()
   CTX = ctx
+  setIMCtx(ctx)
   const vm = createApp(App)
   const stop = () => { try { vm.unmount() } catch (e) {} }
   vm.mount(container)
