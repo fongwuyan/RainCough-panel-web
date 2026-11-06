@@ -4,12 +4,9 @@
 // 数据：复用 qqbot.chat.sessions / qqbot.chat.messages，与「聊天记录」页同源
 import {
   S, loadSessions, loadSelf, openSession, loadMessages, current,
-  sendText, retrySend, sendImage, lastRead, markRead, callData,
+  lastRead, markRead, callData,
 } from './store.js'
-import {
-  fmtListTime, fmtDayLabel, fmtNum, faceUrl,
-  FACE_IDS, FACE_NAMES, recentFaces, pushRecentFace,
-} from './util.js'
+import { fmtListTime, fmtDayLabel, fmtNum } from './util.js'
 import { ImMessageRow } from './message.js'
 
 const RAIL = [
@@ -30,16 +27,9 @@ export const IM = {
       dragging: false,
       sideWidth: 268,
       badAva: {},
-      sending: false,
       menu: null,          // 右键菜单 {x,y,m}
-      quote: null,         // 正在引用的消息
       readAt: 0,           // 上次看到的消息 id（本地，用于"以下为新消息"）
       toastMsg: '',
-      showFace: false,
-      showAt: false,
-      faceIds: FACE_IDS,
-      recent: [],
-      canSend: false,
     }
   },
   computed: {
@@ -82,18 +72,6 @@ export const IM = {
       return out
     },
     total() { return (this.cur && this.cur.msg_count) || S.msgs.length },
-    // @ 候选：从本会话已加载消息里取发言者（去重、排除自己）
-    people() {
-      const seen = new Map()
-      for (const m of S.msgs) {
-        const id = String(m.sender_id || '')
-        if (!id || id === S.uin) continue
-        if (!seen.has(id)) {
-          seen.set(id, { id, name: m.sender_name || id, avatar: m.sender_avatar || '' })
-        }
-      }
-      return [...seen.values()].slice(0, 30)
-    },
   },
   async mounted() {
     await loadSelf()
@@ -101,7 +79,6 @@ export const IM = {
     if (S.sid) {
       await openSession(S.sid)
       this.readAt = lastRead(S.sid)
-      this.$nextTick(() => this.loadDraft(S.sid))
       this.scheduleRead()
     }
     // 首次进入滚到底
@@ -121,220 +98,6 @@ export const IM = {
       if (e.key === 'Escape') { e.stopPropagation(); this.close() }
     },
     close() { this.$emit('close') },
-    // ---------------- 富文本输入区（表情 / @ / 混排）
-    //
-    // 用 contenteditable 而不是 textarea：QQ 的表情和 @ 是"行内对象"，
-    // 纯文本表达不了。发送时再把 DOM 走一遍还原成 OneBot 段数组。
-    faceUrl,
-    toggleFace() {
-      this.showFace = !this.showFace
-      if (this.showFace) {
-        this.showAt = false
-        this.recent = recentFaces()
-        // 每次打开都回到顶部（否则会停在上一轮的滚动位置，看着像"表情少了"）
-        this.$nextTick(() => {
-          const el = this.$el && this.$el.querySelector('.im-facepanel')
-          if (el) el.scrollTop = 0
-        })
-      }
-    },
-    faceName(id) { return FACE_NAMES[id] || ('表情 ' + id) },
-    // 表情图偶发 404/中断：带时间戳重试一次，还失败就藏起来（不留破图）
-    faceRetry(e) {
-      const el = e && e.target
-      if (!el) return
-      if (el.dataset && el.dataset.retried) { el.style.visibility = 'hidden'; return }
-      if (el.dataset) el.dataset.retried = '1'
-      el.src = String(el.src || '').split('?')[0] + '?r=' + Date.now()
-    },
-    toggleAt() { this.showAt = !this.showAt; if (this.showAt) this.showFace = false },
-
-    hasContent() {
-      const el = this.$refs.editor
-      if (!el) return false
-      const txt = String(el.innerText || '').replace(/[\u200b\s]/g, '')
-      return !!txt || !!el.querySelector('img[data-face]')
-    },
-    onInput() {
-      this.canSend = this.hasContent()
-      clearTimeout(this._dt)
-      this._dt = setTimeout(() => this.saveDraft(), 300)
-    },
-    onPaste(e) {
-      const cd = e.clipboardData || window.clipboardData
-      // 粘贴图片：直接发（截图工具最常见的用法）
-      const items = (cd && cd.items) || []
-      for (const it of items) {
-        if (it.kind === 'file' && /^image\//.test(it.type || '')) {
-          e.preventDefault()
-          const f = it.getAsFile()
-          if (f) this.doSendImage(f)
-          return
-        }
-      }
-      // 纯文本：直接插入 HTML 会带一堆样式，甚至脚本
-      e.preventDefault()
-      const t = (cd && cd.getData('text')) || ''
-      document.execCommand('insertText', false, t)
-    },
-    insertNode(node) {
-      const el = this.$refs.editor
-      if (!el) return
-      el.focus()
-      const sel = window.getSelection()
-      if (sel && sel.rangeCount && el.contains(sel.anchorNode)) {
-        const r = sel.getRangeAt(0)
-        r.deleteContents()
-        r.insertNode(node)
-        r.setStartAfter(node)
-        r.collapse(true)
-        sel.removeAllRanges()
-        sel.addRange(r)
-      } else {
-        el.appendChild(node)
-      }
-      this.onInput()
-    },
-    addFace(id) {
-      pushRecentFace(id)
-      this.recent = recentFaces()
-      const img = document.createElement('img')
-      img.className = 'face'
-      img.setAttribute('data-face', String(id))
-      img.src = faceUrl(id)
-      img.alt = '[表情]'
-      img.onerror = () => this.faceRetry({ target: img })
-      this.insertNode(img)
-    },
-    addAt(p) {
-      const sp = document.createElement('span')
-      sp.className = 'at-chip'
-      sp.setAttribute('data-at', String(p.id))
-      sp.setAttribute('data-name', p.name || '')
-      sp.textContent = '@' + (p.name || p.id)
-      const space = document.createTextNode('\u00a0')
-      this.insertNode(sp)
-      this.insertNode(space)
-      this.showAt = false
-    },
-    serialize() {
-      const el = this.$refs.editor
-      const out = []
-      let buf = ''
-      const flush = () => { if (buf) { out.push({ type: 'text', data: { text: buf } }); buf = '' } }
-      const walk = (node) => {
-        for (const n of node.childNodes) {
-          if (n.nodeType === 3) { buf += n.textContent; continue }
-          if (n.nodeType !== 1) continue
-          const d = n.dataset || {}
-          if (d.face) { flush(); out.push({ type: 'face', data: { id: String(d.face) } }) }
-          else if (d.at) { flush(); out.push({ type: 'at', data: { qq: String(d.at), name: d.name || '' } }) }
-          else if (n.tagName === 'BR') buf += '\n'
-          else if (n.tagName === 'DIV' || n.tagName === 'P') { walk(n); buf += '\n' }
-          else walk(n)
-        }
-      }
-      if (el) walk(el)
-      flush()
-      // 去掉末尾多余换行
-      if (out.length && out[out.length - 1].type === 'text') {
-        out[out.length - 1].data.text = out[out.length - 1].data.text.replace(/\n+$/, '')
-        if (!out[out.length - 1].data.text) out.pop()
-      }
-      return out
-    },
-    clearEditor() {
-      const el = this.$refs.editor
-      if (el) el.innerHTML = ''
-      this.canSend = false
-      this.saveDraft()
-    },
-    saveDraft() {
-      const el = this.$refs.editor
-      const sid = S.sid
-      if (!el || !sid) return
-      try {
-        const html = el.innerHTML
-        if (html && html !== '<br>') localStorage.setItem('rcq.im.draft.' + sid, html)
-        else localStorage.removeItem('rcq.im.draft.' + sid)
-      } catch (e) {}
-    },
-    loadDraft(sid) {
-      const el = this.$refs.editor
-      if (!el) return
-      let html = ''
-      try { html = localStorage.getItem('rcq.im.draft.' + sid) || '' } catch (e) {}
-      el.innerHTML = html
-      // 草稿里的表情是 innerHTML 带回来的，没挂过 onerror；
-      // 之前加载失败过的，这里补一次重试，否则会一直显示破图
-      el.querySelectorAll('img.face').forEach((img) => {
-        // ★ 草稿存的是 innerHTML，会把上一轮的"已隐藏/已重试"状态一起存回来。
-        //   这里一律按 data-face 重新拼 src，并把状态标记清掉 ——
-        //   否则一个曾经失败的表情会永远卡在破图（实测踩到）。
-        img.style.visibility = ''
-        if (img.dataset) delete img.dataset.retried
-        const id = img.getAttribute('data-face')
-        if (id !== null) img.src = faceUrl(id)
-        img.onerror = () => this.faceRetry({ target: img })
-      })
-      this.canSend = this.hasContent()
-    },
-
-    pickImage() {
-      const el = this.$refs.fileInput
-      if (el) { el.value = ''; el.click() }
-    },
-    async onPickFile(e) {
-      const f = e.target && e.target.files && e.target.files[0]
-      if (!f) return
-      await this.doSendImage(f)
-    },
-    async onDrop(e) {
-      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
-      if (!f) return
-      if (!/^image\//.test(f.type || '')) { this.toast('只支持拖入图片'); return }
-      await this.doSendImage(f)
-    },
-    async doSendImage(file) {
-      if (!this.cur) return
-      const q = this.quote
-      this.quote = null
-      try {
-        await sendImage(file, q && q.msg_id, q)
-        this.toast('图片已发送')
-      } catch (err) {
-        this.toast(String((err && err.message) || err))
-      } finally {
-        this.$nextTick(() => this.toBottom(true))
-      }
-    },
-
-    async onSend() {
-      const segs = this.serialize()
-      if (!segs.length || !this.cur || this.sending) return
-      const text = segs.filter((x) => x.type === 'text')
-        .map((x) => x.data.text).join('').trim()
-      const q = this.quote
-      this.quote = null
-      this.sending = true
-      this.clearEditor()
-      try {
-        await sendText(text, q && q.msg_id, q, segs)
-      } catch (e) {
-        // 失败项已经在列表里标红
-      } finally {
-        this.sending = false
-        this.$nextTick(() => this.toBottom(true))
-      }
-    },
-    onKeydown(e) {
-      if (e.key === 'Escape') { this.showFace = false; this.showAt = false; return }
-      // QQ 桌面端默认：Enter 发送、Shift+Enter 换行
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault()
-        this.onSend()
-      }
-    },
     closeMenu() { this.menu = null },
     openCtx(e, m) {
       this.menu = { x: e.clientX, y: e.clientY, m }
@@ -348,12 +111,6 @@ export const IM = {
       } catch (e) {
         this.toast('复制失败（浏览器不允许）')
       }
-      this.menu = null
-    },
-    quoteMsg(m) {
-      const t = String((m && (m.text || '')) || '').slice(0, 60)
-      const who = (m && m.sender_name) || ''
-      this.quote = { msg_id: m.msg_id, sender: who, text: t }
       this.menu = null
     },
     async doRecall(m) {
@@ -391,24 +148,13 @@ export const IM = {
         if (S.msgs.length) markRead(S.sid, S.msgs[S.msgs.length - 1].id)
       }, 1200)
     },
-    async onRetry(m) {
-      try { await retrySend(m) } catch (e) {}
-      this.$nextTick(() => this.toBottom(true))
-    },
     avatarOf(s) { return s && s.avatar ? s.avatar : '' },
     initialOf(s) { return String((s && (s.display || s.target_id)) || '?').trim().slice(0, 1) },
     pick(s) {
       if (!s || s.session_id === S.sid) return
-      this.saveDraft()
-      this.quote = null
-      this.showFace = false
-      this.showAt = false
       openSession(s.session_id).then(() => {
         this.readAt = lastRead(s.session_id)
-        this.$nextTick(() => {
-          this.toBottom(false)
-          this.loadDraft(s.session_id)
-        })
+        this.$nextTick(() => this.toBottom(false))
         this.scheduleRead()
       })
     },
@@ -502,7 +248,7 @@ export const IM = {
     </div>
 
     <!-- 聊天区 -->
-    <div class="im-chat" @dragover.prevent @drop.prevent="onDrop">
+    <div class="im-chat">
       <div class="im-head">
         <div class="tt">{{ (cur && (cur.display || cur.target_id)) || '选择一个会话' }}</div>
         <div class="sub" v-if="cur">{{ fmtNum(total) }} 条</div>
@@ -526,8 +272,7 @@ export const IM = {
           <template v-else>
             <div class="im-divider" v-if="r.divider">以下为新消息</div>
             <im-message-row :m="r.m" :compact="r.compact" :show-time="r.showTime"
-              @retry="onRetry" @ctx="openCtx" @copy="copyMsg" @quote="quoteMsg"
-              @recall="doRecall" @jump="jump" />
+              @ctx="openCtx" @copy="copyMsg" @recall="doRecall" @jump="jump" />
           </template>
         </template>
       </div>
@@ -536,70 +281,16 @@ export const IM = {
         <svg viewBox="0 0 24 24"><path d="M12 16l-6-6 1.4-1.4L12 13.2l4.6-4.6L18 10l-6 6z"/></svg>
       </button>
 
-      <!-- 输入区：P1 只读，发送能力下一阶段接入 -->
-      <div class="im-composer">
-        <div class="im-tools">
-          <button class="im-tool" :class="{ on: showFace }" title="表情"
-            @click="toggleFace">
-            <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-3.5 7a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm7 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM12 18c-2.2 0-4.1-1.3-5-3h10c-.9 1.7-2.8 3-5 3z"/></svg>
-          </button>
-          <button class="im-tool" :class="{ on: showAt }" title="@ 某人"
-            @click="toggleAt" :disabled="!cur">@</button>
-          <button class="im-tool" title="发送图片" @click="pickImage" :disabled="!cur">
-            <svg viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm1 2v9l4-4 3 3 3-4 4 5V7H5zm3 1.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/></svg>
-          </button>
-        </div>
-        <div class="im-quote-bar" v-if="quote">
-          <span class="qq">引用 {{ quote.sender || '消息' }}：{{ quote.text }}</span>
-          <button class="qx" title="取消引用" @click="quote = null">×</button>
-        </div>
-        <div class="im-editor" ref="editor" contenteditable="true"
-          :data-ph="cur ? '输入消息，Enter 发送，Shift+Enter 换行' : '先在左边选一个会话'"
-          @input="onInput" @keydown="onKeydown" @paste="onPaste"></div>
-        <div class="im-send">
-          <span class="hint">{{ cur ? 'Enter 发送 · Shift+Enter 换行' : '' }}</span>
-          <button class="im-btn-send" :disabled="!canSend || !cur || sending"
-            @click="onSend">{{ sending ? '发送中…' : '发送' }}</button>
-        </div>
-
-        <input type="file" accept="image/*" ref="fileInput" style="display:none"
-          @change="onPickFile" />
-
-        <!-- 表情面板 -->
-        <div class="im-facepanel" v-if="showFace" @click.stop>
-          <template v-if="recent.length">
-            <div class="im-facelbl">最近使用</div>
-            <div class="im-facegrid">
-              <img v-for="id in recent" :key="'r' + id" :src="faceUrl(id)" loading="lazy"
-                :title="faceName(id)" :alt="faceName(id)" @click="addFace(id)"
-                @error="faceRetry" />
-            </div>
-          </template>
-          <div class="im-facelbl">全部表情</div>
-          <div class="im-facegrid">
-            <img v-for="id in faceIds" :key="id" :src="faceUrl(id)" loading="lazy"
-              :title="faceName(id)" :alt="faceName(id)" @click="addFace(id)"
-              @error="faceRetry" />
-          </div>
-        </div>
-
-        <!-- @ 选择器 -->
-        <div class="im-atpanel" v-if="showAt" @click.stop>
-          <div class="im-atrow" v-for="p in people" :key="p.id" @click="addAt(p)">
-            <img v-if="p.avatar" :src="p.avatar" alt="" />
-            <div v-else class="ava-t">{{ (p.name || '?').slice(0, 1) }}</div>
-            <span class="nm">{{ p.name || p.id }}</span>
-            <span class="qq">{{ p.id }}</span>
-          </div>
-          <div class="im-empty" v-if="!people.length">本会话没有可 @ 的人</div>
-        </div>
+      <!-- 只读栏：本页只做浏览，发送请用 QQ 客户端 -->
+      <div class="im-readonly">
+        <svg viewBox="0 0 24 24"><path d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
+        <span>只读模式 · 本页仅用于浏览消息，发送与回复请使用 QQ 客户端</span>
       </div>
     </div>
 
     <div class="im-menu" v-if="menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
       @click.stop>
       <button @click="copyMsg(menu.m)">复制文字</button>
-      <button @click="quoteMsg(menu.m)">引用</button>
       <button v-if="canRecall(menu.m)" @click="doRecall(menu.m)">撤回</button>
     </div>
 

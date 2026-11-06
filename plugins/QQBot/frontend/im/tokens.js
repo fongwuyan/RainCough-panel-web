@@ -124,7 +124,6 @@ export const IM_CSS = `
   border-left-color:rgba(255,255,255,.5)}
 .im-recall{font-size:12px;color:var(--im-t3);font-style:italic}
 .im-meta{font-size:11px;color:var(--im-t3);margin-top:3px;padding:0 2px}
-.im-st-bad{color:#f5534f;cursor:pointer}
 
 /* 媒体 */
 .im-grid{display:grid;gap:4px;max-width:420px}
@@ -158,44 +157,10 @@ export const IM_CSS = `
 .im-jump svg{width:18px;height:18px;fill:currentColor}
 .im-more{text-align:center;padding:8px;font-size:12px;color:var(--im-t3)}
 
-.im-composer{position:relative;flex:none;border-top:1px solid var(--im-line);background:var(--im-input);
-  padding:6px 14px 10px;display:flex;flex-direction:column;gap:6px}
-.im-tools{display:flex;gap:4px;align-items:center;color:var(--im-t2)}
-.im-tool{width:28px;height:28px;border-radius:6px;border:none;background:none;color:inherit;
-  cursor:pointer;display:flex;align-items:center;justify-content:center}
-.im-tool:hover{background:var(--im-hover);color:var(--im-t1)}
-.im-tool svg{width:17px;height:17px;fill:currentColor}
-.im-editor{min-height:44px;max-height:38vh;overflow-y:auto;border:none;outline:none;
-  background:none;font-family:inherit;font-size:14px;color:var(--im-t1);
-  padding:2px 2px 6px;white-space:pre-wrap;word-break:break-word;line-height:1.5}
-.im-editor:empty:before{content:attr(data-ph);color:var(--im-t3);pointer-events:none}
-.im-editor img.face{width:20px;height:20px;vertical-align:-4px;margin:0 1px}
-.at-chip{color:var(--im-self);background:rgba(0,153,255,.10);border-radius:4px;padding:0 4px}
-.im-tool.on{background:var(--im-active);color:var(--im-t1)}
-
-/* 表情面板 / @ 选择器 */
-.im-facepanel{position:absolute;left:14px;bottom:100%;margin-bottom:8px;width:368px;
-  max-height:280px;overflow:auto;background:var(--im-list);border:1px solid var(--im-line);
-  border-radius:10px;box-shadow:var(--im-shadow);padding:6px 8px 10px;z-index:5}
-.im-facelbl{font-size:11px;color:var(--im-t3);margin:6px 2px 4px}
-.im-facegrid{display:grid;grid-template-columns:repeat(11,1fr);gap:1px}
-.im-facegrid img{width:26px;height:26px;cursor:pointer;border-radius:4px;padding:2px}
-.im-facegrid img:hover{background:var(--im-hover);transform:scale(1.12)}
-.im-atpanel{position:absolute;left:14px;bottom:100%;margin-bottom:8px;width:264px;
-  max-height:240px;overflow:auto;background:var(--im-list);border:1px solid var(--im-line);
-  border-radius:10px;box-shadow:var(--im-shadow);padding:6px;z-index:5}
-.im-atrow{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:6px;
-  cursor:pointer}
-.im-atrow:hover{background:var(--im-hover)}
-.im-atrow img,.im-atrow .ava-t{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:none}
-.im-atrow .nm{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.im-atrow .qq{font-size:11px;color:var(--im-t3)}
-.im-send{display:flex;justify-content:flex-end;gap:8px;align-items:center}
-.im-send .hint{font-size:11px;color:var(--im-t3);margin-right:auto}
-.im-btn-send{height:28px;padding:0 16px;border-radius:6px;border:none;background:var(--im-self);
-  color:#fff;font-size:13px;cursor:pointer;font-family:inherit}
-.im-btn-send:disabled{opacity:.5;cursor:not-allowed}
-
+.im-readonly{flex:none;border-top:1px solid var(--im-line);background:var(--im-input);
+  padding:11px 16px;display:flex;align-items:center;justify-content:center;gap:7px;
+  font-size:12.5px;color:var(--im-t3);user-select:none}
+.im-readonly svg{width:15px;height:15px;fill:currentColor;opacity:.8}
 
 /* 悬停操作条 / 右键菜单 / 高亮 / 未读分割 / 引用条 / 轻提示 */
 .im-ops{position:absolute;top:-10px;right:6px;display:flex;gap:2px;opacity:0;
@@ -215,12 +180,6 @@ export const IM_CSS = `
 .im-flash{animation:imflash 1.1s ease}
 @keyframes imflash{0%,100%{background:transparent}30%{background:rgba(0,153,255,.14)}}
 .im-divider{text-align:center;font-size:12px;color:var(--im-t3);margin:10px 0}
-.im-quote-bar{display:flex;gap:8px;align-items:center;background:var(--im-hover);
-  border-left:3px solid var(--im-self);border-radius:4px;padding:4px 8px;font-size:12.5px;
-  color:var(--im-t2)}
-.im-quote-bar .qq{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.im-quote-bar .qx{border:none;background:none;cursor:pointer;color:var(--im-t3);
-  font-size:16px;line-height:1}
 .im-toast{position:fixed;left:50%;bottom:130px;transform:translateX(-50%);z-index:970;
   background:rgba(0,0,0,.78);color:#fff;font-size:12.5px;padding:6px 14px;border-radius:16px}
 

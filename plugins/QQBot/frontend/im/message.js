@@ -110,8 +110,8 @@ export const ImMessageRow = {
     time() { return fmtClock(this.m.created_at) },
     initial() { return String(this.name || '?').trim().slice(0, 1) },
     showAva() { return !!this.avatar && !this.badAva },
-    // 只有自己发的、已入库（非本地临时）且有 msg_id 的消息才能撤回
-    canRecall() { return this.me && !this.m._pending && !this.m._failed && !!this.m.msg_id },
+    // 只有自己发的、已入库且有 msg_id 的消息才能撤回
+    canRecall() { return this.me && !!this.m.msg_id },
     images() { return this.groups.image.filter(mediaAlive) },
     videos() { return this.groups.video.filter(mediaAlive) },
     voices() { return this.groups.record.filter(mediaAlive) },
@@ -179,17 +179,11 @@ export const ImMessageRow = {
         </div>
 
         <div class="im-ops">
-          <button class="im-op" title="引用" @click.stop="$emit('quote', m)">引用</button>
           <button class="im-op" title="复制文字" @click.stop="$emit('copy', m)">复制</button>
           <button class="im-op" v-if="canRecall" title="撤回" @click.stop="$emit('recall', m)">撤回</button>
         </div>
 
-        <div class="im-meta" v-if="!compact">
-          <span v-if="m._pending">发送中…</span>
-          <span v-else-if="m._failed" class="im-st-bad" title="点击重发"
-            @click="$emit('retry', m)">发送失败，点击重试</span>
-          <span v-else>{{ time }}</span>
-        </div>
+        <div class="im-meta" v-if="!compact">{{ time }}</div>
       </div>
     </div>
 
