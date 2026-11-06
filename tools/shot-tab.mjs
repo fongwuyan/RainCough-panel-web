@@ -70,6 +70,16 @@ await sleep(1500)
 //   只改哈希不重新加载文档时，浏览器会用旧的那份（页面看着"没更新"）。
 await send('Page.reload', { ignoreCache: true })
 await sleep(4200)
+// ★ 先退出「消息」整屏页（它是 fixed overlay，会把插件自己的页签盖掉，
+//   页签点不到，截图就会停在旧画面）。
+await ev(`(() => {
+  if (document.querySelector('.rcq-im')) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  }
+  return true
+})()`)
+await sleep(700)
 await ev(`(() => {
   const el = [...document.querySelectorAll('.rcq-tab')].find(x => x.textContent.trim() === ${JSON.stringify(tab)})
   if (el) el.click(); return !!el
