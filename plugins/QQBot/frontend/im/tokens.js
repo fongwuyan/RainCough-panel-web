@@ -64,8 +64,19 @@ export const IM_CSS = `
   margin-bottom:2px}
 .im-row:hover{background:var(--im-hover)}
 .im-row.on{background:var(--im-active)}
-.im-row .ava{width:40px;height:40px;border-radius:8px;overflow:hidden;background:var(--im-active);flex:none}
-.im-row .ava img{width:100%;height:100%;object-fit:cover;display:block}
+.im-row .ava{width:40px;height:40px;border-radius:8px;background:var(--im-active);flex:none;
+  position:relative}
+.im-row .ava img{width:100%;height:100%;object-fit:cover;display:block;border-radius:8px}
+/* 置顶小旗标（QQ 在头像右上角） */
+.im-row .pin{position:absolute;right:-3px;top:-3px;width:15px;height:15px;border-radius:50%;
+  background:var(--im-self);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 2px var(--im-list)}
+.im-row .pin svg{width:9px;height:9px;fill:#fff}
+/* 未读：红点 / 数字气泡 */
+.im-row .badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#f5534f;
+  color:#fff;font-size:11px;line-height:18px;text-align:center;flex:none}
+.im-row .dot{width:8px;height:8px;border-radius:50%;background:#f5534f;flex:none}
+.im-row.muted .nm{font-weight:400;color:var(--im-t2)}
 .ava-t{width:100%;height:100%;display:flex;align-items:center;justify-content:center;
   background:var(--im-active);color:var(--im-t2);font-size:15px;font-weight:600}
 .im-row .main{flex:1;min-width:0}

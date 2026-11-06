@@ -35,6 +35,7 @@ export const IM = {
       toastMsg: '',
       fwd: null,           // 合并转发展开抽屉 {id, loading, nodes, total, error}
       fwdStack: [],        // 抽屉历史（转发里套转发时用来返回）
+      sessMenu: null,      // 会话右键菜单 {x,y,s}
     }
   },
   computed: {
@@ -107,7 +108,47 @@ export const IM = {
       if (e.key === 'Escape') { e.stopPropagation(); this.close() }
     },
     close() { this.$emit('close') },
-    closeMenu() { this.menu = null },
+    closeMenu() { this.menu = null; this.sessMenu = null },
+    // ---------------- 会话操作（置顶 / 免打扰 / 已读）
+    openSessMenu(e, s) {
+      this.sessMenu = { x: e.clientX, y: e.clientY, s }
+    },
+    async togglePin(s) {
+      this.sessMenu = null
+      if (!s) return
+      try {
+        const r = await callData('qqbot.chat.session_ui',
+          { session_id: s.session_id, pinned: !s.pinned })
+        s.pinned = r && typeof r.pinned !== 'undefined' ? r.pinned : (s.pinned ? 0 : 1)
+        this.toast(s.pinned ? '已置顶' : '已取消置顶')
+        await loadSessions()          // 重新排序（置顶的排前面）
+      } catch (e) {
+        this.toast(String((e && e.message) || e))
+      }
+    },
+    async toggleMute(s) {
+      this.sessMenu = null
+      if (!s) return
+      try {
+        const r = await callData('qqbot.chat.session_ui',
+          { session_id: s.session_id, muted: !s.muted })
+        s.muted = r && typeof r.muted !== 'undefined' ? r.muted : (s.muted ? 0 : 1)
+        this.toast(s.muted ? '已免打扰' : '已取消免打扰')
+      } catch (e) {
+        this.toast(String((e && e.message) || e))
+      }
+    },
+    markReadNow(s) {
+      this.sessMenu = null
+      if (!s) return
+      const lr = lastRead(s.session_id)
+      if (lr) {
+        callData('qqbot.chat.session_ui', { session_id: s.session_id, last_read_id: lr })
+          .catch(() => {})
+      }
+      s.unread = 0
+    },
+
     // ---------------- 合并转发展开
     //
     // 消息里只有一个 forward id，内容要问后端要（后端会顺带把图片落盘）。
@@ -191,6 +232,7 @@ export const IM = {
     initialOf(s) { return String((s && (s.display || s.target_id)) || '?').trim().slice(0, 1) },
     pick(s) {
       if (!s || s.session_id === S.sid) return
+      s.unread = 0
       openSession(s.session_id).then(() => {
         this.readAt = lastRead(s.session_id)
         this.$nextTick(() => this.toBottom(false))
@@ -261,11 +303,15 @@ export const IM = {
       </div>
       <div class="im-list">
         <div class="im-row" v-for="s in filtered" :key="s.session_id"
-          :class="{ on: s.session_id === S.sid }" @click="pick(s)">
+          :class="{ on: s.session_id === S.sid, muted: s.muted }" @click="pick(s)"
+          @contextmenu.prevent="openSessMenu($event, s)">
           <div class="ava">
             <img v-if="avatarOf(s) && !badAva[s.session_id]" :src="avatarOf(s)" alt=""
               @error="badAva[s.session_id] = true" />
             <div v-else class="ava-t">{{ initialOf(s) }}</div>
+            <span class="pin" v-if="s.pinned" title="已置顶">
+              <svg viewBox="0 0 24 24"><path d="M16 9V4h1a1 1 0 000-2H7a1 1 0 000 2h1v5c0 1.66-1.34 3-3 3v2h5v7l1 1 1-1v-7h5v-2c-1.66 0-3-1.34-3-3z"/></svg>
+            </span>
           </div>
           <div class="main">
             <div class="top">
@@ -279,6 +325,8 @@ export const IM = {
               <template v-else>{{ s.msg_count || 0 }} 条消息</template>
             </div>
           </div>
+          <span class="badge" v-if="s.unread && !s.muted">{{ s.unread > 99 ? '99+' : s.unread }}</span>
+          <span class="dot" v-else-if="s.unread && s.muted"></span>
         </div>
         <div class="im-empty" v-if="!filtered.length">
           {{ S.keyword ? '没有匹配的会话' : '还没有聊天记录' }}
@@ -376,6 +424,13 @@ export const IM = {
       @click.stop>
       <button @click="copyMsg(menu.m)">复制文字</button>
       <button v-if="canRecall(menu.m)" @click="doRecall(menu.m)">撤回</button>
+    </div>
+
+    <div class="im-menu" v-if="sessMenu" :style="{ left: sessMenu.x + 'px', top: sessMenu.y + 'px' }"
+      @click.stop>
+      <button @click="togglePin(sessMenu.s)">{{ sessMenu.s.pinned ? '取消置顶' : '置顶该会话' }}</button>
+      <button @click="toggleMute(sessMenu.s)">{{ sessMenu.s.muted ? '取消免打扰' : '消息免打扰' }}</button>
+      <button @click="markReadNow(sessMenu.s)">标记为已读</button>
     </div>
 
     <div class="im-toast" v-if="toastMsg">{{ toastMsg }}</div>

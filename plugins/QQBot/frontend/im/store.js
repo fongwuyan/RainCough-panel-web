@@ -116,6 +116,9 @@ function readMap() {
 }
 
 export function lastRead(sid) {
+  // 服务端的已读位置优先（换设备也一致），本地只作兜底
+  const s = S.sessions.find((x) => x.session_id === sid)
+  if (s && Number(s.last_read_id || 0) > 0) return Number(s.last_read_id)
   return Number(readMap()[sid] || 0)
 }
 
@@ -125,5 +128,10 @@ export function markRead(sid, id) {
   if (Number(m[sid] || 0) >= Number(id)) return
   m[sid] = Number(id)
   try { localStorage.setItem(READ_KEY, JSON.stringify(m)) } catch (e) {}
+  // 同步到服务端（置顶 / 免打扰 / 已读位置都存在服务端）
+  try {
+    const p = callData('qqbot.chat.session_ui', { session_id: sid, last_read_id: Number(id) })
+    if (p && p.catch) p.catch(() => {})
+  } catch (e) {}
 }
 
