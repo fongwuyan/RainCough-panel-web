@@ -6,7 +6,10 @@ import {
   S, loadSessions, loadSelf, openSession, loadMessages, current,
   lastRead, markRead, callData,
 } from './store.js'
-import { fmtListTime, fmtDayLabel, fmtNum } from './util.js'
+import {
+  fmtListTime, fmtDayLabel, fmtNum,
+  partsOf, gridCls, mediaUrl, faceUrl, bytes, forwardIdOf,
+} from './util.js'
 import { ImMessageRow } from './message.js'
 
 const RAIL = [
@@ -30,6 +33,8 @@ export const IM = {
       menu: null,          // 右键菜单 {x,y,m}
       readAt: 0,           // 上次看到的消息 id（本地，用于"以下为新消息"）
       toastMsg: '',
+      fwd: null,           // 合并转发展开抽屉 {id, loading, nodes, total, error}
+      fwdStack: [],        // 抽屉历史（转发里套转发时用来返回）
     }
   },
   computed: {
@@ -93,12 +98,46 @@ export const IM = {
     document.documentElement.style.overflow = ''
   },
   methods: {
+    // ★ 模板里能用的只有 data/computed/methods/props，
+    //   从 util.js import 进来的函数必须在这里挂一次，否则渲染时报
+    //   "xxx is not a function"（踩过：gridCls）。
     fmtListTime, fmtNum,
+    partsOf, gridCls, mediaUrl, faceUrl, bytes, forwardIdOf,
     onKey(e) {
       if (e.key === 'Escape') { e.stopPropagation(); this.close() }
     },
     close() { this.$emit('close') },
     closeMenu() { this.menu = null },
+    // ---------------- 合并转发展开
+    //
+    // 消息里只有一个 forward id，内容要问后端要（后端会顺带把图片落盘）。
+    async openForward(id) {
+      if (!id) return
+      if (this.fwd) this.fwdStack.push(this.fwd)   // 套娃时能返回上一层
+      this.fwd = { id, loading: true, nodes: [], total: 0, error: '' }
+      try {
+        const d = await callData('qqbot.chat.forward', { id })
+        const total = (d && d.total) || 0
+        this.fwd = {
+          id,
+          loading: false,
+          nodes: (d && d.nodes) || [],
+          total,
+          error: '',
+        }
+        // 记下条数，气泡上的卡片可以直接显示「N 条消息」
+        for (const m of S.msgs) {
+          if (forwardIdOf(m) === id) { m._fwdCount = total; break }
+        }
+      } catch (e) {
+        this.fwd = { id, loading: false, nodes: [], total: 0, error: String((e && e.message) || e) }
+      }
+    },
+    backForward() { this.fwd = this.fwdStack.pop() || null },
+    closeForward() { this.fwd = null; this.fwdStack = [] },
+    fwdParts(n) { return partsOf({ segs: (n && n.segs) || [] }).parts },
+    fwdImgs(n) { return ((n && n.media) || []).filter((m) => m.kind === 'image' && m.local) },
+    fwdOther(n) { return ((n && n.media) || []).filter((m) => m.kind !== 'image' && m.local) },
     openCtx(e, m) {
       this.menu = { x: e.clientX, y: e.clientY, m }
     },
@@ -272,7 +311,8 @@ export const IM = {
           <template v-else>
             <div class="im-divider" v-if="r.divider">以下为新消息</div>
             <im-message-row :m="r.m" :compact="r.compact" :show-time="r.showTime"
-              @ctx="openCtx" @copy="copyMsg" @recall="doRecall" @jump="jump" />
+              @ctx="openCtx" @copy="copyMsg" @recall="doRecall" @jump="jump"
+              @forward="openForward" />
           </template>
         </template>
       </div>
@@ -280,6 +320,50 @@ export const IM = {
       <button class="im-jump" v-if="showJump" title="回到最新" @click="toBottom(true)">
         <svg viewBox="0 0 24 24"><path d="M12 16l-6-6 1.4-1.4L12 13.2l4.6-4.6L18 10l-6 6z"/></svg>
       </button>
+
+      <!-- 合并转发展开抽屉 -->
+      <div class="im-fwd" v-if="fwd">
+        <div class="fh">
+          <button class="im-ico" v-if="fwdStack.length" title="返回上一层" @click="backForward">
+            <svg viewBox="0 0 24 24"><path d="M15.4 7.4L14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>
+          </button>
+          <div class="ft">
+            合并转发<template v-if="fwd.total"> · {{ fwd.total }} 条</template>
+          </div>
+          <button class="im-ico" title="关闭" @click="closeForward">
+            <svg viewBox="0 0 24 24"><path d="M6.4 5L5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6 6.4 5z"/></svg>
+          </button>
+        </div>
+        <div class="fb">
+          <div class="im-more" v-if="fwd.loading">正在展开…</div>
+          <div class="im-empty" v-else-if="fwd.error">{{ fwd.error }}</div>
+          <div class="im-empty" v-else-if="!fwd.nodes.length">没有可显示的内容</div>
+          <div class="fn" v-for="(n,i) in fwd.nodes" :key="i">
+            <div class="fn-h">
+              <img class="fava" v-if="n.sender_id"
+                :src="'https://q1.qlogo.cn/g?b=qq&nk=' + n.sender_id + '&s=100'" alt="" />
+              <span class="fnm">{{ n.sender_name }}</span>
+              <span class="ftm">{{ fmtListTime(n.time) }}</span>
+            </div>
+            <div class="fn-b">
+              <span v-for="(p,pi) in fwdParts(n)" :key="pi">
+                <span v-if="p.t === 'text'">{{ p.v }}</span>
+                <span v-else-if="p.t === 'at'" class="at">{{ p.v }}</span>
+                <img v-else-if="p.t === 'face'" class="face" :src="faceUrl(p.v)" alt="[表情]" />
+              </span>
+              <div class="im-grid" :class="gridCls(fwdImgs(n).length)" v-if="fwdImgs(n).length">
+                <img v-for="(m,mi) in fwdImgs(n)" :key="mi" :src="mediaUrl(m)" loading="lazy" alt="图片" />
+              </div>
+              <div class="fn-f" v-for="(m,mi) in fwdOther(n)" :key="'f'+mi">
+                {{ m.name || m.kind }} · {{ bytes(m.bytes) }}
+              </div>
+              <button class="fn-nested" v-if="n.nested" @click="openForward(n.nested)">
+                （这条里还嵌套了一个合并转发，点击展开）
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- 只读栏：本页只做浏览，发送请用 QQ 客户端 -->
       <div class="im-readonly">

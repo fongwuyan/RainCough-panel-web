@@ -183,6 +183,32 @@ export const IM_CSS = `
 .im-toast{position:fixed;left:50%;bottom:130px;transform:translateX(-50%);z-index:970;
   background:rgba(0,0,0,.78);color:#fff;font-size:12.5px;padding:6px 14px;border-radius:16px}
 
+/* 合并转发展开抽屉 */
+.im-fwd{position:absolute;top:0;right:0;bottom:0;width:390px;max-width:82%;
+  background:var(--im-list);border-left:1px solid var(--im-line);z-index:6;
+  display:flex;flex-direction:column;box-shadow:-6px 0 20px rgba(0,0,0,.07)}
+.im-fwd .fh{flex:none;height:48px;display:flex;align-items:center;gap:8px;
+  padding:0 10px 0 16px;border-bottom:1px solid var(--im-line)}
+.im-fwd .ft{flex:1;font-size:14px;font-weight:600;color:var(--im-t1)}
+.im-fwd .fb{flex:1;overflow:auto;padding:10px 14px 18px}
+.im-fwd .fn{padding:9px 0;border-bottom:1px solid var(--im-line)}
+.im-fwd .fn:last-child{border-bottom:none}
+.im-fwd .fn-h{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.im-fwd .fava{width:20px;height:20px;border-radius:4px;object-fit:cover;flex:none}
+.im-fwd .fnm{font-size:12.5px;color:var(--im-t2);flex:1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.im-fwd .ftm{font-size:11px;color:var(--im-t3)}
+.im-fwd .fn-b{font-size:13.5px;color:var(--im-t1);line-height:1.5;word-break:break-word}
+.im-fwd .fn-b .at{color:var(--im-self);font-weight:500}
+.im-fwd .fn-b .face{width:18px;height:18px;vertical-align:-3px}
+.im-fwd .fn-b .im-grid{margin-top:6px;max-width:100%}
+.im-fwd .fn-f{font-size:11.5px;color:var(--im-t3);margin-top:5px}
+.im-fwd .fn-nested{display:block;font-size:11.5px;color:var(--im-self);margin-top:5px;
+  border:none;background:none;padding:0;cursor:pointer;font-family:inherit;text-align:left}
+.im-card.fwd{cursor:pointer;padding:8px 12px;border:1px solid var(--im-line);
+  border-radius:10px;background:var(--im-bg);transition:background .12s}
+.im-card.fwd:hover{background:var(--im-hover)}
+
 /* 大图查看 */
 .im-viewer{position:fixed;inset:0;z-index:950;background:rgba(0,0,0,.82);display:flex;
   align-items:center;justify-content:center;padding:24px;cursor:zoom-out}

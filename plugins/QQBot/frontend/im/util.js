@@ -146,7 +146,6 @@ export function partsOf(m) {
   // （QQ 也不会在图片上方多一行占位）。只有"媒体丢了"时才需要占位提示。
   const media = Array.isArray(m && m.media) ? m.media : []
   if (!parts.length && !media.length && m && m.text) parts.push({ t: 'text', v: m.text })
-  if (!parts.length && !media.length && m && m.text) parts.push({ t: 'text', v: m.text })
   // 墓碑
   if (m && m.role === 'system') system = true
   return { quote, parts, system }
@@ -183,3 +182,16 @@ export function guessSec(m) {
   return Math.max(1, Math.min(60, Math.round(n / 3000)))
 }
 
+
+
+/** 合并转发：消息里只有一个 forward id，内容要另问后端展开 */
+export function forwardIdOf(m) {
+  const segs = Array.isArray(m && m.segs) ? m.segs : []
+  for (const s of segs) {
+    if (s && s.type === 'forward') {
+      const id = (s.data || {}).id
+      if (id) return String(id)
+    }
+  }
+  return ''
+}

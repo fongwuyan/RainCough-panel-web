@@ -4,7 +4,7 @@
 //   卡片类尽量解析出标题，解析失败也不报错。
 import {
   fmtClock, mediaUrl, mediaAlive, faceUrl, bytes, gridCls,
-  partsOf, groupMedia, voiceWidth, guessSec,
+  partsOf, groupMedia, voiceWidth, guessSec, forwardIdOf,
 } from './util.js'
 import { isMe } from './store.js'
 
@@ -32,7 +32,7 @@ function cardInfo(segs) {
       return { kind: 'card', title: '卡片消息', desc: String(d.data || '').slice(0, 90), jump: '' }
     }
     if (t === 'forward' || t === 'node') {
-      return { kind: 'forward', title: '合并转发', desc: '点击查看（下一阶段支持展开）', jump: '' }
+      return { kind: 'forward', title: '合并转发', desc: '点击查看内容', jump: '' }
     }
   }
   return null
@@ -98,7 +98,13 @@ export const ImMessageRow = {
     },
     media() { return this.m.media || [] },
     groups() { return groupMedia(this.media) },
-    card() { return cardInfo(this.m.segs) },
+    card() {
+      const c = cardInfo(this.m.segs)
+      // 展开过一次就把条数写回卡片，省得每次点进去才知道有多少条
+      if (c && c.kind === 'forward' && this.m._fwdCount) c.desc = this.m._fwdCount + ' 条消息'
+      return c
+    },
+    forwardId() { return forwardIdOf(this.m) },
     hasMedia() { return !!(this.groups.image.length || this.groups.video.length || this.groups.record.length || this.groups.file.length) },
     mediaOnly() { return !this.quote && !this.parts.filter((p) => p.t !== 'face').length && this.hasMedia },
     name() { return this.m.sender_name || this.m.sender_id || '未知' },
@@ -141,7 +147,8 @@ export const ImMessageRow = {
             <div class="im-quote" v-if="quote" :title="quote"
               @click.stop="$emit('jump', m.quote && m.quote.msg_id)">{{ quote }}</div>
 
-            <div v-if="card" class="im-card">
+            <div v-if="card" class="im-card" :class="{ fwd: card.kind === 'forward' }"
+              @click.stop="card.kind === 'forward' && forwardId && $emit('forward', forwardId)">
               <div class="ct">{{ card.title }}</div>
               <div class="cd" v-if="card.desc">{{ card.desc }}</div>
             </div>

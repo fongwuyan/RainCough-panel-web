@@ -101,7 +101,7 @@ if (clickText) {
 const afterJs = argOf('--after', '')
 if (afterJs) {
   const r5 = await ev(afterJs)
-  console.log('after:', JSON.stringify(r5).slice(0, 120))
+  console.log('after:', JSON.stringify(r5).slice(0, 900))
   await sleep(1200)
 }
 await sleep(argOf('--after-wait', '4000') * 1)
