@@ -1494,7 +1494,7 @@ const Cards = {
         schema: 2, id: '', version: 1, status: 'draft',
         name: '新角色', alias: [], tagline: '', avatar: '', cover: '', portrait: '',
         prompt: '', greetings: [], examples: [], lorebook: [], taboos: [],
-        style: { temperature: 0.8, max_tokens: 512, max_chars: 0, color: '' },
+        style: { temperature: 0.8, max_tokens: 512, max_chars: 0, allow_emoji: false, color: '' },
         model: { provider_id: '', model: '' },
         context: { keep_rounds: 20 },
         __new: true,
@@ -1794,6 +1794,13 @@ const Cards = {
         <label class="rcq-fi"><span>最多字数</span>
           <input class="input" type="number" step="10" min="0" placeholder="不限"
             v-model.number="cur.style.max_chars" @input="dirty = true" />
+        </label>
+        <label class="rcq-fi"><span>允许 emoji</span>
+          <label class="switch">
+            <input type="checkbox" :checked="!!cur.style.allow_emoji"
+              @change="cur.style.allow_emoji = $event.target.checked; dirty = true" />
+            <span class="slider"></span>
+          </label>
         </label>
         <label class="rcq-fi"><span>上下文轮数</span>
           <input class="input" type="number" min="1"

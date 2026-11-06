@@ -38,6 +38,7 @@ export const IM = {
       sessMenu: null,      // 会话右键菜单 {x,y,s}
       searchOpen: false,   // 聊天区搜索框展开
       msgKw: '',           // 会话内搜索关键词
+      rnd: null,           // 随机挑一条回复 {loading, scope, picked, reply, provider, error}
       busy: '',
     }
   },
@@ -136,6 +137,39 @@ export const IM = {
         this.$nextTick(() => this.toBottom(false))
         this.schedulePendingRefresh()
       })
+    },
+    // ---------------- 随机挑一条消息回
+    // 不是回当前这条，而是从聊天档案里随机翻一条出来，让机器人对它说点什么。
+    openRandom() {
+      this.rnd = { loading: false, scope: (S.sid ? 'session' : 'all'),
+                   picked: null, reply: '', provider: '', error: '' }
+      this.pickRandom()
+    },
+    closeRandom() { this.rnd = null },
+    async pickRandom() {
+      if (!this.rnd) return
+      this.rnd.loading = true
+      this.rnd.error = ''
+      try {
+        const d = await callData('qqbot.chat.random_reply', {
+          sid: S.sid || '',
+          scope: this.rnd.scope,
+        })
+        this.rnd.picked = (d && d.picked) || null
+        this.rnd.reply = (d && d.reply) || ''
+        this.rnd.provider = (d && d.provider) || ''
+      } catch (e) {
+        this.rnd.error = String((e && e.message) || e)
+        this.rnd.picked = null
+        this.rnd.reply = ''
+      } finally {
+        this.rnd.loading = false
+      }
+    },
+    switchScope() {
+      if (!this.rnd) return
+      this.rnd.scope = this.rnd.scope === 'all' ? 'session' : 'all'
+      this.pickRandom()
     },
     // ---------------- 会话导出 / 清空（原「聊天记录」页）
     async exportSession(s) {
@@ -436,6 +470,9 @@ export const IM = {
             @input="onSearch($event.target.value)" />
           <button v-if="msgKw" class="im-hclear" title="清除" @click="onSearch('')">×</button>
         </div>
+        <button class="im-ico" title="随机挑一条消息，让机器人回它" @click="openRandom">
+          <svg viewBox="0 0 24 24"><path d="M12 2l2.2 5.6L20 9l-4.6 3.4L16.6 18 12 14.9 7.4 18l1.2-5.6L4 9l5.8-1.4L12 2z"/></svg>
+        </button>
         <button class="im-ico" title="搜索本会话消息" @click="toggleSearch">
           <svg viewBox="0 0 24 24"><path d="M10 4a6 6 0 014.5 10.1l4.2 4.2-1.4 1.4-4.2-4.2A6 6 0 1110 4zm0 2a4 4 0 100 8 4 4 0 000-8z"/></svg>
         </button>
@@ -513,6 +550,42 @@ export const IM = {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- 随机挑一条回复 -->
+      <div class="im-rnd" v-if="rnd">
+        <div class="fh">
+          <div class="ft">随机挑一条回复</div>
+          <button class="scope" title="切换挑选范围" @click="switchScope">
+            {{ rnd.scope === 'all' ? '全部聊天' : '当前会话' }}
+          </button>
+          <button class="im-ico" title="关闭" @click="closeRandom">
+            <svg viewBox="0 0 24 24"><path d="M6.4 5L5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6 6.4 5z"/></svg>
+          </button>
+        </div>
+        <div class="fb">
+          <div class="im-more" v-if="rnd.loading">正在挑…</div>
+          <div class="im-empty" v-else-if="rnd.error">{{ rnd.error }}</div>
+          <template v-else-if="rnd.picked">
+            <div class="rnd-hint">从聊天档案里随机翻了一条出来，让机器人对它说点什么。</div>
+            <div class="rnd-pick">
+              <div class="rnd-pick-h">
+                <span class="rnd-who">{{ rnd.picked.sender_name || rnd.picked.sender_id }}</span>
+                <span class="rnd-where">{{ rnd.picked.title || rnd.picked.target_id }}</span>
+                <span class="rnd-time">{{ fmtListTime(rnd.picked.created_at) }}</span>
+              </div>
+              <div class="rnd-text">{{ rnd.picked.text }}</div>
+            </div>
+            <div class="rnd-arrow">↓ 机器人这样回</div>
+            <div class="rnd-reply">{{ rnd.reply }}</div>
+            <div class="rnd-foot" v-if="rnd.provider">用 {{ rnd.provider }} 生成</div>
+          </template>
+          <div class="im-empty" v-else>没有可挑的消息</div>
+        </div>
+        <div class="rf">
+          <button :disabled="rnd.loading" @click="pickRandom">换一个</button>
+          <button @click="closeRandom">关闭</button>
         </div>
       </div>
 

@@ -199,6 +199,38 @@ export const IM_CSS = `
 .im-toast{position:fixed;left:50%;bottom:130px;transform:translateX(-50%);z-index:970;
   background:rgba(0,0,0,.78);color:#fff;font-size:12.5px;padding:6px 14px;border-radius:16px}
 
+/* 随机挑一条回复的抽屉 */
+.im-rnd{position:absolute;top:0;right:0;bottom:0;width:390px;max-width:82%;
+  background:var(--im-list);border-left:1px solid var(--im-line);z-index:6;
+  display:flex;flex-direction:column;box-shadow:-6px 0 20px rgba(0,0,0,.07)}
+.im-rnd .fh{flex:none;height:48px;display:flex;align-items:center;gap:8px;
+  padding:0 10px 0 16px;border-bottom:1px solid var(--im-line)}
+.im-rnd .ft{flex:1;font-size:14px;font-weight:600;color:var(--im-t1)}
+.im-rnd .scope{font-size:11.5px;color:var(--im-t2);border:1px solid var(--im-line);
+  background:var(--im-hover);border-radius:11px;padding:3px 10px;cursor:pointer;flex:none}
+.im-rnd .scope:hover{color:var(--im-t1)}
+.im-rnd .fb{flex:1;overflow:auto;padding:12px 14px 18px}
+.im-rnd .rnd-hint{font-size:11.5px;color:var(--im-t3);margin-bottom:10px;line-height:1.6}
+.im-rnd .rnd-pick{border:1px solid var(--im-line);border-radius:8px;padding:9px 11px;
+  background:var(--im-hover)}
+.im-rnd .rnd-pick-h{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.im-rnd .rnd-who{font-size:12.5px;font-weight:600;color:var(--im-t1)}
+.im-rnd .rnd-where{font-size:11px;color:var(--im-t3);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;flex:1}
+.im-rnd .rnd-time{font-size:11px;color:var(--im-t3);flex:none}
+.im-rnd .rnd-text{font-size:13.5px;color:var(--im-t1);line-height:1.6;
+  white-space:pre-wrap;word-break:break-word}
+.im-rnd .rnd-arrow{font-size:11.5px;color:var(--im-t3);margin:14px 0 7px;text-align:center}
+.im-rnd .rnd-reply{background:var(--im-self);border-radius:8px;padding:9px 11px;
+  font-size:13.5px;line-height:1.6;color:var(--im-self-t);white-space:pre-wrap;word-break:break-word}
+.im-rnd .rnd-foot{font-size:11px;color:var(--im-t3);margin-top:8px;text-align:right}
+.im-rnd .rf{flex:none;display:flex;gap:8px;padding:10px 14px;
+  border-top:1px solid var(--im-line)}
+.im-rnd .rf button{flex:1;font-size:12.5px;border:1px solid var(--im-line);
+  background:var(--im-hover);color:var(--im-t1);border-radius:6px;padding:7px 0;cursor:pointer}
+.im-rnd .rf button:hover{background:var(--im-active)}
+.im-rnd .rf button:disabled{opacity:.5;cursor:default}
+
 /* 合并转发展开抽屉 */
 .im-fwd{position:absolute;top:0;right:0;bottom:0;width:390px;max-width:82%;
   background:var(--im-list);border-left:1px solid var(--im-line);z-index:6;
