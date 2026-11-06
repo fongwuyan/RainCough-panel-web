@@ -110,6 +110,8 @@ export const ImMessageRow = {
     time() { return fmtClock(this.m.created_at) },
     initial() { return String(this.name || '?').trim().slice(0, 1) },
     showAva() { return !!this.avatar && !this.badAva },
+    // 只有自己发的、已入库（非本地临时）且有 msg_id 的消息才能撤回
+    canRecall() { return this.me && !this.m._pending && !this.m._failed && !!this.m.msg_id },
     images() { return this.groups.image.filter(mediaAlive) },
     videos() { return this.groups.video.filter(mediaAlive) },
     voices() { return this.groups.record.filter(mediaAlive) },
@@ -123,7 +125,9 @@ export const ImMessageRow = {
   template: `
   <div>
     <div class="im-time" v-if="showTime">{{ showTime }}</div>
-    <div class="im-msg" :class="{ me: me, compact: compact }">
+    <div class="im-msg" :class="{ me: me, compact: compact }" :data-mid="m.id"
+      :data-msgid="m.msg_id || ''"
+      @contextmenu.prevent="$emit('ctx', $event, m)">
       <div class="ava" :class="{ ph: compact }">
         <img v-if="showAva && !compact" :src="avatar" alt="" @error="badAva = true" />
         <div v-else-if="!compact" class="ava-t">{{ initial }}</div>
@@ -134,7 +138,8 @@ export const ImMessageRow = {
         <div class="im-bub" :class="{ media: mediaOnly }">
           <div class="im-recall" v-if="recalled">该消息已被撤回</div>
           <template v-else>
-            <div class="im-quote" v-if="quote" :title="quote">{{ quote }}</div>
+            <div class="im-quote" v-if="quote" :title="quote"
+              @click.stop="$emit('jump', m.quote && m.quote.msg_id)">{{ quote }}</div>
 
             <div v-if="card" class="im-card">
               <div class="ct">{{ card.title }}</div>
@@ -171,6 +176,12 @@ export const ImMessageRow = {
             </div>
             <a :href="mediaUrl(m)" :download="m.name || true" style="margin-left:8px;font-size:12px">下载</a>
           </div>
+        </div>
+
+        <div class="im-ops">
+          <button class="im-op" title="引用" @click.stop="$emit('quote', m)">引用</button>
+          <button class="im-op" title="复制文字" @click.stop="$emit('copy', m)">复制</button>
+          <button class="im-op" v-if="canRecall" title="撤回" @click.stop="$emit('recall', m)">撤回</button>
         </div>
 
         <div class="im-meta" v-if="!compact">

@@ -4,7 +4,7 @@
 // 数据：复用 qqbot.chat.sessions / qqbot.chat.messages，与「聊天记录」页同源
 import {
   S, loadSessions, loadSelf, openSession, loadMessages, current,
-  sendText, retrySend,
+  sendText, retrySend, lastRead, markRead, callData,
 } from './store.js'
 import { fmtListTime, fmtDayLabel, fmtNum } from './util.js'
 import { ImMessageRow } from './message.js'
@@ -29,6 +29,10 @@ export const IM = {
       badAva: {},
       draft: '',
       sending: false,
+      menu: null,          // 右键菜单 {x,y,m}
+      quote: null,         // 正在引用的消息
+      readAt: 0,           // 上次看到的消息 id（本地，用于"以下为新消息"）
+      toastMsg: '',
     }
   },
   computed: {
@@ -43,6 +47,7 @@ export const IM = {
       const out = []
       let lastTs = 0
       let lastWho = ''
+      let marked = false
       for (const m of S.msgs) {
         if (!m) continue
         const txt = String(m.text || '')
@@ -57,7 +62,13 @@ export const IM = {
         }
         const who = String(m.sender_id || m.role || '')
         const compact = !showTime && who === lastWho && gap < 300
-        out.push({ type: 'msg', key: m.id, m, compact, showTime })
+        const row = { type: 'msg', key: m.id, m, compact, showTime }
+        // 第一次跨过"上次已读位置"的那条消息，前面插一条分割线
+        if (!marked && this.readAt && Number(m.id) > this.readAt) {
+          row.divider = true
+          marked = true
+        }
+        out.push(row)
         lastTs = m.created_at
         lastWho = who
       }
@@ -68,14 +79,20 @@ export const IM = {
   async mounted() {
     await loadSelf()
     await loadSessions()
-    if (S.sid) await openSession(S.sid)
+    if (S.sid) {
+      await openSession(S.sid)
+      this.readAt = lastRead(S.sid)
+      this.scheduleRead()
+    }
     // 首次进入滚到底
     this.$nextTick(() => this.toBottom(false))
     window.addEventListener('keydown', this.onKey)
+    window.addEventListener('click', this.closeMenu)
     document.documentElement.style.overflow = 'hidden'
   },
   beforeUnmount() {
     window.removeEventListener('keydown', this.onKey)
+    window.removeEventListener('click', this.closeMenu)
     document.documentElement.style.overflow = ''
   },
   methods: {
@@ -86,11 +103,15 @@ export const IM = {
     close() { this.$emit('close') },
     async onSend() {
       const t = this.draft.trim()
-      if (!t || !cur || this.sending) return
+      // ★ 这里必须是 this.cur：cur 是 computed，不是模块作用域变量。
+      //   漏了 this 会在运行时抛 ReferenceError（模板里能直接写 cur，方法里不行）。
+      if (!t || !this.cur || this.sending) return
       this.sending = true
       this.draft = ''
+      const q = this.quote
+      this.quote = null
       try {
-        await sendText(t)
+        await sendText(t, q && q.msg_id, q)
       } catch (e) {
         // 失败项已经在列表里标红，这里只负责把视口拉到底让人看见
       } finally {
@@ -105,6 +126,62 @@ export const IM = {
         this.onSend()
       }
     },
+    closeMenu() { this.menu = null },
+    openCtx(e, m) {
+      this.menu = { x: e.clientX, y: e.clientY, m }
+    },
+    canRecall(m) { return !!(m && m.msg_id && (m.role === 'assistant') && !m.recalled) },
+    copyMsg(m) {
+      const t = String((m && (m.text || (m.segs || []).map((x) => (x.data || {}).text || '').join(''))) || '')
+      try {
+        navigator.clipboard.writeText(t)
+        this.toast('已复制')
+      } catch (e) {
+        this.toast('复制失败（浏览器不允许）')
+      }
+      this.menu = null
+    },
+    quoteMsg(m) {
+      const t = String((m && (m.text || '')) || '').slice(0, 60)
+      const who = (m && m.sender_name) || ''
+      this.quote = { msg_id: m.msg_id, sender: who, text: t }
+      this.menu = null
+    },
+    async doRecall(m) {
+      this.menu = null
+      if (!m || !m.msg_id) return
+      try {
+        await callData('qqbot.chat.recall', { msg_id: m.msg_id })
+        m.recalled = 1
+        this.toast('已撤回')
+      } catch (e) {
+        this.toast(String((e && e.message) || e))
+      }
+    },
+    jump(msgId) {
+      const id = String(msgId || '')
+      if (!id) return
+      // 引用里存的是 OneBot 的 message_id，而行上的 data-mid 是数据库行 id，
+      // 两者不是一回事 —— 先按 data-msgid 找，找不到再按行 id 兜底。
+      const esc = id.replace(/"/g, '\\"')
+      const el = document.querySelector('.rcq-im [data-msgid="' + esc + '"]')
+        || document.querySelector('.rcq-im [data-mid="' + esc + '"]')
+      if (!el) { this.toast('被引用的消息不在当前页'); return }
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el.classList.add('im-flash')
+      setTimeout(() => el.classList.remove('im-flash'), 1200)
+    },
+    toast(t) {
+      this.toastMsg = String(t || '')
+      clearTimeout(this._tt)
+      this._tt = setTimeout(() => { this.toastMsg = '' }, 1800)
+    },
+    scheduleRead() {
+      clearTimeout(this._rt)
+      this._rt = setTimeout(() => {
+        if (S.msgs.length) markRead(S.sid, S.msgs[S.msgs.length - 1].id)
+      }, 1200)
+    },
     async onRetry(m) {
       try { await retrySend(m) } catch (e) {}
       this.$nextTick(() => this.toBottom(true))
@@ -113,7 +190,12 @@ export const IM = {
     initialOf(s) { return String((s && (s.display || s.target_id)) || '?').trim().slice(0, 1) },
     pick(s) {
       if (!s || s.session_id === S.sid) return
-      openSession(s.session_id).then(() => this.$nextTick(() => this.toBottom(false)))
+      this.quote = null
+      openSession(s.session_id).then(() => {
+        this.readAt = lastRead(s.session_id)
+        this.$nextTick(() => this.toBottom(false))
+        this.scheduleRead()
+      })
     },
     toBottom(smooth = true) {
       const el = this.$refs.flow
@@ -226,8 +308,12 @@ export const IM = {
         </div>
         <template v-for="r in rows" :key="r.key">
           <div class="im-sys" v-if="r.type === 'sys'"><span>{{ r.text }}</span></div>
-          <im-message-row v-else :m="r.m" :compact="r.compact" :show-time="r.showTime"
-            @retry="onRetry" />
+          <template v-else>
+            <div class="im-divider" v-if="r.divider">以下为新消息</div>
+            <im-message-row :m="r.m" :compact="r.compact" :show-time="r.showTime"
+              @retry="onRetry" @ctx="openCtx" @copy="copyMsg" @quote="quoteMsg"
+              @recall="doRecall" @jump="jump" />
+          </template>
         </template>
       </div>
 
@@ -245,6 +331,10 @@ export const IM = {
             <svg viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm1 2v9l4-4 3 3 3-4 4 5V7H5zm3 1.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/></svg>
           </button>
         </div>
+        <div class="im-quote-bar" v-if="quote">
+          <span class="qq">引用 {{ quote.sender || '消息' }}：{{ quote.text }}</span>
+          <button class="qx" title="取消引用" @click="quote = null">×</button>
+        </div>
         <textarea class="im-editor" rows="2" v-model="draft" :disabled="!cur"
           :placeholder="cur ? '输入消息，Enter 发送，Shift+Enter 换行' : '先在左边选一个会话'"
           @keydown="onKeydown"></textarea>
@@ -255,5 +345,14 @@ export const IM = {
         </div>
       </div>
     </div>
+
+    <div class="im-menu" v-if="menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
+      @click.stop>
+      <button @click="copyMsg(menu.m)">复制文字</button>
+      <button @click="quoteMsg(menu.m)">引用</button>
+      <button v-if="canRecall(menu.m)" @click="doRecall(menu.m)">撤回</button>
+    </div>
+
+    <div class="im-toast" v-if="toastMsg">{{ toastMsg }}</div>
   </div>`,
 }

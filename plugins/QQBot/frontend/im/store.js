@@ -111,7 +111,7 @@ export function isMe(m) {
 
 let tmpSeq = 0
 
-export async function sendText(text) {
+export async function sendText(text, replyId = '', quoteMeta = null) {
   const t = String(text || '')
   if (!S.sid || !t.trim()) return
   const tmp = {
@@ -129,7 +129,11 @@ export async function sendText(text) {
   }
   S.msgs.push(tmp)
   try {
-    const d = await callData('qqbot.chat.send', { session_id: S.sid, text: t })
+    const params = { session_id: S.sid, text: t }
+    if (replyId) params.reply_id = String(replyId)
+    const d = await callData('qqbot.chat.send', params)
+    // 发送时带了引用：把引用摘要挂到返回记录上，本地立刻能显示（刷新后由后端解析）
+    if (d && quoteMeta && replyId) d.quote = quoteMeta
     const i = S.msgs.findIndex((x) => x.id === tmp.id)
     if (i >= 0 && d && d.id) S.msgs.splice(i, 1, d)
     else if (i >= 0) { S.msgs[i]._pending = false; S.msgs[i]._failed = true }
@@ -151,4 +155,28 @@ export async function retrySend(m) {
   const text = (m && (m._text || m.text)) || ''
   if (i >= 0) S.msgs.splice(i, 1)
   return sendText(text)
+}
+
+
+// ---------------------------------------------------------------- 已读位置
+//
+// QQ 的"以下为新消息"分割线依赖"本地已读位置"。
+// 这是**客户端本地状态**，不写消息表（换设备本来也会重新算），
+// 所以放 localStorage，按会话记忆最后一次看过的消息 id。
+const READ_KEY = 'rcq.im.read'
+
+function readMap() {
+  try { return JSON.parse(localStorage.getItem(READ_KEY) || '{}') || {} } catch (e) { return {} }
+}
+
+export function lastRead(sid) {
+  return Number(readMap()[sid] || 0)
+}
+
+export function markRead(sid, id) {
+  if (!sid || !id) return
+  const m = readMap()
+  if (Number(m[sid] || 0) >= Number(id)) return
+  m[sid] = Number(id)
+  try { localStorage.setItem(READ_KEY, JSON.stringify(m)) } catch (e) {}
 }
