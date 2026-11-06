@@ -6,7 +6,7 @@ import {
   fmtClock, mediaUrl, mediaAlive, faceUrl, bytes, gridCls,
   partsOf, groupMedia, voiceWidth, guessSec, forwardIdOf,
 } from './util.js'
-import { isMe } from './store.js'
+import { isMe, S } from './store.js'
 
 // 全局唯一的播放器：同一时刻只有一条语音在响
 let AUDIO = null
@@ -114,6 +114,17 @@ export const ImMessageRow = {
       return /^\d{5,12}$/.test(id) ? 'https://q1.qlogo.cn/g?b=qq&nk=' + id + '&s=100' : ''
     },
     time() { return fmtClock(this.m.created_at) },
+    // 谁撤的：在已加载的消息里按 sender_id 找昵称（找不到就只显示"已撤回"）
+    recalledBy() {
+      const by = String((this.m && this.m.recalled_by) || '')
+      if (!by) return ''
+      const hit = S.msgs.find((x) => String(x.sender_id || '') === by)
+      return hit ? (hit.sender_name || '') : ''
+    },
+    recalledTip() {
+      const who = this.recalledBy
+      return who ? ('由 ' + who + ' 撤回') : '消息已被撤回'
+    },
     initial() { return String(this.name || '?').trim().slice(0, 1) },
     showAva() { return !!this.avatar && !this.badAva },
     // 只有自己发的、已入库且有 msg_id 的消息才能撤回
@@ -131,7 +142,7 @@ export const ImMessageRow = {
   template: `
   <div>
     <div class="im-time" v-if="showTime">{{ showTime }}</div>
-    <div class="im-msg" :class="{ me: me, compact: compact }" :data-mid="m.id"
+    <div class="im-msg" :class="{ me: me, compact: compact, recalled: recalled }" :data-mid="m.id"
       :data-msgid="m.msg_id || ''"
       @contextmenu.prevent="$emit('ctx', $event, m)">
       <div class="ava" :class="{ ph: compact }">
@@ -141,39 +152,38 @@ export const ImMessageRow = {
       <div class="col">
         <div class="who" v-if="!compact && !me">{{ name }}</div>
 
+        <!-- ★ 撤回的消息照常显示内容（这是"全量档案"，原文永久保留），
+             只在下面打一个「已撤回」标记 —— 和「聊天记录」页的行为保持一致。 -->
         <div class="im-bub" :class="{ media: mediaOnly }">
-          <div class="im-recall" v-if="recalled">该消息已被撤回</div>
-          <template v-else>
-            <div class="im-quote" v-if="quote" :title="quote"
-              @click.stop="$emit('jump', m.quote && m.quote.msg_id)">{{ quote }}</div>
+          <div class="im-quote" v-if="quote" :title="quote"
+            @click.stop="$emit('jump', m.quote && m.quote.msg_id)">{{ quote }}</div>
 
-            <div v-if="card" class="im-card" :class="{ fwd: card.kind === 'forward' }"
-              @click.stop="card.kind === 'forward' && forwardId && $emit('forward', forwardId)">
-              <div class="ct">{{ card.title }}</div>
-              <div class="cd" v-if="card.desc">{{ card.desc }}</div>
-            </div>
+          <div v-if="card" class="im-card" :class="{ fwd: card.kind === 'forward' }"
+            @click.stop="card.kind === 'forward' && forwardId && $emit('forward', forwardId)">
+            <div class="ct">{{ card.title }}</div>
+            <div class="cd" v-if="card.desc">{{ card.desc }}</div>
+          </div>
 
-            <span v-for="(p,i) in parts" :key="i">
-              <span v-if="p.t === 'text'">{{ p.v }}</span>
-              <span v-else-if="p.t === 'at'" class="at">{{ p.v }}</span>
-              <img v-else-if="p.t === 'face'" class="face" :src="faceUrl(p.v)" alt="[表情]" @error="faceErr" />
-              <span v-else class="im-unk">[{{ p.name }}]</span>
-            </span>
-          </template>
+          <span v-for="(p,i) in parts" :key="i">
+            <span v-if="p.t === 'text'">{{ p.v }}</span>
+            <span v-else-if="p.t === 'at'" class="at">{{ p.v }}</span>
+            <img v-else-if="p.t === 'face'" class="face" :src="faceUrl(p.v)" alt="[表情]" @error="faceErr" />
+            <span v-else class="im-unk">[{{ p.name }}]</span>
+          </span>
         </div>
 
         <!-- 媒体区（放在气泡外，避免圆角与内边距打架） -->
-        <div class="im-grid" :class="gridCls(images.length)" v-if="images.length && !recalled">
+        <div class="im-grid" :class="gridCls(images.length)" v-if="images.length">
           <img v-for="(m,i) in images" :key="i" :src="mediaUrl(m)" loading="lazy"
             @click="openImg(m)" alt="图片" />
         </div>
-        <div class="im-video" v-for="(m,i) in (recalled ? [] : videos)" :key="'v'+i">
+        <div class="im-video" v-for="(m,i) in videos" :key="'v'+i">
           <video :src="mediaUrl(m)" controls preload="metadata" playsinline></video>
         </div>
-        <div class="im-bub" v-for="(m,i) in (recalled ? [] : voices)" :key="'r'+i" style="padding:6px 10px">
+        <div class="im-bub" v-for="(m,i) in voices" :key="'r'+i" style="padding:6px 10px">
           <im-voice :m="m" :me="me" />
         </div>
-        <div class="im-bub" v-for="(m,i) in (recalled ? [] : files)" :key="'f'+i" style="padding:8px 12px">
+        <div class="im-bub" v-for="(m,i) in files" :key="'f'+i" style="padding:8px 12px">
           <div class="im-file">
             <div class="fi">{{ (m.name || 'FILE').split('.').pop().slice(0,4).toUpperCase() }}</div>
             <div style="min-width:0">
@@ -190,7 +200,10 @@ export const ImMessageRow = {
           <button class="im-op" v-if="canRecall" title="撤回" @click.stop="$emit('recall', m)">撤回</button>
         </div>
 
-        <div class="im-meta" v-if="!compact">{{ time }}</div>
+        <div class="im-meta" v-if="!compact">
+          <span>{{ time }}</span>
+          <span class="im-rec-tag" v-if="recalled" :title="recalledTip">已撤回</span>
+        </div>
       </div>
     </div>
 

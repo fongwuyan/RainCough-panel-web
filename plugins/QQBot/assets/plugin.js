@@ -14,10 +14,10 @@
       <i v-for="(h,i) in bars" :key="i" :style="{ height: h + 'px', opacity: playing ? .95 : .5 }"></i>
     </span>
     <span class="sec">{{ sec }}"</span>
-  </div>`},xp={components:{ImVoice:Kh},props:{m:Object,compact:Boolean,showTime:String},data(){return{viewer:"",badAva:!1}},computed:{me(){return cp(this.m)},recalled(){return!!this.m.recalled},parsed(){return ls(this.m)},parts(){return this.parsed.parts},quote(){let e=this.m&&this.m.quote;return e&&(e.sender||e.text)?(e.sender?e.sender+"\uFF1A":"")+(e.text||"[\u6D88\u606F]"):this.parsed.quote},media(){return this.m.media||[]},groups(){return vp(this.media)},card(){let e=Qh(this.m.segs);return e&&e.kind==="forward"&&this.m._fwdCount&&(e.desc=this.m._fwdCount+" \u6761\u6D88\u606F"),e},forwardId(){return os(this.m)},hasMedia(){return!!(this.groups.image.length||this.groups.video.length||this.groups.record.length||this.groups.file.length)},mediaOnly(){return!this.quote&&!this.parts.filter(e=>e.t!=="face").length&&this.hasMedia},name(){return this.m.sender_name||this.m.sender_id||"\u672A\u77E5"},avatar(){if(this.m.sender_avatar)return this.m.sender_avatar;let e=String(this.m.sender_id||"");return/^\d{5,12}$/.test(e)?"https://q1.qlogo.cn/g?b=qq&nk="+e+"&s=100":""},time(){return Ir(this.m.created_at)},initial(){return String(this.name||"?").trim().slice(0,1)},showAva(){return!!this.avatar&&!this.badAva},canRecall(){return this.me&&!!this.m.msg_id},images(){return this.groups.image.filter(gn)},videos(){return this.groups.video.filter(gn)},voices(){return this.groups.record.filter(gn)},files(){return this.groups.file.filter(gn)}},methods:{faceUrl:Rr,mediaUrl:mn,bytes:Or,gridCls:Pr,mediaAlive:gn,openImg(e){this.viewer=mn(e)},faceErr(e){let t=e&&e.target;t&&(t.style.visibility="hidden")}},template:`
+  </div>`},xp={components:{ImVoice:Kh},props:{m:Object,compact:Boolean,showTime:String},data(){return{viewer:"",badAva:!1}},computed:{me(){return cp(this.m)},recalled(){return!!this.m.recalled},parsed(){return ls(this.m)},parts(){return this.parsed.parts},quote(){let e=this.m&&this.m.quote;return e&&(e.sender||e.text)?(e.sender?e.sender+"\uFF1A":"")+(e.text||"[\u6D88\u606F]"):this.parsed.quote},media(){return this.m.media||[]},groups(){return vp(this.media)},card(){let e=Qh(this.m.segs);return e&&e.kind==="forward"&&this.m._fwdCount&&(e.desc=this.m._fwdCount+" \u6761\u6D88\u606F"),e},forwardId(){return os(this.m)},hasMedia(){return!!(this.groups.image.length||this.groups.video.length||this.groups.record.length||this.groups.file.length)},mediaOnly(){return!this.quote&&!this.parts.filter(e=>e.t!=="face").length&&this.hasMedia},name(){return this.m.sender_name||this.m.sender_id||"\u672A\u77E5"},avatar(){if(this.m.sender_avatar)return this.m.sender_avatar;let e=String(this.m.sender_id||"");return/^\d{5,12}$/.test(e)?"https://q1.qlogo.cn/g?b=qq&nk="+e+"&s=100":""},time(){return Ir(this.m.created_at)},recalledBy(){let e=String(this.m&&this.m.recalled_by||"");if(!e)return"";let t=Y.msgs.find(i=>String(i.sender_id||"")===e);return t&&t.sender_name||""},recalledTip(){let e=this.recalledBy;return e?"\u7531 "+e+" \u64A4\u56DE":"\u6D88\u606F\u5DF2\u88AB\u64A4\u56DE"},initial(){return String(this.name||"?").trim().slice(0,1)},showAva(){return!!this.avatar&&!this.badAva},canRecall(){return this.me&&!!this.m.msg_id},images(){return this.groups.image.filter(gn)},videos(){return this.groups.video.filter(gn)},voices(){return this.groups.record.filter(gn)},files(){return this.groups.file.filter(gn)}},methods:{faceUrl:Rr,mediaUrl:mn,bytes:Or,gridCls:Pr,mediaAlive:gn,openImg(e){this.viewer=mn(e)},faceErr(e){let t=e&&e.target;t&&(t.style.visibility="hidden")}},template:`
   <div>
     <div class="im-time" v-if="showTime">{{ showTime }}</div>
-    <div class="im-msg" :class="{ me: me, compact: compact }" :data-mid="m.id"
+    <div class="im-msg" :class="{ me: me, compact: compact, recalled: recalled }" :data-mid="m.id"
       :data-msgid="m.msg_id || ''"
       @contextmenu.prevent="$emit('ctx', $event, m)">
       <div class="ava" :class="{ ph: compact }">
@@ -27,39 +27,38 @@
       <div class="col">
         <div class="who" v-if="!compact && !me">{{ name }}</div>
 
+        <!-- \u2605 \u64A4\u56DE\u7684\u6D88\u606F\u7167\u5E38\u663E\u793A\u5185\u5BB9\uFF08\u8FD9\u662F"\u5168\u91CF\u6863\u6848"\uFF0C\u539F\u6587\u6C38\u4E45\u4FDD\u7559\uFF09\uFF0C
+             \u53EA\u5728\u4E0B\u9762\u6253\u4E00\u4E2A\u300C\u5DF2\u64A4\u56DE\u300D\u6807\u8BB0 \u2014\u2014 \u548C\u300C\u804A\u5929\u8BB0\u5F55\u300D\u9875\u7684\u884C\u4E3A\u4FDD\u6301\u4E00\u81F4\u3002 -->
         <div class="im-bub" :class="{ media: mediaOnly }">
-          <div class="im-recall" v-if="recalled">\u8BE5\u6D88\u606F\u5DF2\u88AB\u64A4\u56DE</div>
-          <template v-else>
-            <div class="im-quote" v-if="quote" :title="quote"
-              @click.stop="$emit('jump', m.quote && m.quote.msg_id)">{{ quote }}</div>
+          <div class="im-quote" v-if="quote" :title="quote"
+            @click.stop="$emit('jump', m.quote && m.quote.msg_id)">{{ quote }}</div>
 
-            <div v-if="card" class="im-card" :class="{ fwd: card.kind === 'forward' }"
-              @click.stop="card.kind === 'forward' && forwardId && $emit('forward', forwardId)">
-              <div class="ct">{{ card.title }}</div>
-              <div class="cd" v-if="card.desc">{{ card.desc }}</div>
-            </div>
+          <div v-if="card" class="im-card" :class="{ fwd: card.kind === 'forward' }"
+            @click.stop="card.kind === 'forward' && forwardId && $emit('forward', forwardId)">
+            <div class="ct">{{ card.title }}</div>
+            <div class="cd" v-if="card.desc">{{ card.desc }}</div>
+          </div>
 
-            <span v-for="(p,i) in parts" :key="i">
-              <span v-if="p.t === 'text'">{{ p.v }}</span>
-              <span v-else-if="p.t === 'at'" class="at">{{ p.v }}</span>
-              <img v-else-if="p.t === 'face'" class="face" :src="faceUrl(p.v)" alt="[\u8868\u60C5]" @error="faceErr" />
-              <span v-else class="im-unk">[{{ p.name }}]</span>
-            </span>
-          </template>
+          <span v-for="(p,i) in parts" :key="i">
+            <span v-if="p.t === 'text'">{{ p.v }}</span>
+            <span v-else-if="p.t === 'at'" class="at">{{ p.v }}</span>
+            <img v-else-if="p.t === 'face'" class="face" :src="faceUrl(p.v)" alt="[\u8868\u60C5]" @error="faceErr" />
+            <span v-else class="im-unk">[{{ p.name }}]</span>
+          </span>
         </div>
 
         <!-- \u5A92\u4F53\u533A\uFF08\u653E\u5728\u6C14\u6CE1\u5916\uFF0C\u907F\u514D\u5706\u89D2\u4E0E\u5185\u8FB9\u8DDD\u6253\u67B6\uFF09 -->
-        <div class="im-grid" :class="gridCls(images.length)" v-if="images.length && !recalled">
+        <div class="im-grid" :class="gridCls(images.length)" v-if="images.length">
           <img v-for="(m,i) in images" :key="i" :src="mediaUrl(m)" loading="lazy"
             @click="openImg(m)" alt="\u56FE\u7247" />
         </div>
-        <div class="im-video" v-for="(m,i) in (recalled ? [] : videos)" :key="'v'+i">
+        <div class="im-video" v-for="(m,i) in videos" :key="'v'+i">
           <video :src="mediaUrl(m)" controls preload="metadata" playsinline></video>
         </div>
-        <div class="im-bub" v-for="(m,i) in (recalled ? [] : voices)" :key="'r'+i" style="padding:6px 10px">
+        <div class="im-bub" v-for="(m,i) in voices" :key="'r'+i" style="padding:6px 10px">
           <im-voice :m="m" :me="me" />
         </div>
-        <div class="im-bub" v-for="(m,i) in (recalled ? [] : files)" :key="'f'+i" style="padding:8px 12px">
+        <div class="im-bub" v-for="(m,i) in files" :key="'f'+i" style="padding:8px 12px">
           <div class="im-file">
             <div class="fi">{{ (m.name || 'FILE').split('.').pop().slice(0,4).toUpperCase() }}</div>
             <div style="min-width:0">
@@ -76,7 +75,10 @@
           <button class="im-op" v-if="canRecall" title="\u64A4\u56DE" @click.stop="$emit('recall', m)">\u64A4\u56DE</button>
         </div>
 
-        <div class="im-meta" v-if="!compact">{{ time }}</div>
+        <div class="im-meta" v-if="!compact">
+          <span>{{ time }}</span>
+          <span class="im-rec-tag" v-if="recalled" :title="recalledTip">\u5DF2\u64A4\u56DE</span>
+        </div>
       </div>
     </div>
 
@@ -84,7 +86,7 @@
       <button class="x" @click="viewer = ''">\xD7</button>
       <img :src="viewer" alt="" />
     </div>
-  </div>`};var Wh=[{id:"im",title:"\u6D88\u606F",d:"M4 5.5A2.5 2.5 0 016.5 3h11A2.5 2.5 0 0120 5.5v8a2.5 2.5 0 01-2.5 2.5H9l-4 4V16H6.5A2.5 2.5 0 014 13.5v-8z"},{id:"contacts",title:"\u8054\u7CFB\u4EBA",d:"M12 12a4 4 0 100-8 4 4 0 000 8zm-8 8a8 8 0 0116 0v1H4v-1z"},{id:"star",title:"\u6536\u85CF",d:"M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z"}],wp={components:{ImMessageRow:xp},props:{},data(){return{S:Y,rail:"im",railItems:Wh,showJump:!1,dragging:!1,sideWidth:268,badAva:{},menu:null,readAt:0,toastMsg:"",fwd:null,fwdStack:[],sessMenu:null}},computed:{cur(){return op()},filtered(){let e=(Y.keyword||"").trim().toLowerCase();return e?Y.sessions.filter(t=>(t.display||"").toLowerCase().includes(e)||String(t.target_id||"").includes(e)):Y.sessions},rows(){let e=[],t=0,i="",n=!1;for(let s of Y.msgs){if(!s)continue;let r=String(s.text||""),a=s.role==="system"||!(s.segs||[]).length&&r.indexOf("\u64A4\u56DE")>=0,l=s.created_at-t,o=!t||l>300?mp(s.created_at):"";if(a){e.push({type:"sys",key:"s"+s.id,text:r||"\u4E00\u6761\u6D88\u606F\u88AB\u64A4\u56DE"}),t=s.created_at,i="";continue}let c=String(s.sender_id||s.role||""),d=!o&&c===i&&l<300,p={type:"msg",key:s.id,m:s,compact:d,showTime:o};!n&&this.readAt&&Number(s.id)>this.readAt&&(p.divider=!0,n=!0),e.push(p),t=s.created_at,i=c}return e},total(){return this.cur&&this.cur.msg_count||Y.msgs.length}},async mounted(){await lp(),await Ar(),Y.sid&&(await Nr(Y.sid),this.readAt=Mr(Y.sid),this.scheduleRead()),this.$nextTick(()=>this.toBottom(!1)),window.addEventListener("keydown",this.onKey),window.addEventListener("click",this.closeMenu),document.documentElement.style.overflow="hidden"},beforeUnmount(){window.removeEventListener("keydown",this.onKey),window.removeEventListener("click",this.closeMenu),document.documentElement.style.overflow=""},methods:{fmtListTime:hp,fmtNum:gp,partsOf:ls,gridCls:Pr,mediaUrl:mn,faceUrl:Rr,bytes:Or,forwardIdOf:os,onKey(e){e.key==="Escape"&&(e.stopPropagation(),this.close())},close(){this.$emit("close")},closeMenu(){this.menu=null,this.sessMenu=null},openSessMenu(e,t){this.sessMenu={x:e.clientX,y:e.clientY,s:t}},async togglePin(e){if(this.sessMenu=null,!!e)try{let t=await Lt("qqbot.chat.session_ui",{session_id:e.session_id,pinned:!e.pinned});e.pinned=t&&typeof t.pinned<"u"?t.pinned:e.pinned?0:1,this.toast(e.pinned?"\u5DF2\u7F6E\u9876":"\u5DF2\u53D6\u6D88\u7F6E\u9876"),await Ar()}catch(t){this.toast(String(t&&t.message||t))}},async toggleMute(e){if(this.sessMenu=null,!!e)try{let t=await Lt("qqbot.chat.session_ui",{session_id:e.session_id,muted:!e.muted});e.muted=t&&typeof t.muted<"u"?t.muted:e.muted?0:1,this.toast(e.muted?"\u5DF2\u514D\u6253\u6270":"\u5DF2\u53D6\u6D88\u514D\u6253\u6270")}catch(t){this.toast(String(t&&t.message||t))}},markReadNow(e){if(this.sessMenu=null,!e)return;let t=Mr(e.session_id);t&&Lt("qqbot.chat.session_ui",{session_id:e.session_id,last_read_id:t}).catch(()=>{}),e.unread=0},async openForward(e){if(e){this.fwd&&this.fwdStack.push(this.fwd),this.fwd={id:e,loading:!0,nodes:[],total:0,error:""};try{let t=await Lt("qqbot.chat.forward",{id:e}),i=t&&t.total||0;this.fwd={id:e,loading:!1,nodes:t&&t.nodes||[],total:i,error:""};for(let n of Y.msgs)if(os(n)===e){n._fwdCount=i;break}}catch(t){this.fwd={id:e,loading:!1,nodes:[],total:0,error:String(t&&t.message||t)}}}},backForward(){this.fwd=this.fwdStack.pop()||null},closeForward(){this.fwd=null,this.fwdStack=[]},fwdParts(e){return ls({segs:e&&e.segs||[]}).parts},fwdImgs(e){return(e&&e.media||[]).filter(t=>t.kind==="image"&&t.local)},fwdOther(e){return(e&&e.media||[]).filter(t=>t.kind!=="image"&&t.local)},openCtx(e,t){this.menu={x:e.clientX,y:e.clientY,m:t}},canRecall(e){return!!(e&&e.msg_id&&e.role==="assistant"&&!e.recalled)},copyMsg(e){let t=String(e&&(e.text||(e.segs||[]).map(i=>(i.data||{}).text||"").join(""))||"");try{navigator.clipboard.writeText(t),this.toast("\u5DF2\u590D\u5236")}catch{this.toast("\u590D\u5236\u5931\u8D25\uFF08\u6D4F\u89C8\u5668\u4E0D\u5141\u8BB8\uFF09")}this.menu=null},async doRecall(e){if(this.menu=null,!(!e||!e.msg_id))try{await Lt("qqbot.chat.recall",{msg_id:e.msg_id}),e.recalled=1,this.toast("\u5DF2\u64A4\u56DE")}catch(t){this.toast(String(t&&t.message||t))}},jump(e){let t=String(e||"");if(!t)return;let i=t.replace(/"/g,'\\"'),n=document.querySelector('.rcq-im [data-msgid="'+i+'"]')||document.querySelector('.rcq-im [data-mid="'+i+'"]');if(!n){this.toast("\u88AB\u5F15\u7528\u7684\u6D88\u606F\u4E0D\u5728\u5F53\u524D\u9875");return}n.scrollIntoView({block:"center",behavior:"smooth"}),n.classList.add("im-flash"),setTimeout(()=>n.classList.remove("im-flash"),1200)},toast(e){this.toastMsg=String(e||""),clearTimeout(this._tt),this._tt=setTimeout(()=>{this.toastMsg=""},1800)},scheduleRead(){clearTimeout(this._rt),this._rt=setTimeout(()=>{Y.msgs.length&&up(Y.sid,Y.msgs[Y.msgs.length-1].id)},1200)},avatarOf(e){return e&&e.avatar?e.avatar:""},initialOf(e){return String(e&&(e.display||e.target_id)||"?").trim().slice(0,1)},pick(e){!e||e.session_id===Y.sid||(e.unread=0,Nr(e.session_id).then(()=>{this.readAt=Mr(e.session_id),this.$nextTick(()=>this.toBottom(!1)),this.scheduleRead()}))},toBottom(e=!0){let t=this.$refs.flow;t&&(t.scrollTo({top:t.scrollHeight,behavior:e?"smooth":"auto"}),Y.atBottom=!0,this.showJump=!1)},async onScroll(){let e=this.$refs.flow;if(!e)return;let t=e.scrollHeight-e.scrollTop-e.clientHeight<40;if(Y.atBottom=t,this.showJump=!t,e.scrollTop<160&&Y.hasMore&&!Y.loadingMore){let i=e.scrollHeight,n=e.scrollTop;await xl(!0),this.$nextTick(()=>{let s=this.$refs.flow;s&&(s.scrollTop=s.scrollHeight-i+n)})}},async reload(){await Ar(),Y.sid&&(await Nr(Y.sid),this.$nextTick(()=>this.toBottom(!1)))}},template:`
+  </div>`};var Wh=[{id:"im",title:"\u6D88\u606F",d:"M4 5.5A2.5 2.5 0 016.5 3h11A2.5 2.5 0 0120 5.5v8a2.5 2.5 0 01-2.5 2.5H9l-4 4V16H6.5A2.5 2.5 0 014 13.5v-8z"},{id:"contacts",title:"\u8054\u7CFB\u4EBA",d:"M12 12a4 4 0 100-8 4 4 0 000 8zm-8 8a8 8 0 0116 0v1H4v-1z"},{id:"star",title:"\u6536\u85CF",d:"M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z"}],wp={components:{ImMessageRow:xp},props:{},data(){return{S:Y,rail:"im",railItems:Wh,showJump:!1,dragging:!1,sideWidth:268,badAva:{},menu:null,readAt:0,toastMsg:"",fwd:null,fwdStack:[],sessMenu:null}},computed:{cur(){return op()},filtered(){let e=(Y.keyword||"").trim().toLowerCase();return e?Y.sessions.filter(t=>(t.display||"").toLowerCase().includes(e)||String(t.target_id||"").includes(e)):Y.sessions},rows(){let e=[],t=0,i="",n=!1;for(let s of Y.msgs){if(!s)continue;let r=String(s.text||""),a=s.role==="system"||!(s.segs||[]).length&&r.indexOf("\u64A4\u56DE")>=0,l=s.created_at-t,o=!t||l>300?mp(s.created_at):"";if(a){let u=(r||"\u6709\u4EBA\u64A4\u56DE\u4E86\u4E00\u6761\u6D88\u606F").replace(/^\[/,"").replace(/\]$/,"");e.push({type:"sys",key:"s"+s.id,text:u}),t=s.created_at,i="";continue}let c=String(s.sender_id||s.role||""),d=!o&&c===i&&l<300,p={type:"msg",key:s.id,m:s,compact:d,showTime:o};!n&&this.readAt&&Number(s.id)>this.readAt&&(p.divider=!0,n=!0),e.push(p),t=s.created_at,i=c}return e},total(){return this.cur&&this.cur.msg_count||Y.msgs.length}},async mounted(){await lp(),await Ar(),Y.sid&&(await Nr(Y.sid),this.readAt=Mr(Y.sid),this.scheduleRead()),this.$nextTick(()=>this.toBottom(!1)),window.addEventListener("keydown",this.onKey),window.addEventListener("click",this.closeMenu),document.documentElement.style.overflow="hidden"},beforeUnmount(){window.removeEventListener("keydown",this.onKey),window.removeEventListener("click",this.closeMenu),document.documentElement.style.overflow=""},methods:{fmtListTime:hp,fmtNum:gp,partsOf:ls,gridCls:Pr,mediaUrl:mn,faceUrl:Rr,bytes:Or,forwardIdOf:os,onKey(e){e.key==="Escape"&&(e.stopPropagation(),this.close())},close(){this.$emit("close")},closeMenu(){this.menu=null,this.sessMenu=null},openSessMenu(e,t){this.sessMenu={x:e.clientX,y:e.clientY,s:t}},async togglePin(e){if(this.sessMenu=null,!!e)try{let t=await Lt("qqbot.chat.session_ui",{session_id:e.session_id,pinned:!e.pinned});e.pinned=t&&typeof t.pinned<"u"?t.pinned:e.pinned?0:1,this.toast(e.pinned?"\u5DF2\u7F6E\u9876":"\u5DF2\u53D6\u6D88\u7F6E\u9876"),await Ar()}catch(t){this.toast(String(t&&t.message||t))}},async toggleMute(e){if(this.sessMenu=null,!!e)try{let t=await Lt("qqbot.chat.session_ui",{session_id:e.session_id,muted:!e.muted});e.muted=t&&typeof t.muted<"u"?t.muted:e.muted?0:1,this.toast(e.muted?"\u5DF2\u514D\u6253\u6270":"\u5DF2\u53D6\u6D88\u514D\u6253\u6270")}catch(t){this.toast(String(t&&t.message||t))}},markReadNow(e){if(this.sessMenu=null,!e)return;let t=Mr(e.session_id);t&&Lt("qqbot.chat.session_ui",{session_id:e.session_id,last_read_id:t}).catch(()=>{}),e.unread=0},async openForward(e){if(e){this.fwd&&this.fwdStack.push(this.fwd),this.fwd={id:e,loading:!0,nodes:[],total:0,error:""};try{let t=await Lt("qqbot.chat.forward",{id:e}),i=t&&t.total||0;this.fwd={id:e,loading:!1,nodes:t&&t.nodes||[],total:i,error:""};for(let n of Y.msgs)if(os(n)===e){n._fwdCount=i;break}}catch(t){this.fwd={id:e,loading:!1,nodes:[],total:0,error:String(t&&t.message||t)}}}},backForward(){this.fwd=this.fwdStack.pop()||null},closeForward(){this.fwd=null,this.fwdStack=[]},fwdParts(e){return ls({segs:e&&e.segs||[]}).parts},fwdImgs(e){return(e&&e.media||[]).filter(t=>t.kind==="image"&&t.local)},fwdOther(e){return(e&&e.media||[]).filter(t=>t.kind!=="image"&&t.local)},openCtx(e,t){this.menu={x:e.clientX,y:e.clientY,m:t}},canRecall(e){return!!(e&&e.msg_id&&e.role==="assistant"&&!e.recalled)},copyMsg(e){let t=String(e&&(e.text||(e.segs||[]).map(i=>(i.data||{}).text||"").join(""))||"");try{navigator.clipboard.writeText(t),this.toast("\u5DF2\u590D\u5236")}catch{this.toast("\u590D\u5236\u5931\u8D25\uFF08\u6D4F\u89C8\u5668\u4E0D\u5141\u8BB8\uFF09")}this.menu=null},async doRecall(e){if(this.menu=null,!(!e||!e.msg_id))try{await Lt("qqbot.chat.recall",{msg_id:e.msg_id}),e.recalled=1,this.toast("\u5DF2\u64A4\u56DE")}catch(t){this.toast(String(t&&t.message||t))}},jump(e){let t=String(e||"");if(!t)return;let i=t.replace(/"/g,'\\"'),n=document.querySelector('.rcq-im [data-msgid="'+i+'"]')||document.querySelector('.rcq-im [data-mid="'+i+'"]');if(!n){this.toast("\u88AB\u5F15\u7528\u7684\u6D88\u606F\u4E0D\u5728\u5F53\u524D\u9875");return}n.scrollIntoView({block:"center",behavior:"smooth"}),n.classList.add("im-flash"),setTimeout(()=>n.classList.remove("im-flash"),1200)},toast(e){this.toastMsg=String(e||""),clearTimeout(this._tt),this._tt=setTimeout(()=>{this.toastMsg=""},1800)},scheduleRead(){clearTimeout(this._rt),this._rt=setTimeout(()=>{Y.msgs.length&&up(Y.sid,Y.msgs[Y.msgs.length-1].id)},1200)},avatarOf(e){return e&&e.avatar?e.avatar:""},initialOf(e){return String(e&&(e.display||e.target_id)||"?").trim().slice(0,1)},pick(e){!e||e.session_id===Y.sid||(e.unread=0,Nr(e.session_id).then(()=>{this.readAt=Mr(e.session_id),this.$nextTick(()=>this.toBottom(!1)),this.scheduleRead()}))},toBottom(e=!0){let t=this.$refs.flow;t&&(t.scrollTo({top:t.scrollHeight,behavior:e?"smooth":"auto"}),Y.atBottom=!0,this.showJump=!1)},async onScroll(){let e=this.$refs.flow;if(!e)return;let t=e.scrollHeight-e.scrollTop-e.clientHeight<40;if(Y.atBottom=t,this.showJump=!t,e.scrollTop<160&&Y.hasMore&&!Y.loadingMore){let i=e.scrollHeight,n=e.scrollTop;await xl(!0),this.$nextTick(()=>{let s=this.$refs.flow;s&&(s.scrollTop=s.scrollHeight-i+n)})}},async reload(){await Ar(),Y.sid&&(await Nr(Y.sid),this.$nextTick(()=>this.toBottom(!1)))}},template:`
   <div class="rcq-im">
     <!-- rail -->
     <div class="im-rail">
@@ -373,6 +375,11 @@
 .im-msg.me .im-quote{background:rgba(255,255,255,.16);color:rgba(255,255,255,.9);
   border-left-color:rgba(255,255,255,.5)}
 .im-recall{font-size:12px;color:var(--im-t3);font-style:italic}
+/* \u64A4\u56DE\u6807\u8BB0\uFF1A\u5185\u5BB9\u7167\u5E38\u663E\u793A\uFF0C\u53EA\u662F\u6DE1\u4E00\u70B9 + \u4E00\u4E2A\u89D2\u6807 */
+.im-msg.recalled .im-bub{opacity:.62}
+.im-msg.recalled .im-grid,.im-msg.recalled .im-video{opacity:.62}
+.im-rec-tag{display:inline-block;margin-left:6px;font-size:10.5px;color:#e8a33d;
+  border:1px solid #e8a33d;border-radius:999px;padding:0 6px;vertical-align:1px}
 .im-meta{font-size:11px;color:var(--im-t3);margin-top:3px;padding:0 2px}
 
 /* \u5A92\u4F53 */

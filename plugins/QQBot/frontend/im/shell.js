@@ -58,7 +58,9 @@ export const IM = {
         const gap = m.created_at - lastTs
         const showTime = (!lastTs || gap > 300) ? fmtDayLabel(m.created_at) : ''
         if (sys) {
-          out.push({ type: 'sys', key: 's' + m.id, text: txt || '一条消息被撤回' })
+          // 墓碑行的文案带方括号不好看，这里去掉
+          const st = (txt || '有人撤回了一条消息').replace(/^\[/, '').replace(/\]$/, '')
+          out.push({ type: 'sys', key: 's' + m.id, text: st })
           lastTs = m.created_at
           lastWho = ''
           continue

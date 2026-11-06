@@ -134,6 +134,11 @@ export const IM_CSS = `
 .im-msg.me .im-quote{background:rgba(255,255,255,.16);color:rgba(255,255,255,.9);
   border-left-color:rgba(255,255,255,.5)}
 .im-recall{font-size:12px;color:var(--im-t3);font-style:italic}
+/* 撤回标记：内容照常显示，只是淡一点 + 一个角标 */
+.im-msg.recalled .im-bub{opacity:.62}
+.im-msg.recalled .im-grid,.im-msg.recalled .im-video{opacity:.62}
+.im-rec-tag{display:inline-block;margin-left:6px;font-size:10.5px;color:#e8a33d;
+  border:1px solid #e8a33d;border-radius:999px;padding:0 6px;vertical-align:1px}
 .im-meta{font-size:11px;color:var(--im-t3);margin-top:3px;padding:0 2px}
 
 /* 媒体 */
