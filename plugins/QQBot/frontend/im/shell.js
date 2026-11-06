@@ -36,6 +36,9 @@ export const IM = {
       fwd: null,           // 合并转发展开抽屉 {id, loading, nodes, total, error}
       fwdStack: [],        // 抽屉历史（转发里套转发时用来返回）
       sessMenu: null,      // 会话右键菜单 {x,y,s}
+      searchOpen: false,   // 聊天区搜索框展开
+      msgKw: '',           // 会话内搜索关键词
+      busy: '',
     }
   },
   computed: {
@@ -111,6 +114,90 @@ export const IM = {
     },
     close() { this.$emit('close') },
     closeMenu() { this.menu = null; this.sessMenu = null },
+    // 左侧搜索：后端在消息内容/发送者里找，本地再按会话名过一道
+    onKwInput() {
+      clearTimeout(this._kwTimer)
+      this._kwTimer = setTimeout(() => { loadSessions(S.keyword) }, 350)
+    },
+    // ---------------- 会话内搜索（原「聊天记录」页的能力，合并过来）
+    toggleSearch() {
+      this.searchOpen = !this.searchOpen
+      if (!this.searchOpen && this.msgKw) this.onSearch('')
+      this.$nextTick(() => {
+        const el = this.$refs.msgSearch
+        if (el && this.searchOpen) el.focus()
+      })
+    },
+    onSearch(kw) {
+      const v = String(kw || '').trim()
+      this.msgKw = v
+      if (v === S.msgKeyword) return
+      openSession(S.sid, v).then(() => {
+        this.$nextTick(() => this.toBottom(false))
+        this.schedulePendingRefresh()
+      })
+    },
+    // ---------------- 会话导出 / 清空（原「聊天记录」页）
+    async exportSession(s) {
+      const sid = (s && s.session_id) || S.sid
+      this.sessMenu = null
+      if (!sid) return
+      this.busy = 'exp'
+      try {
+        const d = await callData('qqbot.chat.export', { session_id: sid })
+        const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = 'chat-' + String(sid).replace(/[^\w-]/g, '_') + '-' + Date.now() + '.json'
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 3000)
+        this.toast('已导出会话记录')
+      } catch (e) {
+        this.toast(String((e && e.message) || e))
+      } finally {
+        this.busy = ''
+      }
+    },
+    async clearSession(s) {
+      const sid = (s && s.session_id) || S.sid
+      const name = s ? (s.display || s.target_id) : '这个会话'
+      this.sessMenu = null
+      if (!sid) return
+      if (!confirm('清空会话「' + name + '」的全部聊天记录？\n\n此操作不可撤销。')) return
+      const withMedia = confirm(
+        '要连图片/视频/语音这些媒体文件一起删掉吗？\n\n确定 = 一起删\n取消 = 只删文字记录（媒体保留）')
+      this.busy = 'clear'
+      try {
+        const r = await callData('qqbot.chat.clear_session',
+          { session_id: sid, with_media: withMedia, confirm: true })
+        this.toast('已清空 ' + ((r && r.messages) || 0) + ' 条消息')
+        await loadSessions()
+        await openSession(S.sid, S.msgKeyword)
+      } catch (e) {
+        this.toast(String((e && e.message) || e))
+      } finally {
+        this.busy = ''
+      }
+    },
+    // 转码中的媒体：定时重载当前会话，直到都转完
+    hasPending() {
+      for (const m of S.msgs) {
+        for (const md of (m.media || [])) {
+          if (md && md.transcode === 'pending') return true
+        }
+      }
+      return false
+    },
+    schedulePendingRefresh() {
+      clearTimeout(this._pendTimer)
+      if (!this.hasPending()) return
+      this._pendTimer = setTimeout(async () => {
+        this._pendTimer = null
+        await loadMessages(false)
+        this.schedulePendingRefresh()
+      }, 6000)
+    },
+
     // ---------------- 会话操作（置顶 / 免打扰 / 已读）
     openSessMenu(e, s) {
       this.sessMenu = { x: e.clientX, y: e.clientY, s }
@@ -239,6 +326,7 @@ export const IM = {
         this.readAt = lastRead(s.session_id)
         this.$nextTick(() => this.toBottom(false))
         this.scheduleRead()
+        this.schedulePendingRefresh()
       })
     },
     toBottom(smooth = true) {
@@ -297,7 +385,7 @@ export const IM = {
       <div class="im-side-h">
         <div class="im-search">
           <svg viewBox="0 0 24 24"><path d="M10 4a6 6 0 014.5 10.1l4.2 4.2-1.4 1.4-4.2-4.2A6 6 0 1110 4zm0 2a4 4 0 100 8 4 4 0 000-8z"/></svg>
-          <input v-model="S.keyword" placeholder="搜索" />
+          <input v-model="S.keyword" placeholder="搜索会话/消息内容" @input="onKwInput" />
         </div>
         <button class="im-ico" title="刷新会话" @click="reload">
           <svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 11-5 5H5a7 7 0 107-7z"/></svg>
@@ -342,6 +430,15 @@ export const IM = {
         <div class="tt">{{ (cur && (cur.display || cur.target_id)) || '选择一个会话' }}</div>
         <div class="sub" v-if="cur">{{ fmtNum(total) }} 条</div>
         <div class="sp"></div>
+        <div class="im-hsearch" v-if="searchOpen">
+          <svg viewBox="0 0 24 24"><path d="M10 4a6 6 0 014.5 10.1l4.2 4.2-1.4 1.4-4.2-4.2A6 6 0 1110 4zm0 2a4 4 0 100 8 4 4 0 000-8z"/></svg>
+          <input ref="msgSearch" :value="msgKw" placeholder="搜索本会话的消息"
+            @input="onSearch($event.target.value)" />
+          <button v-if="msgKw" class="im-hclear" title="清除" @click="onSearch('')">×</button>
+        </div>
+        <button class="im-ico" title="搜索本会话消息" @click="toggleSearch">
+          <svg viewBox="0 0 24 24"><path d="M10 4a6 6 0 014.5 10.1l4.2 4.2-1.4 1.4-4.2-4.2A6 6 0 1110 4zm0 2a4 4 0 100 8 4 4 0 000-8z"/></svg>
+        </button>
         <button class="im-ico" title="刷新" @click="reload">
           <svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 11-5 5H5a7 7 0 107-7z"/></svg>
         </button>
@@ -351,6 +448,10 @@ export const IM = {
       </div>
 
       <div class="im-flow" ref="flow" @scroll="onScroll">
+        <div class="im-srch" v-if="S.msgKeyword">
+          搜索「{{ S.msgKeyword }}」找到 {{ S.msgs.length }} 条
+          <button class="im-hclear" @click="onSearch(''); msgKw = ''">清除</button>
+        </div>
         <div class="im-more" v-if="S.loadingMore">加载更早的消息…</div>
         <div class="im-more" v-else-if="!S.hasMore && S.msgs.length >= 50">已经到最早了</div>
         <div class="im-empty" v-if="!S.msgs.length && !S.loading">
@@ -433,6 +534,8 @@ export const IM = {
       <button @click="togglePin(sessMenu.s)">{{ sessMenu.s.pinned ? '取消置顶' : '置顶该会话' }}</button>
       <button @click="toggleMute(sessMenu.s)">{{ sessMenu.s.muted ? '取消免打扰' : '消息免打扰' }}</button>
       <button @click="markReadNow(sessMenu.s)">标记为已读</button>
+      <button @click="exportSession(sessMenu.s)">导出会话 JSON</button>
+      <button @click="clearSession(sessMenu.s)">清空会话…</button>
     </div>
 
     <div class="im-toast" v-if="toastMsg">{{ toastMsg }}</div>

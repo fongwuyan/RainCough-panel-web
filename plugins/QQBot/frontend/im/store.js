@@ -29,7 +29,8 @@ export const S = reactive({
   loading: false,
   loadingMore: false,
   hasMore: true,
-  keyword: '',
+  keyword: '',        // 会话名过滤（左侧搜索框）
+  msgKeyword: '',     // 会话内消息搜索（聊天区搜索框）
   viewer: '',
   pageSize: 50,
   cap: 600,          // 单会话最多保留条数（DOM 上限，超出裁头）
@@ -43,10 +44,11 @@ export async function loadSelf() {
   } catch (e) { /* 取不到就算了，右侧判定走 role */ }
 }
 
-export async function loadSessions() {
+export async function loadSessions(kw) {
   S.err = ''
   try {
-    const d = await callData('qqbot.chat.sessions', { limit: 200 })
+    // kw 交给后端 = 在会话的**消息内容/发送者**里找（原「聊天记录」页的搜索）
+    const d = await callData('qqbot.chat.sessions', { limit: 200, kw: kw || '' })
     const items = (d && d.items) || []
     // 只保留有消息的会话，按最后消息时间倒序（后端已排好）
     S.sessions = items.filter((x) => x && x.target_id)
@@ -57,9 +59,10 @@ export async function loadSessions() {
   }
 }
 
-export async function openSession(sid) {
+export async function openSession(sid, kw) {
   if (!sid) return
   S.sid = sid
+  S.msgKeyword = String(kw || '')
   S.msgs = []
   S.hasMore = true
   S.atBottom = true
@@ -73,6 +76,7 @@ export async function loadMessages(append) {
   else S.loading = true
   try {
     const params = { session_id: S.sid, limit: S.pageSize }
+    if (S.msgKeyword) params.kw = S.msgKeyword
     if (append && S.msgs.length) params.before_id = S.msgs[0].id
     const d = await callData('qqbot.chat.messages', params)
     const items = (d && d.items) || []

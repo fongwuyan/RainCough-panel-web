@@ -225,6 +225,19 @@ export const IM_CSS = `
   border-radius:10px;background:var(--im-bg);transition:background .12s}
 .im-card.fwd:hover{background:var(--im-hover)}
 
+/* 聊天区搜索框（会话内搜索） */
+.im-hsearch{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;
+  border:1px solid var(--im-line);border-radius:14px;background:var(--im-bg);min-width:200px}
+.im-hsearch svg{width:14px;height:14px;fill:var(--im-t3);flex:none}
+.im-hsearch input{border:none;outline:none;background:none;font-family:inherit;
+  font-size:12.5px;color:var(--im-t1);width:100%;min-width:0}
+.im-hclear{border:none;background:none;cursor:pointer;color:var(--im-t3);
+  font-size:15px;line-height:1;padding:0 2px;font-family:inherit}
+.im-hclear:hover{color:var(--im-t1)}
+.im-srch{position:sticky;top:0;z-index:3;background:var(--im-hover);color:var(--im-t2);
+  font-size:12px;padding:6px 14px;display:flex;align-items:center;gap:8px;
+  border-bottom:1px solid var(--im-line)}
+
 /* 大图查看 */
 .im-viewer{position:fixed;inset:0;z-index:950;background:rgba(0,0,0,.82);display:flex;
   align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
