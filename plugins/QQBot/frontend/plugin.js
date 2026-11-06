@@ -186,6 +186,9 @@ const CSS = `
 .rcq-row .t{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .rcq-row .d{font-size:11.5px;color:var(--m);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
 .rcq-row .acts{display:flex;gap:6px;flex:none;align-items:center}
+/* 会话列表行内的启用开关：垂直居中、不撑高行高 */
+.rcq-row .acts .switch{margin:0;display:inline-flex;align-items:center}
+.rcq-row .acts .switch input{width:30px;height:17px}
 .rcq-mono{font-family:var(--font-mono);font-size:11.5px}
 
 .rcq-empty{padding:38px 12px;text-align:center;color:var(--f);font-size:12.5px}
@@ -1491,7 +1494,7 @@ const Cards = {
         schema: 2, id: '', version: 1, status: 'draft',
         name: '新角色', alias: [], tagline: '', avatar: '', cover: '', portrait: '',
         prompt: '', greetings: [], examples: [], lorebook: [], taboos: [],
-        style: { temperature: 0.8, max_tokens: 512, color: '' },
+        style: { temperature: 0.8, max_tokens: 512, max_chars: 0, color: '' },
         model: { provider_id: '', model: '' },
         context: { keep_rounds: 20 },
         __new: true,
@@ -1788,6 +1791,10 @@ const Cards = {
           <input class="input" type="number" step="64" min="64"
             v-model.number="cur.style.max_tokens" @input="dirty = true" />
         </label>
+        <label class="rcq-fi"><span>最多字数</span>
+          <input class="input" type="number" step="10" min="0" placeholder="不限"
+            v-model.number="cur.style.max_chars" @input="dirty = true" />
+        </label>
         <label class="rcq-fi"><span>上下文轮数</span>
           <input class="input" type="number" min="1"
             v-model.number="cur.context.keep_rounds" @input="dirty = true" />
@@ -1831,9 +1838,14 @@ const Sessions = {
       return this.list.filter((s) => {
         if (this.filter === 'group' && s.kind !== 'group') return false
         if (this.filter === 'private' && s.kind === 'group') return false
+        if (this.filter === 'off' && s.enabled !== 0) return false
+        if (this.filter === 'on' && s.enabled === 0) return false
         if (!k) return true
         return ((s.display || '') + ' ' + (s.id || '') + ' ' + (s.target_id || '')).toLowerCase().indexOf(k) >= 0
       })
+    },
+    enabledCount() {
+      return this.list.filter((s) => s.enabled !== 0).length
     },
     usedPct() {
       const c = this.ctx
@@ -1869,6 +1881,38 @@ const Sessions = {
       try {
         this.detail = await callData('rcbot.session.get', { id: s.id, limit: this.limit })
         this.ctx = await callData('rcbot.context', { id: s.id })
+      } catch (e) { toast(errText(e), 'err') } finally { this.busy = '' }
+    },
+    // 拉取账号的全部群聊与好友，登记成会话目录
+    // 新登记的一律默认「不启用」—— 机器人不会在没说过话的地方主动开口。
+    async syncCatalog() {
+      if (!confirm('从 QQ 拉取全部群聊与好友？\n\n拉到的会话默认都是「不启用」，需要你自己打开开关。')) return
+      this.busy = 'sync'
+      try {
+        const r = await callData('rcbot.session.catalog', {})
+        toast('已拉取：群 ' + (r.groups || 0) + ' 个、好友 ' + (r.friends || 0) +
+              ' 个，新增会话 ' + (r.new || 0) + ' 个', 'ok')
+        await this.load()
+      } catch (e) { toast(errText(e), 'err') } finally { this.busy = '' }
+    },
+    async toggle(s, on) {
+      const old = s.enabled
+      s.enabled = on ? 1 : 0
+      try {
+        await call('rcbot.session.save', { id: s.id, enabled: on ? 1 : 0 })
+      } catch (e) {
+        s.enabled = old
+        toast(errText(e), 'err')
+      }
+    },
+    async bulk(on) {
+      if (on && !confirm('启用全部会话？\n\n机器人会在这些群里自动回复（群里仍需 @ 或唤醒前缀）。')) return
+      if (!on && !confirm('停用全部会话？机器人将不再自动回复。')) return
+      this.busy = 'bulk'
+      try {
+        const r = await callData('rcbot.session.bulk', { enabled: on ? 1 : 0 })
+        toast((on ? '已启用 ' : '已停用 ') + (r.changed || 0) + ' 个会话', 'ok')
+        await this.load()
       } catch (e) { toast(errText(e), 'err') } finally { this.busy = '' }
     },
     async reloadDetail() {
@@ -1932,14 +1976,24 @@ const Sessions = {
           <b>会话</b>
           <span class="rcq-hint">{{ stats.sessions || 0 }} 个 · 消息 {{ fmtNum(stats.messages || 0) }}</span>
           <span class="sp"></span>
-          <button class="btn btn-sm" @click="load">刷新</button>
+          <button class="btn btn-sm" :disabled="!!busy" @click="syncCatalog">
+            {{ busy === 'sync' ? '拉取中…' : '拉取群聊/私聊' }}</button>
+          <button class="btn btn-sm" :disabled="!!busy" @click="load">刷新</button>
         </div>
-        <div class="rcq-flex" style="padding:0 16px 10px">
+        <div class="rcq-flex" style="padding:0 16px 8px">
           <button class="btn btn-sm" :class="filter === 'all' ? 'btn-primary' : ''" @click="filter = 'all'">全部</button>
           <button class="btn btn-sm" :class="filter === 'group' ? 'btn-primary' : ''" @click="filter = 'group'">群聊</button>
           <button class="btn btn-sm" :class="filter === 'private' ? 'btn-primary' : ''" @click="filter = 'private'">私聊</button>
+          <button class="btn btn-sm" :class="filter === 'on' ? 'btn-primary' : ''" @click="filter = 'on'">已启用</button>
+          <button class="btn btn-sm" :class="filter === 'off' ? 'btn-primary' : ''" @click="filter = 'off'">已停用</button>
           <input class="input" style="flex:1;min-width:90px;padding:4px 10px;font-size:12px"
             v-model="kw" placeholder="搜会话" />
+        </div>
+        <div class="rcq-flex" style="padding:0 16px 8px;font-size:11.5px;color:var(--m)">
+          <span>已启用 <b>{{ enabledCount }}</b> / {{ list.length }}</span>
+          <span class="sp"></span>
+          <button class="btn btn-sm" :disabled="!!busy" @click="bulk(true)">全部启用</button>
+          <button class="btn btn-sm" :disabled="!!busy" @click="bulk(false)">全部停用</button>
         </div>
         <div class="rcq-list">
           <div class="rcq-row click" v-for="s in shown" :key="s.id"
@@ -1948,6 +2002,7 @@ const Sessions = {
               <div class="t">
                 <span class="tag-chip tag-chip-sm">{{ s.kind === 'group' ? '群' : '私' }}</span>
                 {{ s.display || s.target_id || s.id }}
+                <span class="tag-chip tag-chip-sm" v-if="!s.talked">未聊过</span>
                 <span class="tag-chip tag-chip-sm" v-if="s.enabled === 0">已停用</span>
               </div>
               <div class="d">
@@ -1955,6 +2010,13 @@ const Sessions = {
                 <template v-if="s.persona_id"> · {{ personaName(s.persona_id) }}</template>
                 · {{ fmtTime(s.last_at || s.updated_at) }}
               </div>
+            </div>
+            <div class="acts" @click.stop>
+              <label class="switch" :title="s.enabled === 0 ? '启用这个会话' : '停用这个会话'">
+                <input type="checkbox" :checked="s.enabled !== 0" :disabled="!!busy"
+                  @change="toggle(s, $event.target.checked)" />
+                <span class="slider"></span>
+              </label>
             </div>
           </div>
           <div v-if="!shown.length" class="rcq-empty"><b>▤</b>没有会话</div>
