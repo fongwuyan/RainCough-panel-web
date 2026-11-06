@@ -6,7 +6,7 @@ import {
   S, loadSessions, loadSelf, openSession, loadMessages, current,
   sendText, retrySend, lastRead, markRead, callData,
 } from './store.js'
-import { fmtListTime, fmtDayLabel, fmtNum } from './util.js'
+import { fmtListTime, fmtDayLabel, fmtNum, faceUrl } from './util.js'
 import { ImMessageRow } from './message.js'
 
 const RAIL = [
@@ -27,12 +27,15 @@ export const IM = {
       dragging: false,
       sideWidth: 268,
       badAva: {},
-      draft: '',
       sending: false,
       menu: null,          // 右键菜单 {x,y,m}
       quote: null,         // 正在引用的消息
       readAt: 0,           // 上次看到的消息 id（本地，用于"以下为新消息"）
       toastMsg: '',
+      showFace: false,
+      showAt: false,
+      faceIds: Array.from({ length: 200 }, (_, i) => i),
+      canSend: false,
     }
   },
   computed: {
@@ -75,6 +78,18 @@ export const IM = {
       return out
     },
     total() { return (this.cur && this.cur.msg_count) || S.msgs.length },
+    // @ 候选：从本会话已加载消息里取发言者（去重、排除自己）
+    people() {
+      const seen = new Map()
+      for (const m of S.msgs) {
+        const id = String(m.sender_id || '')
+        if (!id || id === S.uin) continue
+        if (!seen.has(id)) {
+          seen.set(id, { id, name: m.sender_name || id, avatar: m.sender_avatar || '' })
+        }
+      }
+      return [...seen.values()].slice(0, 30)
+    },
   },
   async mounted() {
     await loadSelf()
@@ -82,6 +97,7 @@ export const IM = {
     if (S.sid) {
       await openSession(S.sid)
       this.readAt = lastRead(S.sid)
+      this.$nextTick(() => this.loadDraft(S.sid))
       this.scheduleRead()
     }
     // 首次进入滚到底
@@ -101,25 +117,139 @@ export const IM = {
       if (e.key === 'Escape') { e.stopPropagation(); this.close() }
     },
     close() { this.$emit('close') },
+    // ---------------- 富文本输入区（表情 / @ / 混排）
+    //
+    // 用 contenteditable 而不是 textarea：QQ 的表情和 @ 是"行内对象"，
+    // 纯文本表达不了。发送时再把 DOM 走一遍还原成 OneBot 段数组。
+    faceUrl,
+    toggleFace() { this.showFace = !this.showFace; if (this.showFace) this.showAt = false },
+    toggleAt() { this.showAt = !this.showAt; if (this.showAt) this.showFace = false },
+
+    hasContent() {
+      const el = this.$refs.editor
+      if (!el) return false
+      const txt = String(el.innerText || '').replace(/[\u200b\s]/g, '')
+      return !!txt || !!el.querySelector('img[data-face]')
+    },
+    onInput() {
+      this.canSend = this.hasContent()
+      clearTimeout(this._dt)
+      this._dt = setTimeout(() => this.saveDraft(), 300)
+    },
+    onPaste(e) {
+      // 只接受纯文本：直接插入 HTML 会带一堆样式，甚至脚本
+      e.preventDefault()
+      const t = (e.clipboardData || window.clipboardData).getData('text') || ''
+      document.execCommand('insertText', false, t)
+    },
+    insertNode(node) {
+      const el = this.$refs.editor
+      if (!el) return
+      el.focus()
+      const sel = window.getSelection()
+      if (sel && sel.rangeCount && el.contains(sel.anchorNode)) {
+        const r = sel.getRangeAt(0)
+        r.deleteContents()
+        r.insertNode(node)
+        r.setStartAfter(node)
+        r.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(r)
+      } else {
+        el.appendChild(node)
+      }
+      this.onInput()
+    },
+    addFace(id) {
+      const img = document.createElement('img')
+      img.className = 'face'
+      img.setAttribute('data-face', String(id))
+      img.src = faceUrl(id)
+      img.alt = '[表情]'
+      this.insertNode(img)
+    },
+    addAt(p) {
+      const sp = document.createElement('span')
+      sp.className = 'at-chip'
+      sp.setAttribute('data-at', String(p.id))
+      sp.setAttribute('data-name', p.name || '')
+      sp.textContent = '@' + (p.name || p.id)
+      const space = document.createTextNode('\u00a0')
+      this.insertNode(sp)
+      this.insertNode(space)
+      this.showAt = false
+    },
+    serialize() {
+      const el = this.$refs.editor
+      const out = []
+      let buf = ''
+      const flush = () => { if (buf) { out.push({ type: 'text', data: { text: buf } }); buf = '' } }
+      const walk = (node) => {
+        for (const n of node.childNodes) {
+          if (n.nodeType === 3) { buf += n.textContent; continue }
+          if (n.nodeType !== 1) continue
+          const d = n.dataset || {}
+          if (d.face) { flush(); out.push({ type: 'face', data: { id: String(d.face) } }) }
+          else if (d.at) { flush(); out.push({ type: 'at', data: { qq: String(d.at), name: d.name || '' } }) }
+          else if (n.tagName === 'BR') buf += '\n'
+          else if (n.tagName === 'DIV' || n.tagName === 'P') { walk(n); buf += '\n' }
+          else walk(n)
+        }
+      }
+      if (el) walk(el)
+      flush()
+      // 去掉末尾多余换行
+      if (out.length && out[out.length - 1].type === 'text') {
+        out[out.length - 1].data.text = out[out.length - 1].data.text.replace(/\n+$/, '')
+        if (!out[out.length - 1].data.text) out.pop()
+      }
+      return out
+    },
+    clearEditor() {
+      const el = this.$refs.editor
+      if (el) el.innerHTML = ''
+      this.canSend = false
+      this.saveDraft()
+    },
+    saveDraft() {
+      const el = this.$refs.editor
+      const sid = S.sid
+      if (!el || !sid) return
+      try {
+        const html = el.innerHTML
+        if (html && html !== '<br>') localStorage.setItem('rcq.im.draft.' + sid, html)
+        else localStorage.removeItem('rcq.im.draft.' + sid)
+      } catch (e) {}
+    },
+    loadDraft(sid) {
+      const el = this.$refs.editor
+      if (!el) return
+      let html = ''
+      try { html = localStorage.getItem('rcq.im.draft.' + sid) || '' } catch (e) {}
+      el.innerHTML = html
+      this.canSend = this.hasContent()
+    },
+
     async onSend() {
-      const t = this.draft.trim()
-      // ★ 这里必须是 this.cur：cur 是 computed，不是模块作用域变量。
-      //   漏了 this 会在运行时抛 ReferenceError（模板里能直接写 cur，方法里不行）。
-      if (!t || !this.cur || this.sending) return
-      this.sending = true
-      this.draft = ''
+      const segs = this.serialize()
+      if (!segs.length || !this.cur || this.sending) return
+      const text = segs.filter((x) => x.type === 'text')
+        .map((x) => x.data.text).join('').trim()
       const q = this.quote
       this.quote = null
+      this.sending = true
+      this.clearEditor()
       try {
-        await sendText(t, q && q.msg_id, q)
+        await sendText(text, q && q.msg_id, q, segs)
       } catch (e) {
-        // 失败项已经在列表里标红，这里只负责把视口拉到底让人看见
+        // 失败项已经在列表里标红
       } finally {
         this.sending = false
         this.$nextTick(() => this.toBottom(true))
       }
     },
     onKeydown(e) {
+      if (e.key === 'Escape') { this.showFace = false; this.showAt = false; return }
       // QQ 桌面端默认：Enter 发送、Shift+Enter 换行
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault()
@@ -190,10 +320,16 @@ export const IM = {
     initialOf(s) { return String((s && (s.display || s.target_id)) || '?').trim().slice(0, 1) },
     pick(s) {
       if (!s || s.session_id === S.sid) return
+      this.saveDraft()
       this.quote = null
+      this.showFace = false
+      this.showAt = false
       openSession(s.session_id).then(() => {
         this.readAt = lastRead(s.session_id)
-        this.$nextTick(() => this.toBottom(false))
+        this.$nextTick(() => {
+          this.toBottom(false)
+          this.loadDraft(s.session_id)
+        })
         this.scheduleRead()
       })
     },
@@ -324,10 +460,13 @@ export const IM = {
       <!-- 输入区：P1 只读，发送能力下一阶段接入 -->
       <div class="im-composer">
         <div class="im-tools">
-          <button class="im-tool" title="表情（待接入）" disabled>
+          <button class="im-tool" :class="{ on: showFace }" title="表情"
+            @click="toggleFace">
             <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-3.5 7a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm7 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM12 18c-2.2 0-4.1-1.3-5-3h10c-.9 1.7-2.8 3-5 3z"/></svg>
           </button>
-          <button class="im-tool" title="图片（待接入）" disabled>
+          <button class="im-tool" :class="{ on: showAt }" title="@ 某人"
+            @click="toggleAt" :disabled="!cur">@</button>
+          <button class="im-tool" title="图片（待接入上传接口）" disabled>
             <svg viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm1 2v9l4-4 3 3 3-4 4 5V7H5zm3 1.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/></svg>
           </button>
         </div>
@@ -335,13 +474,32 @@ export const IM = {
           <span class="qq">引用 {{ quote.sender || '消息' }}：{{ quote.text }}</span>
           <button class="qx" title="取消引用" @click="quote = null">×</button>
         </div>
-        <textarea class="im-editor" rows="2" v-model="draft" :disabled="!cur"
-          :placeholder="cur ? '输入消息，Enter 发送，Shift+Enter 换行' : '先在左边选一个会话'"
-          @keydown="onKeydown"></textarea>
+        <div class="im-editor" ref="editor" contenteditable="true"
+          :data-ph="cur ? '输入消息，Enter 发送，Shift+Enter 换行' : '先在左边选一个会话'"
+          @input="onInput" @keydown="onKeydown" @paste="onPaste"></div>
         <div class="im-send">
           <span class="hint">{{ cur ? 'Enter 发送 · Shift+Enter 换行' : '' }}</span>
-          <button class="im-btn-send" :disabled="!draft.trim() || !cur || sending"
+          <button class="im-btn-send" :disabled="!canSend || !cur || sending"
             @click="onSend">{{ sending ? '发送中…' : '发送' }}</button>
+        </div>
+
+        <!-- 表情面板 -->
+        <div class="im-facepanel" v-if="showFace" @click.stop>
+          <div class="im-facegrid">
+            <img v-for="id in faceIds" :key="id" :src="faceUrl(id)" loading="lazy"
+              :alt="'表情' + id" @click="addFace(id)" />
+          </div>
+        </div>
+
+        <!-- @ 选择器 -->
+        <div class="im-atpanel" v-if="showAt" @click.stop>
+          <div class="im-atrow" v-for="p in people" :key="p.id" @click="addAt(p)">
+            <img v-if="p.avatar" :src="p.avatar" alt="" />
+            <div v-else class="ava-t">{{ (p.name || '?').slice(0, 1) }}</div>
+            <span class="nm">{{ p.name || p.id }}</span>
+            <span class="qq">{{ p.id }}</span>
+          </div>
+          <div class="im-empty" v-if="!people.length">本会话没有可 @ 的人</div>
         </div>
       </div>
     </div>

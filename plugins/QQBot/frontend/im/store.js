@@ -111,16 +111,17 @@ export function isMe(m) {
 
 let tmpSeq = 0
 
-export async function sendText(text, replyId = '', quoteMeta = null) {
+export async function sendText(text, replyId = '', quoteMeta = null, segs = null) {
   const t = String(text || '')
-  if (!S.sid || !t.trim()) return
+  const use = (segs && segs.length) ? segs : (t.trim() ? [{ type: 'text', data: { text: t } }] : [])
+  if (!S.sid || !use.length) return
   const tmp = {
     id: 'tmp-' + (++tmpSeq) + '-' + Date.now(),
     created_at: Math.floor(Date.now() / 1000),
     sender_id: S.uin,
     sender_name: '',
     role: 'assistant',
-    segs: [{ type: 'text', data: { text: t } }],
+    segs: use,
     text: t,
     media: [],
     recalled: 0,
@@ -130,6 +131,7 @@ export async function sendText(text, replyId = '', quoteMeta = null) {
   S.msgs.push(tmp)
   try {
     const params = { session_id: S.sid, text: t }
+    if (segs && segs.length) params.segs = segs
     if (replyId) params.reply_id = String(replyId)
     const d = await callData('qqbot.chat.send', params)
     // 发送时带了引用：把引用摘要挂到返回记录上，本地立刻能显示（刷新后由后端解析）

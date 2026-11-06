@@ -139,12 +139,10 @@ export function partsOf(m) {
     }
   }
 
-  // 纯媒体消息：segs 里没有文本，用占位符保证气泡不空
+  // 纯媒体消息：媒体本身会渲染成图片/视频/语音，气泡里不该再塞 "[图片]" 文字
+  // （QQ 也不会在图片上方多一行占位）。只有"媒体丢了"时才需要占位提示。
   const media = Array.isArray(m && m.media) ? m.media : []
-  if (!parts.length && media.length) {
-    const k = media[0].kind
-    parts.push({ t: 'text', v: { image: '[图片]', video: '[视频]', record: '[语音]', file: '[文件]', face: '[表情]' }[k] || '[消息]' })
-  }
+  if (!parts.length && !media.length && m && m.text) parts.push({ t: 'text', v: m.text })
   if (!parts.length && !media.length && m && m.text) parts.push({ t: 'text', v: m.text })
   // 墓碑
   if (m && m.role === 'system') system = true

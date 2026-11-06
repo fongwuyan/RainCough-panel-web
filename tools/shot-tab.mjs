@@ -97,6 +97,13 @@ if (clickText) {
   })()`)
   console.log('按文字点击', clickText, ok)
 }
+// 截图前可再跑一段 JS（--after "..."）：方便打开浮层/按钮态
+const afterJs = argOf('--after', '')
+if (afterJs) {
+  const r5 = await ev(afterJs)
+  console.log('after:', JSON.stringify(r5).slice(0, 120))
+  await sleep(1200)
+}
 await sleep(argOf('--after-wait', '4000') * 1)
 
 const info = await ev(`(() => {
