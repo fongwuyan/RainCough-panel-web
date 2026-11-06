@@ -351,32 +351,66 @@ const CSS = `
 }
 
 /* ---- 角色卡片 ---- */
-.cd-row{align-items:center}
-.cd-thumb{position:relative;width:46px;height:46px;flex:none}
-.cd-thumb .cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-  border-radius:8px;opacity:.5}
-.cd-thumb .ava{position:relative;width:34px;height:34px;border-radius:8px;object-fit:cover;
-  border:2px solid var(--sf);margin:6px;display:block}
-.cd-thumb .ava.ph{display:flex;align-items:center;justify-content:center;font-size:15px;
-  font-weight:600;color:var(--m);background:var(--sf3)}
-.cd-tag{display:inline-block;margin-left:6px;font-size:10px;padding:0 6px;border-radius:999px;
-  border:1px solid var(--bd2);color:var(--m);vertical-align:1px}
-.cd-tag.draft{border-color:var(--warn);color:var(--warn)}
-.cd-preview{position:relative;border:1px solid var(--bd);border-radius:10px;overflow:hidden;
-  margin:10px 0;min-height:86px;display:flex;align-items:flex-end;background:var(--sf2)}
-.cd-preview .cp-bg{position:absolute;inset:0;background-size:cover;background-position:center;
-  opacity:.5}
-.cd-preview .cp-body{position:relative;display:flex;align-items:center;gap:10px;padding:10px 12px;
-  width:100%}
-.cd-preview .cp-ava{width:40px;height:40px;border-radius:8px;object-fit:cover;background:var(--sf3)}
-.cd-preview .cp-ava.ph{display:flex;align-items:center;justify-content:center;font-size:16px;
-  color:var(--m)}
-.cd-preview .cp-name{font-size:14px;font-weight:600}
-.cd-preview .cp-tag{font-size:12px;color:var(--m);margin-top:2px}
+/* 列表：卡片墙 */
+.cd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;padding:12px}
+.cd-card{position:relative;border:1px solid var(--bd);border-radius:12px;overflow:hidden;
+  background:var(--sf);cursor:pointer;transition:transform .12s ease,box-shadow .12s ease}
+.cd-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.cd-card.on{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac)}
+.cdc-cover{position:relative;aspect-ratio:16/10;background:linear-gradient(135deg,var(--sf3),var(--sf2));
+  background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center}
+.cdc-fallback{font-size:30px;font-weight:600;color:rgba(255,255,255,.92);
+  text-shadow:0 2px 8px rgba(0,0,0,.28)}
+.cdc-ava{position:absolute;left:10px;bottom:-14px;width:38px;height:38px;border-radius:10px;
+  object-fit:cover;border:2px solid var(--sf);background:var(--sf3)}
+.cdc-body{padding:18px 10px 10px}
+.cdc-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cdc-tag{font-size:11px;color:var(--m);margin-top:2px;line-height:1.35;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.7em}
+.cdc-badges{margin-top:6px;display:flex;gap:4px;flex-wrap:wrap}
+.cd-tag.v{color:var(--f)}
+
+/* 详情：一张完整的大卡片 */
+.cd-hero{position:relative;border:1px solid var(--bd);border-radius:14px;overflow:hidden;
+  background:var(--sf);margin:10px 0 14px}
+.cdh-cover{position:absolute;left:0;right:0;top:0;height:132px;background-size:cover;
+  background-position:center 28%;opacity:.85}
+.cdh-cover::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(0,0,0,0) 40%,rgba(0,0,0,.30) 100%)}
+.cdh-inner{position:relative;display:flex;align-items:center;gap:13px;padding:18px 18px 14px}
+.cd-hero.grad .cdh-name{color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.35)}
+.cd-hero.grad .cdh-alias{color:rgba(255,255,255,.82)}
+.cd-hero.grad .cdh-tag{color:rgba(255,255,255,.92)}
+.cd-hero.grad .cdh-ava{background:rgba(255,255,255,.22);color:#fff;
+  border:1px solid rgba(255,255,255,.45)}
+.cd-hero.grad .cd-tag{color:#fff;border-color:rgba(255,255,255,.55)}
+.cd-hero.grad .cdh-inner::before{content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(0,0,0,.30),rgba(0,0,0,.05));pointer-events:none}
+.cdh-ava{width:58px;height:58px;border-radius:15px;overflow:hidden;background:var(--sf3);
+  display:flex;align-items:center;justify-content:center;font-size:23px;font-weight:600;color:var(--f);
+  box-shadow:0 4px 14px rgba(0,0,0,.20);flex:none}
+.cdh-ava img{width:100%;height:100%;object-fit:cover;display:block}
+.cdh-title{flex:1;min-width:0}
+.cdh-name{font-size:17px;font-weight:700;letter-spacing:.01em}
+.cdh-alias{font-size:11.5px;color:var(--m);margin-top:2px}
+.cdh-tag{font-size:12.5px;color:var(--m);margin-top:4px}
+.cdh-badges{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+.cdh-sections{position:relative;background:var(--sf);border-top:1px solid var(--bd);
+  padding:12px 18px 16px;
+  display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.cdh-sec{font-size:12.5px;line-height:1.6;min-width:0}
+.cdh-sec>b{display:block;font-size:10.5px;color:var(--f);margin-bottom:5px;letter-spacing:.06em}
+.cdh-line{margin-bottom:3px}
+.cdh-ex{margin-bottom:7px}
+.cdh-ex .u{font-size:11.5px;color:var(--m)}
+.cdh-ex .a{margin-top:1px}
+.cdh-lore{font-size:11.5px;color:var(--m);margin-bottom:6px;line-height:1.5}
+.cdh-lore .k{display:inline-block;margin-right:5px;color:var(--ac)}
+
 .cd-tabs{display:flex;gap:4px;margin:10px 0 0;border-bottom:1px solid var(--bd)}
 .cd-tabs button{border:none;background:none;padding:7px 12px;font-size:12.5px;color:var(--m);
   cursor:pointer;border-bottom:2px solid transparent;font-family:inherit}
-.cd-tabs button.on{color:var(--t);border-bottom-color:var(--ac)}
+.cd-tabs button.on{border-bottom-color:var(--ac);font-weight:600}
 .cd-blk{border:1px solid var(--bd);border-radius:8px;padding:9px 11px;margin-top:10px}
 .cd-blk-h{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12.5px}
 .cd-blk-h .sp{flex:1}
@@ -387,7 +421,7 @@ const CSS = `
 .cd-row2 .input{flex:1;min-width:0}
 .cd-x{border:none;background:none;color:var(--m);font-size:15px;line-height:1;cursor:pointer;
   padding:2px 5px;border-radius:4px;font-family:inherit}
-.cd-x:hover{background:var(--sf3);color:var(--t)}
+.cd-x:hover{background:var(--sf3)}
 .rcq-ta.tall{min-height:140px}
 `
 
@@ -1415,6 +1449,17 @@ const Cards = {
   methods: {
     fmtNum,
     cloneDeep(o) { return JSON.parse(JSON.stringify(o || {})) },
+    // 没有封面图时，按名字生成一个稳定的渐变，卡片不至于灰扑扑的
+    grad(name) {
+      const t = String(name || '')
+      let h = 0
+      for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) % 360
+      return 'linear-gradient(135deg, hsl(' + h + ' 58% 56%), hsl(' + ((h + 46) % 360) + ' 52% 42%))'
+    },
+    coverStyle(c) {
+      const cover = c && c.cover
+      return cover ? { backgroundImage: 'url(' + cover + ')' } : { backgroundImage: this.grad((c || {}).name) }
+    },
     async load() {
       this.busy = 'load'
       try {
@@ -1548,24 +1593,25 @@ const Cards = {
         <button class="btn btn-sm" @click="importJson">导入</button>
         <button class="btn btn-sm btn-primary" @click="add">新建</button>
       </div>
-      <div class="rcq-list">
-        <div class="rcq-row click cd-row" v-for="c in list" :key="c.id"
+      <div class="rcq-list cd-grid">
+        <div class="cd-card" v-for="c in list" :key="c.id"
           :class="{ on: cur && cur.id === c.id }" @click="pick(c)">
-          <div class="cd-thumb">
-            <img v-if="c.cover" :src="c.cover" class="cover" alt="" />
-            <img v-if="c.avatar" :src="c.avatar" class="ava" alt="" />
-            <span v-else class="ava ph">{{ (c.name || '?').slice(0, 1) }}</span>
+          <div class="cdc-cover" :style="coverStyle(c)">
+            <span class="cdc-fallback" v-if="!c.cover">{{ (c.name || '?').slice(0, 1) }}</span>
           </div>
-          <div class="main">
-            <div class="t">
-              {{ c.name || '未命名' }}
+          <img v-if="c.avatar" class="cdc-ava" :src="c.avatar" alt="" />
+          <div class="cdc-body">
+            <div class="cdc-name">{{ c.name || '未命名' }}</div>
+            <div class="cdc-tag">{{ c.tagline || (c.prompt || '').slice(0, 40) }}</div>
+            <div class="cdc-badges">
               <span class="cd-tag" v-if="c.id === def">默认</span>
               <span class="cd-tag draft" v-if="c.status !== 'published'">草稿</span>
+              <span class="cd-tag v">v{{ c.version || 1 }}</span>
             </div>
-            <div class="d">{{ c.tagline || ('v' + (c.version || 1) + ' · ' + (c.prompt || '').slice(0, 30)) }}</div>
           </div>
         </div>
-        <div v-if="!list.length" class="rcq-empty"><b>☺</b>还没有角色卡片，点「新建」加一个</div>
+        <div v-if="!list.length" class="rcq-empty" style="grid-column:1/-1">
+          <b>☺</b>还没有角色卡片，点「新建」加一个</div>
       </div>
     </div>
 
@@ -1581,15 +1627,42 @@ const Cards = {
         </button>
       </div>
 
-      <!-- 预览 -->
-      <div class="cd-preview">
-        <div class="cp-bg" :style="cur.cover ? { backgroundImage: 'url(' + cur.cover + ')' } : {}"></div>
-        <div class="cp-body">
-          <img v-if="cur.avatar" :src="cur.avatar" class="cp-ava" alt="" />
-          <span v-else class="cp-ava ph">{{ (cur.name || '?').slice(0, 1) }}</span>
-          <div class="cp-info">
-            <div class="cp-name">{{ cur.name || '未命名' }}</div>
-            <div class="cp-tag">{{ cur.tagline || '（还没有简介）' }}</div>
+      <!-- 卡片本体 -->
+      <div class="cd-hero" :class="{ grad: !cur.cover }">
+        <div class="cdh-cover" :style="coverStyle(cur)"></div>
+        <div class="cdh-inner">
+          <div class="cdh-ava">
+            <img v-if="cur.avatar" :src="cur.avatar" alt="" />
+            <span v-else>{{ (cur.name || '?').slice(0, 1) }}</span>
+          </div>
+          <div class="cdh-title">
+            <div class="cdh-name">{{ cur.name || '未命名' }}</div>
+            <div class="cdh-alias" v-if="cur.alias && cur.alias.length">{{ cur.alias.join(' / ') }}</div>
+            <div class="cdh-tag">{{ cur.tagline || '（还没有简介）' }}</div>
+            <div class="cdh-badges">
+              <span class="cd-tag" v-if="cur.id === def">默认角色</span>
+              <span class="cd-tag draft" v-if="cur.status !== 'published'">草稿</span>
+              <span class="cd-tag v">v{{ cur.version || 1 }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="cdh-sections" v-if="(cur.greetings || []).length || (cur.examples || []).length || (cur.lorebook || []).length">
+          <div class="cdh-sec" v-if="(cur.greetings || []).length">
+            <b>开场白</b>
+            <div class="cdh-line" v-for="(g, i) in cur.greetings" :key="'g' + i">「{{ g }}」</div>
+          </div>
+          <div class="cdh-sec" v-if="(cur.examples || []).length">
+            <b>示例对话</b>
+            <div class="cdh-ex" v-for="(ex, i) in cur.examples" :key="'e' + i">
+              <div class="u">› {{ ex.user }}</div>
+              <div class="a">{{ ex.assistant }}</div>
+            </div>
+          </div>
+          <div class="cdh-sec" v-if="(cur.lorebook || []).length">
+            <b>世界书</b>
+            <div class="cdh-lore" v-for="(l, i) in cur.lorebook" :key="'l' + i">
+              <span class="k">{{ (l.keys || []).join('、') }}</span>{{ l.content }}
+            </div>
           </div>
         </div>
       </div>
