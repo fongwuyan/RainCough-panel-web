@@ -4,7 +4,28 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
-## Unreleased — 插件环境准备（P1/P2/P3）+ 内置功能审计 + 市场免口令 + 登录方式可切换
+## v1.0.0 — 2026-11-07（正式版）
+
+**首个正式版。** 此前对外只有一个公开 Release（`v1.0.0-beta`，2026-10-18）；
+`v1.0.0` 这个 tag 虽在仓库里，却**从未建过 Release** —— 本次补上，并把
+beta.2 起累积的改动一并收进正式版。
+
+### 悬浮球与侧栏收起
+
+- **侧栏可收起**：`Sidebar.vue` 顶部加 `≡` 按钮；`App.vue` 按 `sidebarHidden` 条件渲染；
+  状态存 `localStorage['rc_sidebar_hidden']`，刷新后保持；「设置」页有「显示侧栏」开关
+- **新增悬浮球** `PanelBall.vue`（236 行）：侧栏收起后用它把侧栏叫回来
+  - 可拖动，位置 `clamp` 在视口内并记忆；右键菜单换黑/白底色
+  - 可上传自定义图标（base64 存 localStorage，>1MB 拒绝，避免撑爆存储）
+  - 「设置」页有「显示悬浮球」「球归位」
+  - 两个实现坑：`<img>` 默认 `draggable=true`，上传图标后一拖就变成"拖图片"、
+    pointer 事件被浏览器原生拖拽接管（必须 `draggable=false` + `user-drag:none` +
+    `pointer-events:none`）；右键菜单不能写死 `right/bottom`，否则球拖到别处菜单还留在角落
+- 探针 `tools/panel-ball-probe.mjs`（校验侧栏收起与悬浮球）
+- **版本号** `1.0.0-beta` → `1.0.0`：`VERSION`、`internal/config/config.go` 的 `Version`、
+  `install.sh` 内嵌版本、`web/package.json` 四处同步
+  （此前内嵌版本还停在 `1.0.0-beta`，会让 `…/v<版本>/install.sh` 装成上一版）
+
 ### 市场安装接入环境预检与阶段时间轴（P3）
 
 - **安装流程改成「先预检后落盘」**：zipball 先解到暂存目录 → 校验清单 →
@@ -183,7 +204,16 @@ yescrypt 支持要另做（libxcrypt 的 KDF），没在本次范围。
 - 前端：「插件」页已安装列表新增「环境」按钮，行内展开环境报告（P0 只读，无修复按钮）
 - 面板版本号不变
 
-## v1.0.0-beta.2 — 侧栏收起与悬浮球
+### 面板本体其他修复
+
+- **插件目录变了不必重启面板**：新增 `POST /api/plugins/rescan` —— 往插件目录里放了新插件，
+  以前得重启面板才认得出来
+- **文件预览按扩展名给准确 MIME**：以前靠猜，`预览` 出来的是 `application/octet-stream`，
+  浏览器只能下载不能显示
+- **侧栏版本号不再硬编码**：改为从 `GET /api/panel/version` 读（此前 `v1.0.0-beta.2` 写死在模板里，
+  升版本漏改一处就显示旧号）
+
+## v1.0.0-beta.2 — 侧栏收起与悬浮球（未发布；内容已并入上面的 v1.0.0）
 - **侧栏可收起**：`Sidebar.vue` 顶部加 `≡` 按钮；`App.vue` 按 `sidebarHidden` 条件渲染；
   状态存 `localStorage['rc_sidebar_hidden']`，刷新后保持；「设置」页有「显示侧栏」开关
 - **新增悬浮球** `PanelBall.vue`（236 行）：侧栏收起后用它把侧栏叫回来
@@ -361,7 +391,7 @@ yescrypt 支持要另做（libxcrypt 的 KDF），没在本次范围。
   支持 `RC_PANEL_PASSWORD` / `RC_SKIP_PANEL_PASSWORD=1` / `RC_ADMIN_PASSWORD`
 - 新增探针工具：`tools/auth-probe.mjs`（登录流程 11 项）、`tools/login-layout-check.mjs`（亮/暗色布局与对比度 22 项）
 
-## v1.0.0 — 2026-10-01
+## v1.0.0（2026-10-01 首个基线 —— Release 已删除，内容由 2026-11-07 的正式版取代）
 - 面板功能分层成型：内置仅 工作台/文件管理/终端/系统扩展/插件/设置/开发文档 七项
 - 新增「系统扩展」系统功能：扩展包格式 + 构建工具 + 安装/卸载/更新 API + 加载器
 - 媒体中心、任务队列、调度器、系统中心迁为扩展包（extensions/）

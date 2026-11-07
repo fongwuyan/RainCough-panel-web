@@ -49,7 +49,7 @@ set -euo pipefail
 REPO="fongwuyan/RainCough-panel-web"
 # 版本: RC_VERSION 覆盖 > 本脚本内嵌版本(发布时写入, = 所在 tag 的版本) > latest
 # 未替换的占位符(开发树)与空值都按 latest 解析, 见下方「版本解析」。
-RC_PANEL_VERSION="${RC_VERSION:-1.0.0-beta}"
+RC_PANEL_VERSION="${RC_VERSION:-1.0.0}"
 MIRROR="${RC_MIRROR:-https://gh-proxy.com/https://github.com}"
 UNIT_NAME="${RC_UNIT_NAME:-raincough.service}"   # 单元名可覆盖(测试/多实例隔离)
 
