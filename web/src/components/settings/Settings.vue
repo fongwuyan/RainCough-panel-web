@@ -6,7 +6,7 @@ import { api } from '../../api'
 
 const st = useSettings()
 const ui = useUi()
-const { sidebarHidden, ball } = useUi()
+const { sidebarHidden, ball, themes } = useUi()
 const {
   theme, setTheme, cfg, loading, saving, pinging, pingState, pingMsg,
   gatePW, gateLocked, gateEnabled, gateBusy,
@@ -15,6 +15,41 @@ const {
 } = st
 
 const active = ref('appearance')
+
+// ---- 雨咯主题背景图 ----
+// 玻璃不染色, 背景完全由用户图片决定; 图片只存本浏览器(localStorage)。
+const { bgImage, setWallpaper, clearWallpaper, toast: uiToast } = useUi()
+// 侧栏选项卡 / 内容区(除背景) 的颜色 + 不透明度
+const {
+  sideAlpha, sideColor, setSideAlpha, setSideColor,
+  contentAlpha, contentColor, setContentAlpha, setContentColor,
+} = useUi()
+const bgBusy = ref(false)
+const bgMsg = ref('')
+
+async function onBgPick(e) {
+  const file = e.target && e.target.files && e.target.files[0]
+  if (e.target) e.target.value = ''
+  if (!file) return
+  bgBusy.value = true
+  bgMsg.value = ''
+  try {
+    const r = await setWallpaper(file)
+    bgMsg.value = '已设置背景（' + Math.round(r.bytes / 1024) + ' KB，已在本机压缩）'
+    uiToast('背景已更新', 'success')
+  } catch (err) {
+    bgMsg.value = (err && err.message) || '设置失败'
+    uiToast(bgMsg.value, 'error')
+  } finally {
+    bgBusy.value = false
+  }
+}
+
+function onBgClear() {
+  clearWallpaper()
+  bgMsg.value = '已恢复默认中性背景'
+  uiToast('已移除背景图', 'info')
+}
 
 // ---- 移动端访问密钥 ----
 // /<插件名>/api/... 前缀通道不走登录中间件(App 没有登录能力), 全靠这个密钥把关。
@@ -127,9 +162,62 @@ async function savePanelPassword() {
   }
 }
 
+// ---- 多盘存储 ----
+const storage = ref({ mounts: [], threshold_gb: 10, active: null, active_path: '' })
+const storageBusy = ref(false)
+const storageMsg = ref('')
+
+function fmtBytes(n) {
+  n = Number(n) || 0
+  if (n >= 1 << 30) return (n / (1 << 30)).toFixed(1) + ' GB'
+  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(0) + ' MB'
+  return Math.round(n / 1024) + ' KB'
+}
+
+async function loadStorage() {
+  try {
+    storage.value = Object.assign({ mounts: [] }, await api.storageInfo())
+  } catch (e) {
+    storageMsg.value = (e && e.message) || '读取磁盘失败'
+  }
+}
+
+function toggleStorage(m) { m.enabled = !m.enabled }
+
+function moveStorage(i, d) {
+  const arr = storage.value.mounts
+  const j = i + d
+  if (j < 0 || j >= arr.length) return
+  const t = arr[i]
+  arr[i] = arr[j]
+  arr[j] = t
+}
+
+async function saveStorage() {
+  storageBusy.value = true
+  storageMsg.value = ''
+  try {
+    const ms = storage.value.mounts || []
+    await api.storageSave({
+      threshold_gb: Math.max(0, Number(storage.value.threshold_gb) || 0),
+      order: ms.filter((m) => m.enabled).map((m) => m.path),
+      disabled: ms.filter((m) => !m.enabled).map((m) => m.path),
+    })
+    await loadStorage()
+    storageMsg.value = '已保存：新写入会按新顺序选盘（已有数据不动）'
+  } catch (e) {
+    storageMsg.value = (e && e.message) || '保存失败'
+  } finally {
+    storageBusy.value = false
+  }
+}
+
+onMounted(loadStorage)
+
 const NAV = [
   { key: 'appearance', label: '外观', desc: '主题与显示' },
   { key: 'repo', label: '仓库配置', desc: '插件市场 / 面板仓库' },
+  { key: 'storage', label: '存储', desc: '多盘与自动切换' },
   { key: 'login', label: '登录', desc: '密码与登录方式' },
   { key: 'panel', label: '面板信息', desc: '版本与运行状态' },
   { key: 'maint', label: '维护', desc: '数据清理' },
@@ -159,22 +247,71 @@ const NAV = [
         <div v-if="active === 'appearance'" class="st-group">
           <div class="st-group-title">主题</div>
           <div class="st-themes">
-            <button class="st-theme" :class="{ active: theme === 'light' }" @click="setTheme('light')">
-              <div class="st-theme-prev light">
+            <button
+              v-for="t in themes"
+              :key="t.id"
+              class="st-theme"
+              :class="{ active: theme === t.id }"
+              :title="t.note"
+              @click="setTheme(t.id)"
+            >
+              <div class="st-theme-prev" :class="'prev-' + t.id">
                 <span class="pv-side"></span>
                 <span class="pv-main"></span>
               </div>
-              <span class="st-theme-name">浅色</span>
-            </button>
-            <button class="st-theme" :class="{ active: theme === 'dark' }" @click="setTheme('dark')">
-              <div class="st-theme-prev dark">
-                <span class="pv-side"></span>
-                <span class="pv-main"></span>
-              </div>
-              <span class="st-theme-name">深色</span>
+              <span class="st-theme-name">{{ t.label }}</span>
             </button>
           </div>
-          <p class="st-hint">主题保存在浏览器本地，切换立即生效。</p>
+          <p class="st-hint">
+            主题保存在浏览器本地，切换立即生效。「雨咯主题」= 毛玻璃 / 半透明 / 不染色，
+            背景用你自己上传的图片；插件页与面板一起换肤（插件读的是同一套 CSS 变量，不用重装）。
+          </p>
+
+          <div class="st-group-title" style="margin-top:18px">背景图片</div>
+          <div class="st-bg">
+            <div
+              class="st-bg-prev"
+              :style="bgImage ? { backgroundImage: 'url(' + bgImage + ')' } : null"
+            >
+              <span v-if="!bgImage" class="hint">默认中性深灰</span>
+            </div>
+            <div class="st-bg-act">
+              <div class="st-bg-btns">
+                <label class="btn btn-sm" :class="{ 'is-busy': bgBusy }">
+                  {{ bgBusy ? '处理中…' : (bgImage ? '更换图片' : '上传图片') }}
+                  <input type="file" accept="image/*" hidden :disabled="bgBusy" @change="onBgPick" />
+                </label>
+                <button class="btn btn-sm" :disabled="!bgImage || bgBusy" @click="onBgClear">移除背景</button>
+              </div>
+              <p class="st-hint">
+                仅用于「雨咯主题」：玻璃本身不染色，颜色全部来自这张图。
+                图片在本机压到 1920px 内再保存，只存在这个浏览器、不上传服务器。
+              </p>
+              <p v-if="bgMsg" class="st-hint">{{ bgMsg }}</p>
+            </div>
+          </div>
+
+          <div class="st-group-title" style="margin-top:18px">颜色与不透明度</div>
+          <div class="st-range">
+            <span>侧边栏选项卡</span>
+            <input class="st-color" type="color" :value="sideColor" title="选项卡底色"
+                   @input="setSideColor($event.target.value)" />
+            <input class="range" type="range" min="1" max="100" step="1"
+                   :value="sideAlpha" @input="setSideAlpha($event.target.value)" />
+            <b class="mono">{{ sideAlpha }}%</b>
+          </div>
+          <div class="st-range">
+            <span>内容区（除背景）</span>
+            <input class="st-color" type="color" :value="contentColor" title="内容区底色"
+                   @input="setContentColor($event.target.value)" />
+            <input class="range" type="range" min="1" max="100" step="1"
+                   :value="contentAlpha" @input="setContentAlpha($event.target.value)" />
+            <b class="mono">{{ contentAlpha }}%</b>
+          </div>
+          <p class="st-hint">
+            仅「雨咯主题」生效：点色块选颜色，滑杆 1%（几乎纯透明）到 100%（完全不透）。
+            内容区这一层铺在卡片之下、背景图之上，背景图本身不受影响。数值存在本浏览器。
+          </p>
 
           <div class="st-group-title" style="margin-top:18px">布局</div>
           <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:12px">
@@ -279,6 +416,49 @@ const NAV = [
             <button class="btn btn-primary" :disabled="saving" @click="saveRepo">{{ saving ? '保存中…' : '保存配置' }}</button>
             <button class="btn" :disabled="pinging" @click="ping">{{ pinging ? '测试中…' : '测试连接' }}</button>
             <span v-if="pingMsg" class="st-ping" :class="pingState">{{ pingMsg }}</span>
+          </div>
+        </div>
+
+        <!-- 存储 -->
+        <div v-else-if="active === 'storage'" class="st-group">
+          <div class="st-group-title">多盘存储策略</div>
+          <p class="st-hint">
+            新写入的数据（文件管理上传、插件数据目录）会落到第一块「剩余空间 ≥ 阈值」的盘；
+            都不够时选剩余空间最大的盘。<b>已有数据不会迁移</b>，只是新数据换地方。
+            数据根目录为 <span class="mono">&lt;挂载点&gt;/RainCoughData</span>。
+          </p>
+
+          <div class="st-form" style="grid-template-columns: 220px 1fr; align-items: end">
+            <label class="st-field"><span>切换阈值（GB，0 = 不限制）</span>
+              <input class="input" type="number" min="0" max="1000" step="1" v-model.number="storage.threshold_gb" />
+            </label>
+            <div class="st-field"><span>当前写入盘</span>
+              <b class="mono">{{ storage.active ? storage.active.path : '—' }}</b>
+              <span v-if="storage.active_path" class="hint mono">{{ storage.active_path }}</span>
+            </div>
+          </div>
+
+          <div class="st-rows" style="margin-top: 12px">
+            <div v-for="(m, i) in storage.mounts" :key="m.path" class="st-row">
+              <span>
+                <input type="checkbox" :checked="m.enabled" @change="toggleStorage(m)" />
+                <b class="mono">{{ m.path }}</b>
+                <em class="hint" style="font-style: normal">
+                  — {{ fmtBytes(m.free) }} 可用 / {{ fmtBytes(m.total) }}（{{ m.fs || m.dev }}）</em>
+              </span>
+              <span>
+                <button class="btn btn-sm" :disabled="i === 0" @click="moveStorage(i, -1)">↑</button>
+                <button class="btn btn-sm" :disabled="i === storage.mounts.length - 1" @click="moveStorage(i, 1)">↓</button>
+              </span>
+            </div>
+          </div>
+          <p v-if="!storage.mounts.length" class="hint">没有检测到已挂载磁盘</p>
+
+          <div class="st-actions">
+            <button class="btn btn-primary" :disabled="storageBusy" @click="saveStorage">
+              {{ storageBusy ? '保存中…' : '保存策略' }}</button>
+            <button class="btn" :disabled="storageBusy" @click="loadStorage">刷新磁盘</button>
+            <span v-if="storageMsg" class="hint">{{ storageMsg }}</span>
           </div>
         </div>
 
@@ -424,24 +604,66 @@ const NAV = [
 .st-status.ok { border-color: var(--success); background: var(--success-soft); color: var(--success); }
 .st-status.err { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
 
-.st-themes { display: flex; gap: 12px; }
+.st-themes { display: flex; gap: 12px; flex-wrap: wrap; }
 .st-theme {
   border: 1px solid var(--border); background: var(--surface); padding: 10px; cursor: pointer;
   display: flex; flex-direction: column; gap: 8px; width: 160px;
 }
 .st-theme:hover { border-color: var(--border-strong); }
 .st-theme.active { border-color: var(--accent); box-shadow: var(--ring); }
-.st-theme-prev { height: 64px; display: flex; gap: 4px; padding: 4px; }
-.st-theme-prev .pv-side { width: 26px; display: block; }
-.st-theme-prev .pv-main { flex: 1; display: block; }
-.st-theme-prev.light { background: #f5f6f8; border: 1px solid #d8dce4; }
-.st-theme-prev.light .pv-side { background: #ffffff; border-right: 1px solid #d8dce4; }
-.st-theme-prev.light .pv-main { background: #ffffff; }
-.st-theme-prev.dark { background: #0d1117; border: 1px solid #2a3140; }
-.st-theme-prev.dark .pv-side { background: #161b24; border-right: 1px solid #2a3140; }
-.st-theme-prev.dark .pv-main { background: #161b24; }
+.st-theme-prev { height: 64px; display: flex; gap: 4px; padding: 4px; border-radius: var(--radius-sm); }
+.st-theme-prev .pv-side { width: 26px; display: block; border-radius: 2px; }
+.st-theme-prev .pv-main { flex: 1; display: block; border-radius: 2px; }
+.st-theme-prev.prev-light { background: #f5f6f8; border: 1px solid #d8dce4; }
+.st-theme-prev.prev-light .pv-side { background: #ffffff; border-right: 1px solid #d8dce4; }
+.st-theme-prev.prev-light .pv-main { background: #ffffff; }
+.st-theme-prev.prev-dark { background: #0d1117; border: 1px solid #2a3140; }
+.st-theme-prev.prev-dark .pv-side { background: #161b24; border-right: 1px solid #2a3140; }
+.st-theme-prev.prev-dark .pv-main { background: #161b24; }
+/* 雨咯: 中性照片背景 + 白色毛玻璃面板(玻璃本身不染色) */
+.st-theme-prev.prev-yuluo {
+  background:
+    linear-gradient(180deg, rgba(6, 8, 10, 0.45), rgba(6, 8, 10, 0.7)),
+    linear-gradient(135deg, #4a5560 0%, #2b333b 45%, #151a1f 100%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.st-theme-prev.prev-yuluo .pv-side {
+  background: rgba(20, 24, 29, 0.7);
+  border-right: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(6px);
+}
+.st-theme-prev.prev-yuluo .pv-main {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04));
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(6px);
+}
 .st-theme-name { font-size: 12px; color: var(--text-muted); }
 .st-theme.active .st-theme-name { color: var(--accent); }
+
+/* 雨咯主题背景图 */
+.st-bg { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
+.st-bg-prev {
+  width: 180px; height: 104px; flex-shrink: 0;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: linear-gradient(160deg, #1b2026, #0b0e11) center / cover no-repeat;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.st-bg-act { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 6px; }
+.st-bg-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.st-bg .btn.is-busy { opacity: 0.6; pointer-events: none; }
+
+/* 颜色 + 不透明度 */
+.st-range { display: flex; align-items: center; gap: 12px; margin: 8px 0; font-size: 12px; color: var(--text-muted); }
+.st-range > span { width: 104px; flex-shrink: 0; }
+.st-range .range { flex: 1; max-width: 260px; }
+.st-range b { width: 42px; text-align: right; font-size: 11px; color: var(--text); }
+.st-color {
+  width: 30px; height: 24px; padding: 0; flex-shrink: 0; cursor: pointer;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: transparent;
+}
+.st-color::-webkit-color-swatch-wrapper { padding: 2px; }
+.st-color::-webkit-color-swatch { border: none; border-radius: 4px; }
 
 .st-form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .st-field { display: flex; flex-direction: column; gap: 4px; }

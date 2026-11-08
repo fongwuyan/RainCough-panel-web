@@ -2,17 +2,29 @@
 // PluginView — v4 插件页加载器(接口库)
 // 加载插件前端产物 /api/plugins/<name>/assets/plugin.js → window.__rcPluginV4__[name]
 // 失败时回退 GenericPlugin 信息卡; 诊断信息在「服务健康」页, 不在本页显示
-import { computed, ref, onMounted, onBeforeUnmount, nextTick, onErrorCaptured } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, nextTick, onErrorCaptured, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GenericPlugin from './GenericPlugin.vue'
+import { useUi } from '../stores/ui'
 
 const route = useRoute()
 const router = useRouter()
+const ui = useUi()
 const name = computed(() => String(route.params.name || ''))
 
 const mode = ref('loading')   // loading | plugin | generic
 let mountFn = null
+let pluginBus = null
 const mountEl = ref(null)
+
+// 主题变化: 先更新挂载点属性(纯 CSS 主题的插件靠它), 再广播给插件前端(需要重绘的)
+watch(() => [ui.theme.value, mountEl.value], () => {
+  const el = mountEl.value
+  if (!el || !el.getAttribute) return
+  el.setAttribute('data-theme', ui.theme.value)
+  el.setAttribute('data-scheme', ui.scheme.value)
+  if (pluginBus) pluginBus.emit('theme', { theme: ui.theme.value, scheme: ui.scheme.value })
+})
 
 const comp = computed(() => GenericPlugin)
 
@@ -73,9 +85,24 @@ async function loadPluginFrontend() {
     await nextTick()
     if (mountEl.value) {
       try {
-        const listeners = new Set()
+        // 事件总线: 主题切换要能通知到插件(ctx.on('theme')), 不能只靠 CSS
+        const bus = new Map()
+        const on = (ev, cb) => {
+          if (!bus.has(ev)) bus.set(ev, new Set())
+          bus.get(ev).add(cb)
+          return () => { const s = bus.get(ev); if (s) s.delete(cb) }
+        }
+        const emit = (ev, payload) => {
+          const s = bus.get(ev)
+          if (s) s.forEach((cb) => { try { cb(payload) } catch (e) {} })
+        }
         const ctx = {
           plugin: { name: name.value },
+          // 当前主题: 用 getter, 切主题后插件读到的就是新值
+          get theme() { return ui.theme.value },
+          get scheme() { return ui.scheme.value },
+          // 供插件自己写主题相关 CSS: [data-theme="yuluo"] .your-class
+          get themeAttr() { return ui.theme.value },
           invoke: async (iface, params, opts) => {
             const r = await fetch('/api/plugins/' + name.value + '/invoke', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -84,12 +111,17 @@ async function loadPluginFrontend() {
             if (!r.ok) throw new Error((r.rpc_error && r.rpc_error.message) || 'invoke failed')
             return r.result
           },
-          on: (ev, cb) => { listeners.add(cb); return () => listeners.delete(cb) },
-          emit: (ev, payload) => { listeners.forEach((cb) => { try { cb(payload) } catch (e) {} }) },
-          toast: (msg, kind) => { console.log('[plugin:' + name.value + ']', kind || 'info', msg) },
+          on,
+          emit,
+          toast: (msg, kind) => { ui.toast(msg, kind); console.log('[plugin:' + name.value + ']', kind || 'info', msg) },
           navigate: (to) => router.push(to),
         }
+        // 把主题写在插件挂载点上, 插件内部可直接用 [data-theme=...] 选择器
+        mountEl.value.setAttribute('data-plugin', name.value)
+        mountEl.value.setAttribute('data-theme', ui.theme.value)
+        mountEl.value.setAttribute('data-scheme', ui.scheme.value)
         mountFn = reg.mount(mountEl.value, ctx)
+        pluginBus = { emit }
       } catch (e) {
         console.warn('[plugin:' + name.value + '] 挂载失败:', (e && e.message) || e)
       }

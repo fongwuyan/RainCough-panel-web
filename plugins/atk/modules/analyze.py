@@ -19,9 +19,23 @@ import struct
 
 from core import store, x86
 
-# 单样本读取上限。APK 常见几十 MB(实测一个 67MB), 64MB 会卡住;
-# 256MB 在几十 GB 内存的机器上安全, 再大就该用外部工具了。
+# 单样本「全读进内存」的上限。ELF / PE 的反汇编必须整份在手, 所以超过这个
+# 尺寸就不支持(1GB 的 ELF 现实中不存在, 真有也该上 IDA)。
 MAX_READ = 256 * 1024 * 1024
+
+# APK 走另一条路: zip 的中央目录在文件尾部, zipfile 传文件名就是懒加载,
+# 不读全文件。所以 1GB 的包也能开 —— 只有被点开的那几个 dex/so 才解压。
+MAX_APK = 1024 * 1024 * 1024
+
+# 单次解析里解压的总预算。1GB 包里 dex 可能有十几个、每个几十 MB,
+# 全解一遍要几十秒且没有额外信息量, 按预算截断比卡死强。
+DEX_BUDGET = 320 * 1024 * 1024
+
+# 单个 zip 条目解压上限 —— 防 zip 炸弹(声明 10MB 实际解出 10GB)
+ENTRY_LIMIT = 192 * 1024 * 1024
+
+# 分块上传的单块上限(base64 后约 5.4MB, 宿主 8MB 帧放得下)
+CHUNK_SIZE = 4 * 1024 * 1024
 
 # 可疑 API: 命中即提示"这个样本会做什么", 不做判定
 SUSPICIOUS = {
@@ -649,13 +663,43 @@ def _apk_libs(z, names, max_libs=24, max_bytes=64 * 1024 * 1024):
     return out, summary
 
 
-def _apk(buf):
-    if buf[:2] != b"PK":
+def _tail(path, n):
+    """读文件最后 n 字节。大文件不能整份读进内存, 只能 seek。"""
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - n))
+        return f.read(n)
+
+
+def _read_at(path, off, n):
+    """读指定偏移的 n 字节。"""
+    if n <= 0:
+        return b""
+    with open(path, "rb") as f:
+        f.seek(max(0, off))
+        return f.read(n)
+
+
+def _apk(buf, path=None):
+    """解析 APK。
+
+    [path] 给了就走 zipfile 懒加载 —— 只读中央目录 + 用到的条目, 1GB 的包也吃得下;
+    没给就把 buf 当完整字节串(小文件、或上传后还没落盘的情况)。
+    """
+    if path:
+        try:
+            with open(path, "rb") as f:
+                if f.read(2) != b"PK":
+                    return None
+        except OSError:
+            return None
+    elif not buf or buf[:2] != b"PK":
         return None
     import io
     import zipfile
     try:
-        z = zipfile.ZipFile(io.BytesIO(buf))
+        z = zipfile.ZipFile(path) if path else zipfile.ZipFile(io.BytesIO(buf))
     except Exception:
         return None
     names = z.namelist()
@@ -704,43 +748,61 @@ def _apk(buf):
                 min_sdk = attrs.get("minSdkVersion", "")
                 target_sdk = attrs.get("targetSdkVersion", "")
 
+    # dex 只解压一次: 头信息(方法数/字符串数)和类名都从同一份 raw 里取。
+    # 大包按 DEX_BUDGET 截断 —— 解压是这里最贵的一步, 重复解两遍纯属浪费。
     dexes = []
+    classes = []
+    budget_left = DEX_BUDGET
+    dex_skipped = 0
     for n in names:
-        if n.endswith(".dex") and "/" not in n:
+        if not (n.endswith(".dex") and "/" not in n):
+            continue
+        zi = z.getinfo(n)
+        info = {}
+        raw = None
+        if zi.file_size <= ENTRY_LIMIT and zi.file_size <= budget_left:
             try:
-                info = _dex_info(z.read(n)) or {}
+                raw = z.read(n)
+                budget_left -= len(raw)
+                info = _dex_info(raw) or {}
+                if len(classes) < 20000:
+                    classes.extend(_dex_classes(raw, 4000))
             except Exception:
                 info = {}
-            dexes.append(dict({"name": n, "size": z.getinfo(n).file_size}, **info))
+            finally:
+                del raw
+        else:
+            dex_skipped += 1
+        dexes.append(dict({"name": n, "size": zi.file_size}, **info))
     dexes.sort(key=lambda x: -x["size"])
 
     abis = sorted({n.split("/")[1] for n in names
                    if n.startswith("lib/") and n.count("/") >= 2})
     sigs = [n for n in names if n.startswith("META-INF/")
             and n.upper().endswith((".RSA", ".DSA", ".EC", ".SF"))]
-    # v2/v3 签名块紧挨在中央目录之前, 不在文件尾部 —— 先定位 EOCD 拿到 CD 偏移
+    # v2/v3 签名块紧挨在中央目录之前, 不在文件尾部 —— 先定位 EOCD 拿到 CD 偏移。
+    # ★ 大文件不能 buf.rfind(): buf 是 None。只读尾部 64KB(EOCD 最大就这个量级)。
     v2 = False
     try:
-        eocd = buf.rfind(b"PK\x05\x06", max(0, len(buf) - 65558))
-        if eocd > 0:
-            cd_off = struct.unpack_from("<I", buf, eocd + 16)[0]
-            lo = max(0, cd_off - 262144)
-            v2 = b"APK Sig Block 42" in buf[lo:cd_off + 8]
+        if path:
+            size = os.path.getsize(path)
+            tail = _tail(path, min(65558, size))
+            eocd = tail.rfind(b"PK\x05\x06")
+            if eocd >= 0:
+                cd_off = struct.unpack_from("<I", tail, eocd + 16)[0]
+                lo = max(0, cd_off - 262144)
+                v2 = b"APK Sig Block 42" in _read_at(path, lo, cd_off + 8 - lo)
+        else:
+            eocd = buf.rfind(b"PK\x05\x06", max(0, len(buf) - 65558))
+            if eocd > 0:
+                cd_off = struct.unpack_from("<I", buf, eocd + 16)[0]
+                lo = max(0, cd_off - 262144)
+                v2 = b"APK Sig Block 42" in buf[lo:cd_off + 8]
     except Exception:
-        v2 = b"APK Sig Block 42" in buf[-262144:]
-
+        v2 = False
     packers = _packer_hints(names, dexes, abis)
     libs, lib_summary = _apk_libs(z, names)
-    # 扫全部 dex 收类名。多 dex 时应用自身的类不一定在 classes.dex 里,
-    # 只扫前两个会得出"应用自身类 0 个"的错误结论。
-    classes = []
-    try:
-        for d in dexes:
-            if len(classes) >= 20000:
-                break
-            classes.extend(_dex_classes(z.read(d["name"]), 4000))
-    except Exception:
-        pass
+    # 类名已在上面解压 dex 时一并收集(见 "dex 只解压一次")
     classes = list(dict.fromkeys(classes))
     # 去掉编译器生成的 synthetic lambda —— 一个 Compose 页面能生成几十个,
     # 全列出来会淹没真正的业务类。
@@ -771,7 +833,7 @@ def _apk(buf):
         "flags": flags, "dex": dexes[:20], "dex_count": len(dexes),
         "minSdk": min_sdk, "targetSdk": target_sdk,
         "abis": abis, "v1_sign": bool(sigs), "v2_sign": v2,
-        "entries": len(names),
+        "entries": len(names), "dex_skipped": dex_skipped,
     }
     out["protections"] = {
         "可调试": flags.get("debuggable", "false") == "true",
@@ -790,6 +852,9 @@ def _apk(buf):
         out["notes"].append("未检出 v2/v3 签名块, 只有 v1 签名(整包易被篡改)")
     if len(dexes) > 1:
         out["notes"].append("多 dex(%d 个) —— multidex 或大量依赖" % len(dexes))
+    if dex_skipped:
+        out["notes"].append("包太大, %d 个 dex 未展开(已解析 %d 个); 类列表不完整"
+                            % (dex_skipped, len(dexes) - dex_skipped))
     for h in packers:
         out["notes"].append("命中加固特征: %s（%s）" % (h["vendor"], "、".join(h["evidence"])))
     sus_libs = (lib_summary or {}).get("suspicious_libs") or []
@@ -801,12 +866,30 @@ def _apk(buf):
 
 # ══════════════════════════════════════════════════════ 通用
 
-def parse(buf):
-    """识别并解析。返回结构 dict, 不支持则 None。"""
-    for fn in (_elf, _pe, _apk):
+def parse(buf, path=None):
+    """识别并解析。返回结构 dict, 不支持则 None。
+
+    [path] 给了就按路径解析 —— APK 走 zipfile 懒加载, buf 可以是 None;
+    没给就把 buf 当完整字节串。ELF / PE 的反汇编必须整份在手, 不给 path 走不通。
+    """
+    if path:
+        try:
+            with open(path, "rb") as f:
+                magic = f.read(4)
+        except OSError:
+            return None
+    else:
+        magic = (buf or b"")[:4]
+
+    # 按 magic 分派, 不再逐个 try —— 1GB 的文件挨个试解析太贵
+    if magic[:2] == b"PK":
+        return _apk(buf, path)
+    if not buf:
+        return None
+    for fn in (_elf, _pe):
         try:
             r = fn(buf)
-        except Exception as e:
+        except Exception:
             r = None
         if r:
             return r
@@ -904,6 +987,68 @@ def _dex_strings(buf, limit=200000):
 
 # ══════════════════════════════════════════════════════ 样本存取
 
+def _fmt_size(n):
+    n = int(n or 0)
+    if n < 1024:
+        return "%d B" % n
+    if n < 1024 * 1024:
+        return "%.1f KB" % (n / 1024.0)
+    if n < 1024 * 1024 * 1024:
+        return "%.1f MB" % (n / 1024.0 / 1024)
+    return "%.2f GB" % (n / 1024.0 / 1024 / 1024)
+
+
+class Sample:
+    """样本读取抽象。
+
+    小文件整份读进内存(反汇编/字符串扫描必须), 大文件只在真要整份时才报错 ——
+    APK 走 zipfile 懒加载, 1GB 的包也不需要整份读。
+    """
+
+    def __init__(self, row):
+        self.row = row
+        self.path = row.get("path") or ""
+        try:
+            self.size = os.path.getsize(self.path)
+        except OSError:
+            self.size = 0
+        self._buf = None
+        self._tried = False
+
+    def buf(self):
+        """整份字节串; 超过 MAX_READ 返回 None(调用方决定是否降级)。"""
+        if not self._tried:
+            self._tried = True
+            if self.size and self.size <= MAX_READ:
+                with open(self.path, "rb") as f:
+                    self._buf = f.read()
+        return self._buf
+
+    def need(self, what="该操作"):
+        """要整份字节串的操作先过这道 —— 报错信息说清楚为什么、怎么办。"""
+        b = self.buf()
+        if b is None:
+            raise ValueError(
+                "%s需要整份读入内存, 该样本 %s 已超过 %d MB 上限。"
+                "APK 的结构/类列表/so 详情不受影响(走按需读取), "
+                "但反汇编与字符串全扫只对 ELF/PE 有意义, 请先裁剪到 256MB 以内"
+                % (what, _fmt_size(self.size), MAX_READ // 1024 // 1024))
+        return b
+
+    def digest(self):
+        """流式算 md5 + sha256。1GB 文件也不占额外内存。"""
+        md5 = hashlib.md5()
+        sha = hashlib.sha256()
+        with open(self.path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                md5.update(chunk)
+                sha.update(chunk)
+        return md5.hexdigest(), sha.hexdigest()
+
+
 def _load(sample_id):
     row = store.q1("SELECT * FROM atk_artifact WHERE id=?", (int(sample_id),))
     if not row:
@@ -911,9 +1056,7 @@ def _load(sample_id):
     path = row["path"]
     if not path or not os.path.isfile(path):
         raise ValueError("样本文件已丢失, 请重新上传")
-    with open(path, "rb") as f:
-        buf = f.read(MAX_READ)
-    return row, buf
+    return Sample(row)
 
 
 def upload(task_id, filename, data_b64):
@@ -927,7 +1070,7 @@ def upload(task_id, filename, data_b64):
     if not buf:
         raise ValueError("文件为空")
     if len(buf) > 32 * 1024 * 1024:
-        raise ValueError("样本超过 32MB, 请先裁剪")
+        raise ValueError("单次上传上限 32MB; 更大的文件请用「分块上传」或「按路径打开」")
     info = parse(buf) or {}
     kind = info.get("format") or "未知"
     safe = re.sub(r"[^\w.\-]", "_", name) or "sample.bin"
@@ -935,23 +1078,27 @@ def upload(task_id, filename, data_b64):
     os.makedirs(store.UPLOAD_DIR, exist_ok=True)
     with open(path, "wb") as f:
         f.write(buf)
-    meta = {"format": kind, "size": len(buf),
-            "sha256": hashlib.sha256(buf).hexdigest(),
-            "md5": hashlib.md5(buf).hexdigest()}
     aid = store.artifact_add(int(task_id or 0), name, "样本·" + kind,
-                             json.dumps(meta), path)
-    # 返回的 info 与 atk.analyze.info 同构, 前端上传后就能直接渲染
-    full = _enrich(info, buf)
+                             json.dumps({"format": kind, "size": len(buf),
+                                         "sha256": hashlib.sha256(buf).hexdigest(),
+                                         "md5": hashlib.md5(buf).hexdigest()}), path)
+    s = Sample(store.q1("SELECT * FROM atk_artifact WHERE id=?", (aid,)))
+    full = _enrich(info, s)
     full["filename"] = name
     return {"sample_id": aid, "filename": name, "kind": kind, "size": len(buf),
             "info": full}
 
 
-def _enrich(st, buf):
+def _enrich(st, s):
+    """补齐尺寸/哈希/可疑能力。s 是 Sample —— 大文件走流式哈希, 不整份读。"""
     st = dict(st or {})
-    st["size"] = len(buf)
-    st["md5"] = hashlib.md5(buf).hexdigest()
-    st["sha256"] = hashlib.sha256(buf).hexdigest()
+    st["size"] = s.size
+    try:
+        md5, sha = s.digest()
+        st["md5"] = md5
+        st["sha256"] = sha
+    except OSError:
+        st["md5"] = st["sha256"] = ""
     st["suspicious"] = suspicious(st.get("imports") or [])
     st.setdefault("sections", [])
     st.setdefault("imports", [])
@@ -1008,14 +1155,13 @@ def lib_detail(sample_id, lib_path):
 
     [lib_path] 是 zip 内的路径(如 lib/arm64-v8a/libfoo.so)。
     """
-    row, buf = _load(sample_id)
-    st = parse(buf)
+    s = _load(sample_id)
+    st = parse(s.buf(), s.path)
     if not st or st.get("format") != "APK":
         raise ValueError("这个样本不是 APK")
-    import io
     import zipfile
     try:
-        z = zipfile.ZipFile(io.BytesIO(buf))
+        z = zipfile.ZipFile(s.path)
     except Exception as e:
         raise ValueError("zip 打不开: %s" % e)
     name = (lib_path or "").strip()
@@ -1023,6 +1169,10 @@ def lib_detail(sample_id, lib_path):
         raise ValueError("缺少 so 路径")
     if name not in z.namelist():
         raise ValueError("包里没有这个文件: " + name)
+    zi = z.getinfo(name)
+    if zi.file_size > ENTRY_LIMIT:
+        raise ValueError("%s 解压后 %s, 超过单条目上限 %d MB"
+                         % (name, _fmt_size(zi.file_size), ENTRY_LIMIT // 1024 // 1024))
     data = z.read(name)
     info = _elf(data)
     if not info:
@@ -1050,46 +1200,135 @@ def lib_detail(sample_id, lib_path):
 
 
 def open_path(task_id, path):
-    """直接读服务器上的文件(大样本用)。路径由使用者自己填, 不做沙箱 —— 这是自建面板。"""
-    import time as _t
+    """直接读服务器上的文件(大样本用)。路径由使用者自己填, 不做沙箱 —— 这是自建面板。
+
+    ★ 1GB 的 APK 就走这条路: 不整份读进内存, 交给 zipfile 懒加载。
+      整份读的做法在 1GB 上会直接吃满内存(读 1GB + BytesIO 再拷一份)。
+    """
     p = (path or "").strip()
     if not p:
         raise ValueError("请填写文件路径")
     if not os.path.isfile(p):
         raise ValueError("文件不存在: " + p)
     size = os.path.getsize(p)
-    if size > MAX_READ:
-        raise ValueError("文件超过 %d MB" % (MAX_READ // 1024 // 1024))
+    if size > MAX_APK:
+        raise ValueError("文件 %s 超过 1GB 上限" % _fmt_size(size))
+
+    # 先看 magic 决定怎么解析: APK 按需读, ELF/PE 必须整份(有 256MB 上限)
     with open(p, "rb") as f:
-        buf = f.read(MAX_READ)
-    st = parse(buf)
+        magic = f.read(4)
+    is_zip = magic[:2] == b"PK"
+    if not is_zip and size > MAX_READ:
+        raise ValueError(
+            "ELF/PE 需要整份读入内存, 该文件 %s 超过 %d MB; "
+            "只有 APK 支持到 1GB(zip 可按需读取)" % (_fmt_size(size), MAX_READ // 1024 // 1024))
+
+    s = Sample({"path": p, "filename": os.path.basename(p)})
+    st = parse(s.buf(), p)
     if not st:
         raise ValueError("无法识别的格式(支持 ELF / PE / APK)")
     kind = st.get("format") or "未知"
-    meta = {"format": kind, "size": size, "src": p,
-            "sha256": hashlib.sha256(buf).hexdigest(),
-            "md5": hashlib.md5(buf).hexdigest()}
+    md5, sha = s.digest()
+    meta = {"format": kind, "size": size, "src": p, "sha256": sha, "md5": md5}
     aid = store.artifact_add(int(task_id or 0), os.path.basename(p),
                              "样本·" + kind, json.dumps(meta), p)
-    full = _enrich(st, buf)
+    full = _enrich(st, s)
     full["filename"] = os.path.basename(p)
     return {"sample_id": aid, "filename": os.path.basename(p), "kind": kind,
             "size": size, "info": full}
 
 
-def info(sample_id):
-    row, buf = _load(sample_id)
-    st = parse(buf)
+# ---------------------------------------------------------------- 分块上传
+
+def _part_dir():
+    d = os.path.join(store.UPLOAD_DIR, ".parts")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _part_path(upload_id):
+    """upload_id 只允许十六进制/字母数字 —— 它会拼进文件路径, 不能带 / 和 .."""
+    uid = re.sub(r"[^A-Za-z0-9_-]", "", upload_id or "")[:64]
+    if len(uid) < 8:
+        raise ValueError("upload_id 不合法")
+    return os.path.join(_part_dir(), uid + ".part")
+
+
+def chunk(task_id, upload_id, filename, index, total, data_b64):
+    """收一块。最后一块到了就直接解析并落库, 前端不用再发 finish。
+
+    为什么要分块: 宿主 JSON-RPC 单帧 8MB, 1GB 的包整份 base64 是 1.37GB 的字符串,
+    一次发过去必然失败。4MB/块 → base64 约 5.4MB, 留足余量。
+    """
+    import base64
+    idx = int(index or 0)
+    tot = int(total or 0)
+    if tot <= 0:
+        raise ValueError("total 必须大于 0")
+    if idx < 0 or idx >= tot:
+        raise ValueError("index 越界: %d/%d" % (idx, tot))
+    p = _part_path(upload_id)
+    try:
+        raw = base64.b64decode(data_b64 or "", validate=False)
+    except Exception as e:
+        raise ValueError("base64 解码失败: %s" % e)
+
+    # 按块号 seek 写入 —— 前端并发发块时也能落对位置
+    with open(p, "r+b" if os.path.exists(p) else "w+b") as f:
+        f.seek(idx * CHUNK_SIZE)
+        f.write(raw)
+        f.flush()
+        done = f.seek(0, os.SEEK_END)
+
+    if idx + 1 < tot:
+        return {"upload_id": upload_id, "received": idx + 1, "total": tot,
+                "bytes": done, "done": False}
+
+    # 最后一块: 校验大小 → 改名 → 解析
+    size = os.path.getsize(p)
+    if size <= (tot - 1) * CHUNK_SIZE:
+        raise ValueError("分块不完整: 收到 %d 字节, 至少应有 %d"
+                         % (size, (tot - 1) * CHUNK_SIZE + 1))
+    if size > MAX_APK:
+        os.remove(p)
+        raise ValueError("文件 %s 超过 1GB 上限" % _fmt_size(size))
+
+    name = os.path.basename(filename or "sample.bin")[:120]
+    safe = re.sub(r"[^\w.\-]", "_", name) or "sample.bin"
+    import time as _t
+    final = os.path.join(store.UPLOAD_DIR, "%d_%s" % (int(_t.time()), safe))
+    os.replace(p, final)
+
+    s = Sample({"path": final, "filename": name})
+    st = parse(s.buf(), final)
     if not st:
-        raise ValueError("无法识别的格式(目前支持 ELF / PE)")
-    st = _enrich(st, buf)
-    st["filename"] = row["filename"]
+        # 认不出格式也别把文件删了 —— 取证模块还要用
+        kind = "未知"
+    else:
+        kind = st.get("format") or "未知"
+    md5, sha = s.digest()
+    meta = {"format": kind, "size": size, "sha256": sha, "md5": md5}
+    aid = store.artifact_add(int(task_id or 0), name, "样本·" + kind,
+                             json.dumps(meta), final)
+    full = _enrich(st or {}, s)
+    full["filename"] = name
+    return {"sample_id": aid, "filename": name, "kind": kind, "size": size,
+            "done": True, "info": full}
+
+
+def info(sample_id):
+    s = _load(sample_id)
+    st = parse(s.buf(), s.path)
+    if not st:
+        raise ValueError("无法识别的格式(支持 ELF / PE / APK)")
+    st = _enrich(st, s)
+    st["filename"] = s.row["filename"]
     return st
 
 
 def functions(sample_id):
-    row, buf = _load(sample_id)
-    st = parse(buf)
+    s = _load(sample_id)
+    st = parse(s.buf(), s.path)
     if not st:
         raise ValueError("无法识别的格式")
     out = []
@@ -1097,7 +1336,7 @@ def functions(sample_id):
         out.append({"name": x["name"], "addr": x["addr"], "size": x.get("size", 0), "kind": "导出"})
     if st["format"] == "ELF":
         # 从 .symtab 补函数符号(比 dynsym 全)
-        syms = _elf_symtab(buf)
+        syms = _elf_symtab(s.need("读取符号表"))
         for s in syms:
             if not any(o["addr"] == s["addr"] and o["name"] == s["name"] for o in out):
                 out.append(s)
@@ -1153,8 +1392,9 @@ def _elf_symtab(buf):
 
 
 def disasm(sample_id, addr=0, count=60):
-    row, buf = _load(sample_id)
-    st = parse(buf)
+    s = _load(sample_id)
+    buf = s.need("反汇编")
+    st = parse(buf, s.path)
     if not st:
         raise ValueError("无法识别的格式")
     if st.get("arch") not in ("x86-64", "x86"):
@@ -1211,20 +1451,26 @@ def _elf_vaddr2off(buf, vaddr):
 
 
 def strings(sample_id):
-    row, buf = _load(sample_id)
-    st = parse(buf)
+    """字符串分类提取。
+
+    APK 走 zip 懒加载(1GB 包也只解 4 个最大的 dex); ELF/PE 需要整份扫描。
+    """
+    s = _load(sample_id)
+    st = parse(s.buf(), s.path)
     if st and st.get("format") == "APK":
-        import io
         import zipfile
         try:
-            z = zipfile.ZipFile(io.BytesIO(buf))
+            z = zipfile.ZipFile(s.path)
             dexes = sorted([n for n in z.namelist() if n.endswith(".dex") and "/" not in n],
                            key=lambda n: -z.getinfo(n).file_size)[:4]
             texts = []
             for n in dexes:
+                if z.getinfo(n).file_size > ENTRY_LIMIT:
+                    continue
                 texts.extend(_dex_strings(z.read(n), 120000))
             if texts:
                 return classify_texts(texts[:400000])
         except Exception:
             pass
-    return classify_strings(buf)
+        return classify_strings(b"")
+    return classify_strings(s.need("字符串全扫"))

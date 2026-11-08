@@ -33,7 +33,8 @@ const DARK = {
 
 // 终端会话管理: xterm 实例、SSE 输出流、输入/尺寸同步、主机与命令库。
 export function useTerminal() {
-  const { theme } = useUi()
+  // 终端只认"亮/暗"二值, 不认具体主题名: 加了新主题(雨咯)也照常工作
+  const { scheme } = useUi()
 
   const sessions = ref([])
   const activeId = ref('')
@@ -62,7 +63,7 @@ export function useTerminal() {
   }
 
   function themeOpts() {
-    return theme.value === 'dark' ? DARK : LIGHT
+    return scheme.value === 'dark' ? DARK : LIGHT
   }
 
   // ---- 会话 ----

@@ -4,6 +4,94 @@
 每个版本一个 git tag（`vX.Y.Z`），并发布同名 Release，资产为 `raincough-linux-x86_64-<版本>.tar.gz`。
 每个版本有独立安装命令（见 README / releases.json）。
 
+## v1.0.1 — 2026-11-08
+
+**主题系统升级 + 任务列表**
+
+### 新增：雨咯主题（纯透明毛玻璃 + 自定义背景图）
+
+- 主题从「只有浅色/深色」改成**注册表驱动**：`web/src/stores/ui.js` 的 `THEMES` 是唯一来源，
+  设置页用 `v-for` 渲染卡片；以后加主题只加一条注册项 + 一段 `[data-theme=...]` CSS 变量，
+  不用再改设置页、终端或插件页
+- 新增 `yuluo`（雨咯主题）：**容器一律不铺底色**，只有 1px 白描边 + `backdrop-filter` 模糊，
+  照片完整透出来；文字用 `text-shadow` 在亮处保持可读；圆角 0 → 10–20px；
+  不支持 `backdrop-filter` 的浏览器退回不透明深色
+- **背景图由用户上传**：设置 → 外观 → 背景图片，选图后在本机 canvas 压到 1920px / JPEG
+  再存 `localStorage`（只存当前浏览器，不上传服务器），上传后自动切到雨咯主题；
+  可一键「移除背景」回到中性深灰。`index.html` 引导脚本会在首屏前把图挂上，避免闪一下默认背景
+- 颜色全部来自背景图；面板与插件共用同一套白 alpha 表面，照片透上来就是毛玻璃
+- 白强调色下的可读性兜底：主按钮/危险按钮/选中导航/开关圆点改用深字，
+  `.accent-soft` 反相成压暗（否则白底白字）
+- **插件专属主题样式**（JMComic / 雨咯Bot / 来张图 / 虚拟机）：纯透明下插件内容会直接浮在照片上，
+  按 `data-plugin` 作用域给内容面板补深玻璃底（统一 `--rcp-bg` / `--rcp-line`）：
+  JMComic 本子库卡片、QQBot 概览面板与计数条、来张图的 `.card/.section`、虚拟机的卡片/详情抽屉/弹窗；
+  只改外观不改结构，按钮/标签页/详情/开关等功能保持原样
+- **插件标题压到玻璃边框**：`.plugin-mount` 之前没有内边距，插件自带的顶格标题/工具条会骑在 1px 描边上
+  （JMComic 标题最明显）→ 加 `padding: 12px 14px 14px`；fixed 定位的全屏 IM 不受影响
+- **调色盘 + 不透明度**：设置 → 外观 → 两组「颜色 + 滑杆」
+  （侧边栏选项卡 / 内容区（除背景），1–100%）；颜色用原生取色器，
+  1% 几乎纯透明、100% 完全不透。内容区是一整层铺在 `.content` 上（背景图在它下面、不受影响），
+  卡片不再各自铺色；值存 `localStorage`，`index.html` 首屏前也会先应用
+- **主题能影响插件页**（本次的重点）：
+  - 插件读的是同一套 `var(--*)`，换主题即换肤（atk / QQBot / vm / JMComic 等按约定写变量的插件零改动）
+  - `.plugin-mount` 在雨咯主题下额外包一层玻璃（圆角/描边/模糊/内高光）：
+    即使插件自己写死了颜色、不读变量，外框与底色也跟随主题
+  - 插件挂载点补 `data-theme` / `data-scheme` 属性，插件内部可直接用 `[data-theme="yuluo"]` 选择器
+  - 新增 `ctx.theme`（getter）、`ctx.scheme` 与 `ctx.on('theme', cb)`，
+    主题切换会广播给插件前端（Canvas/图表类插件可重绘）
+- `data-theme` 继续只表达主题 id；新增 `data-scheme`（light/dark）给 xterm 配色、
+  `color-scheme` 这类只认二值的场景 —— 以后加主题不用再动终端代码
+
+### 新增：任务列表（系统功能）
+- 侧栏新增「任务列表」`/tasks`，读统一任务队列 `GET /api/tasks`
+  （插件安装、下载、上传、文件批量操作共用同一个 TaskStore）
+- 全部 / 进行中 / 已完成 / 失败 筛选 + 关键字搜索；2s 自动刷新，页面不可见时暂停
+- 进度条、状态灯、来源/类型标签、相对时间；点开看详情（阶段、meta、错误原文）
+- 「清理已完成」走 `POST /api/tasks/purge`，只清 done/failed，进行中的不受影响
+- 新增 `api.taskDetail(id)` ↔ `GET /api/tasks/{id}`
+
+### 新增：多盘支持与存储策略
+
+- **文件管理支持多盘**：侧栏「磁盘」不再只列物理盘，改为列出所有**已挂载分区**
+  （挂载点 + 剩余空间），点哪个进哪个；新增「自动存储池」入口。
+- **存储策略**（设置 → 存储）：可勾选参与的磁盘、上下调整顺序、设置阈值（0–1000 GB）。
+  新写入按顺序选第一块「剩余空间 ≥ 阈值」的盘，都不够时选剩余最大的；
+  **只影响新数据，不迁移已有数据**。
+- 数据根目录固定为 `<挂载点>/RainCoughData/{uploads,plugins}`，自动创建。
+- 新接口：`GET/POST /api/storage`（磁盘列表 + 阈值 + 顺序）、
+  `GET /api/storage/target?kind=uploads|plugins`（按策略取写入路径并建目录）。
+- **插件接入**：面板把策略结果落成 `<DataDir>/storage-targets.json`（含 plugins/uploads 路径）。
+  - JMComic：自动把 `<plugins>/JMComic/downloads` 加进 `storage_paths` 并设为 `active_path`，
+    阈值同步 `full_threshold_mb`；旧下载目录保留在候选里，老本子照常读。
+  - 雨咯Bot（rcbot）：新媒体写到 `<plugins>/QQBot/media`，旧目录 `/opt/rcbot/media`
+    作为回退根仍可解析；媒体库 `exists` 不受切盘影响。
+  - 策略变更后插件无需重启（每次读取配置/落盘时重新读该文件）。
+
+### 修复
+
+- **侧栏搜索下拉位置错**：`.search-pop` 是 `position:absolute`，但 `.sidebar` 没有定位上下文，
+  下拉按视口左右各 10px 铺满整屏 → 给 `.sidebar` 补 `position: relative`，锚回侧栏
+- **终端不跟随主题**：`useTerminal.syncTheme()` 早就实现了却没有任何调用方，
+  切深浅色后 xterm 仍是旧配色、要重进页面才好 → `Terminal.vue` watch `scheme` 并调用
+- **插件 `ctx.toast` 只进 console**：插件提示用户看不到 → 接入面板统一 toast（右下角，可点掉），
+  顺带 `data-theme` 之前只写在 `<html>` 上、插件内部取不到的问题
+- **深色/雨咯主题首屏闪白**：`web/index.html` 的引导脚本只认 `dark`，选雨咯时首屏没有
+  `data-theme`，会先渲染一帧浅色 → 改为非 `light` 主题都先落 `data-theme` 与 `data-scheme`
+- **QQBot「消息」页被压成 200px**：`.plugin-mount` 上的 `backdrop-filter` 会成为
+  `position:fixed` 子元素的包含块，全屏 IM 被限制在 200px 高 → 玻璃改挂 `::before` 伪元素，
+  不再影响插件的 fixed 定位
+- **白底白字**：活动导航图标（白底白字）、危险按钮、开关圆点、选中态在白色强调色下不可读
+- **趋势图黑块**：`.rchart svg` 底色取 `--bg`，纯透明主题下应透明，只剩网格线
+- **插件 `.badge` 类冲突**：QQBot 会话行的未读数复用面板卡片角标类（absolute），
+  红点飘到全屏 IM 左上角 → 在插件上下文里放宽定位（所有主题通用）
+
+### 版本
+
+- `VERSION` / `internal/config/config.go` / `install.sh` 内嵌版本 / `web/package.json`
+  四处同步到 `1.0.1`
+- `releases.json` 暂未追加 1.0.1 条目：它指向 GitHub Release 资产，
+  需要先打包 `tools/pack-release.sh 1.0.1` 并发 Release 再回填 size/md5/sha256
+
 ## v1.0.0 — 2026-11-07（正式版）
 
 **首个正式版。** 此前对外只有一个公开 Release（`v1.0.0-beta`，2026-10-18）；

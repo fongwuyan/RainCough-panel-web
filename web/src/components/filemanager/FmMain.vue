@@ -25,6 +25,43 @@ const ctx = reactive({ open: false, x: 0, y: 0, item: null })
 
 const QUICK = ['/', '/home', '/tmp', '/var/log', '/opt', '/etc']
 const disks = ref([])
+const storageActive = ref('')
+
+// 多盘：把物理盘摊平成"已挂载分区"，点哪个进哪个
+const mounts = computed(() => {
+  const out = []
+  for (const d of disks.value) {
+    for (const p of (d.partitions || [])) {
+      if (!p.mounted || !p.mountpoint) continue
+      if (p.mountpoint === '/boot' || p.mountpoint.startsWith('/boot/')) continue
+      const total = Number(p.total) || 0
+      const used = Number(p.used) || 0
+      out.push({
+        path: p.mountpoint, dev: p.name, fs: p.fstype,
+        total, free: Math.max(0, total - used),
+      })
+    }
+  }
+  out.sort((a, b) => (a.path === '/' ? -1 : b.path === '/' ? 1 : a.path.localeCompare(b.path)))
+  return out
+})
+
+async function loadStorage() {
+  try {
+    const d = await api.storageInfo()
+    storageActive.value = d.active_path || ''
+  } catch (e) { /* 老版本没有该接口时静默 */ }
+}
+
+// 按存储策略选盘（主盘剩余低于阈值就切下一块），并创建数据根目录
+async function openPool() {
+  try {
+    const d = await api.storageTarget('uploads')
+    if (d && d.path) go(d.path)
+  } catch (e) {
+    error.value = (e && e.message) || '存储池不可用'
+  }
+}
 
 const crumbs = computed(() => {
   const parts = cwd.value.split('/').filter(Boolean)
@@ -46,6 +83,7 @@ onMounted(async () => {
     const d = await api.disks()
     disks.value = d.disks || []
   } catch (e) { /* 忽略 */ }
+  loadStorage()
   window.addEventListener('keydown', onKey)
   document.addEventListener('click', onDocClick)
 })
@@ -332,9 +370,14 @@ function sortCls(k) {
 
         <div class="fm-side-group">
           <div class="fm-side-title">磁盘</div>
-          <div v-for="d in disks" :key="d.name" class="fm-side-item" @click="go('/')">
-            <span class="fm-side-name">{{ d.name }}</span>
-            <span class="fm-side-meta">{{ fmtSize(d.size) }}</span>
+          <div class="fm-side-item" @click="openPool" title="按设置里的多盘策略自动选盘">
+            <span class="fm-side-name">自动存储池</span>
+            <span class="fm-side-meta">{{ storageActive || '按策略' }}</span>
+          </div>
+          <div v-for="m in mounts" :key="m.path" class="fm-side-item"
+            :class="{ active: cwd === m.path }" @click="go(m.path)" :title="m.fs + ' · ' + m.dev">
+            <span class="fm-side-name">{{ m.path }}</span>
+            <span class="fm-side-meta">{{ fmtSize(m.free) }} 可用</span>
           </div>
         </div>
       </aside>

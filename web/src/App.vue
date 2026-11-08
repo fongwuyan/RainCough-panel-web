@@ -11,7 +11,7 @@ import { useUi } from './stores/ui'
 const preview = usePreview()
 const ui = useUi()
 // 侧栏可收起；收起后靠内容区的悬浮球叫回来（状态存 localStorage）
-const { sidebarHidden, ball } = useUi()
+const { sidebarHidden, ball, toasts, dismissToast } = useUi()
 const route = useRoute()
 const errGlobal = ref('')
 const blankHint = ref('')
@@ -71,6 +71,16 @@ onUnmounted(() => {
     </main>
     <Lightbox v-if="!isLogin" />
     <PanelBall v-if="!isLogin && ball.on" />
+    <!-- 轻量提示: 插件 ctx.toast 与面板操作共用 -->
+    <div v-if="!isLogin && toasts.length" class="rc-toasts">
+      <div
+        v-for="t in toasts"
+        :key="t.id"
+        class="rc-toast"
+        :class="'rc-toast-' + t.kind"
+        @click="dismissToast(t.id)"
+      >{{ t.msg }}</div>
+    </div>
     <!-- 安装浮窗挂在根上: 切路由不消失, 装插件时能同时去别处查资料 -->
     <InstallDock v-if="!isLogin" />
   </div>

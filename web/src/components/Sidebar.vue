@@ -31,11 +31,12 @@ async function onLogout() {
   router.replace('/login')
 }
 
-// 内置功能: 工作台 / 文件管理 / 终端 / 插件 / 设置(共 5 项)
+// 内置功能: 工作台 / 文件管理 / 终端 / 任务列表 / 插件 / 设置(共 6 项)
 const PAGES = [
   { key: 'workspace', label: '工作台', path: '/', desc: '概览与状态', icon: 'WD' },
   { key: 'fm', label: '文件管理', path: '/fm', desc: '文件系统', icon: 'FM' },
   { key: 'terminal', label: '终端', path: '/terminal', desc: 'Shell', icon: 'TM' },
+  { key: 'tasks', label: '任务列表', path: '/tasks', desc: '队列与进度', icon: 'TK' },
   { key: 'plugins', label: '插件', path: '/plugins', desc: '管理与安装', icon: 'PL' },
   { key: 'settings', label: '设置', path: '/settings', desc: '偏好', icon: 'SG' },
 ]
@@ -73,6 +74,7 @@ function isActive(name) {
   if (name === 'workspace') return route.path === '/'
   if (name === 'fm') return route.name === 'fm'
   if (name === 'terminal') return route.name === 'terminal'
+  if (name === 'tasks') return route.name === 'tasks'
   if (name === 'plugins') return route.name === 'plugins' || route.name === 'plugin'
   if (name === 'settings') return route.name === 'settings'
   return false

@@ -83,6 +83,27 @@ CREATE TABLE IF NOT EXISTS atk_artifact (
   created_at  INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS atk_vqueue (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     INTEGER NOT NULL,
+  risk_id     INTEGER NOT NULL DEFAULT 0,
+  kind        TEXT NOT NULL DEFAULT '',
+  level       TEXT NOT NULL DEFAULT '低危',
+  target      TEXT NOT NULL DEFAULT '',
+  expect      TEXT NOT NULL DEFAULT '',
+  probe       TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'pending',
+  verdict     TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  resp_status INTEGER NOT NULL DEFAULT 0,
+  resp_ms     INTEGER NOT NULL DEFAULT 0,
+  resp_len    INTEGER NOT NULL DEFAULT 0,
+  resp_snip   TEXT NOT NULL DEFAULT '',
+  ran_at      INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_atk_vq_task ON atk_vqueue(task_id);
+
 CREATE TABLE IF NOT EXISTS atk_dataset (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id     INTEGER NOT NULL DEFAULT 0,
@@ -178,7 +199,7 @@ def task_touch(tid):
 
 def task_delete(tid):
     tid = int(tid)
-    for tb in ("atk_asset", "atk_risk", "atk_artifact", "atk_dataset"):
+    for tb in ("atk_asset", "atk_risk", "atk_artifact", "atk_dataset", "atk_vqueue"):
         ex("DELETE FROM %s WHERE task_id=?" % tb, (tid,))
     ex("DELETE FROM atk_evidence WHERE task_id=?", (tid,))
     ex("DELETE FROM atk_task WHERE id=?", (tid,))
@@ -280,6 +301,74 @@ def risk_mark(rid, status):
 
 def risk_delete(rid):
     ex("DELETE FROM atk_risk WHERE id=?", (int(rid),))
+
+
+# ---------------------------------------------------------------- 验证队列
+# 与 atk_risk 分开存: 风险是"发现", 队列是"待办", 一条风险可能被反复送验证,
+# 每次重跑都要覆盖结果, 混在一张表里会把风险记录冲掉。
+
+def vq_add(task_id, risk_id, kind, level, target, expect, probe):
+    return ex(
+        "INSERT INTO atk_vqueue(task_id, risk_id, kind, level, target, expect, probe, "
+        "status, verdict, note, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (int(task_id), int(risk_id or 0), kind, level, target, expect,
+         probe if isinstance(probe, str) else json.dumps(probe, ensure_ascii=False),
+         "pending", "", "", now()),
+    )
+
+
+def vq_list(task_id, status=""):
+    sql = "SELECT * FROM atk_vqueue WHERE task_id=?"
+    args = [int(task_id)]
+    if status:
+        sql += " AND status=?"
+        args.append(status)
+    sql += " ORDER BY CASE level WHEN '高危' THEN 0 WHEN '中危' THEN 1 ELSE 2 END, id"
+    return q(sql, args)
+
+
+def vq_get(vid):
+    return q1("SELECT * FROM atk_vqueue WHERE id=?", (int(vid),))
+
+
+def vq_has_risk(task_id, risk_id):
+    """同一条风险已在队列里就不重复入队(避免点两次出现两条)。"""
+    return bool(q1("SELECT id FROM atk_vqueue WHERE task_id=? AND risk_id=? LIMIT 1",
+                   (int(task_id), int(risk_id))))
+
+
+def vq_patch(vid, **kw):
+    if not kw:
+        return
+    cols = ", ".join("%s=?" % k for k in kw)
+    ex("UPDATE atk_vqueue SET %s WHERE id=?" % cols, tuple(kw.values()) + (int(vid),))
+
+
+def vq_clear(task_id, keep_done=False):
+    if keep_done:
+        ex("DELETE FROM atk_vqueue WHERE task_id=? AND status!='done'", (int(task_id),))
+    else:
+        ex("DELETE FROM atk_vqueue WHERE task_id=?", (int(task_id),))
+
+
+def vq_remove(vid):
+    ex("DELETE FROM atk_vqueue WHERE id=?", (int(vid),))
+
+
+def vq_stats(task_id):
+    rows = q("SELECT verdict, status, COUNT(*) AS n FROM atk_vqueue WHERE task_id=? "
+             "GROUP BY verdict, status", (int(task_id),))
+    out = {"total": 0, "pending": 0, "done": 0, "确认": 0, "疑似": 0, "未命中": 0, "需人工": 0}
+    for r in rows:
+        n = r["n"]
+        out["total"] += n
+        if r["status"] == "done":
+            out["done"] += n
+            if r["verdict"] in out:
+                out[r["verdict"]] += n
+        else:
+            out["pending"] += n
+    return out
 
 
 # ---------------------------------------------------------------- 提取物

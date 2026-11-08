@@ -23,8 +23,9 @@ const gatePW = argOf('--gate', '')
 // 面板路由: path → 页面名。新增页面时在这里补一行。
 const PAGES = [
   ['/', '工作台'],
-  ['/#/files', '文件管理'],
+  ['/#/fm', '文件管理'],
   ['/#/terminal', '终端'],
+  ['/#/tasks', '任务列表'],
   ['/#/plugins', '插件'],
   ['/#/settings', '设置'],
   ['/#/plugin/JMComic', 'JMComic 插件页'],

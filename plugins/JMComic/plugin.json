@@ -198,9 +198,17 @@
         "args": {
           "aid": "body.aid"
         }
+      },
+      {
+        "method": "GET",
+        "path": "/download_zip/{aid}",
+        "iface": "jmcomic.zip",
+        "args": {
+          "aid": "{aid}"
+        },
+        "file": "zip"
       }
-    ],
-    "rest_public": true
+    ]
   },
   "interfaces": [
     {
@@ -370,6 +378,18 @@
       "visibility": "all",
       "version": "1",
       "description": "内置下载器：只补下失败的页"
+    },
+    {
+      "id": "jmcomic.zip",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "整包下载：返回服务端打包好的 zip 地址"
     }
   ]
 }

@@ -200,8 +200,15 @@ export const api = {
   tmCommandUpdate: (c) => req('PUT', '/api/terminal/commands', c),
   tmCommandDelete: (title) => req('DELETE', `/api/terminal/commands?title=${encodeURIComponent(title)}`),
 
+  // ---- 多盘存储策略 ----
+  storageInfo: () => req('GET', '/api/storage'),
+  storageSave: (cfg) => req('POST', '/api/storage', cfg),
+  storageTarget: (kind) => req('GET', `/api/storage/target?kind=${encodeURIComponent(kind || 'uploads')}`),
+
   // ---- 统一任务队列 ----
   taskQueue: (includeDone, limit) => req('GET', `/api/tasks?done=${includeDone ? '1' : '0'}&limit=${limit || 0}`),
+  // 单条任务详情(含 meta): 任务列表页打开展开时用, 列表接口不返回大字段
+  taskDetail: (id) => req('GET', `/api/tasks/${encodeURIComponent(id)}`),
   taskQueuePurge: () => req('POST', '/api/tasks/purge'),
 
   // ---- 插件市场 ----

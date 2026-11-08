@@ -141,6 +141,16 @@ textarea.rcat-inp{font-family:ui-monospace,Consolas,monospace;resize:vertical}
 .rcat-chip i{cursor:pointer;color:var(--f);font-style:normal}
 .rcat-chip i:hover{color:var(--bad)}
 
+/* 勾选列 + 验证队列 */
+.rcat-chk{width:30px;padding-right:0!important}
+.rcat-chk input{width:13px;height:13px;cursor:pointer;accent-color:var(--ac);vertical-align:middle}
+.rcat-tbl tbody tr.picked{background:var(--acbg)}
+.rcat-vq-snip{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--m);
+ background:var(--sf2);border:1px solid var(--bd);border-radius:7px;padding:8px 10px;margin-top:8px;
+ white-space:pre-wrap;word-break:break-all;max-height:180px;overflow:auto;line-height:1.6}
+.rcat-vq-note{font-size:11.5px;color:var(--m)}
+.rcat-tab b{font-weight:600;color:var(--ac)}
+
 /* 日志条: 吸附底部, 点开成抽屉(对应宿主 log.tail) */
 .rcat-logbox{background:var(--sf);border:1px solid var(--bd);border-bottom:none;
  border-radius:10px 10px 0 0;max-height:200px;overflow:auto;padding:8px 12px;
@@ -331,14 +341,25 @@ const TPL = `
             <option value="">全部状态</option><option>待确认</option><option>已确认</option><option>误报</option>
           </select>
           <span class="rcat-hint">共 <b>{{ filteredRisks.length }}</b> 条</span>
+          <div style="flex:1"></div>
+          <button class="rcat-btn" :disabled="!filteredRisks.length" @click="pickAllVisible">
+            {{ allPicked ? '取消全选' : '全选' }}
+          </button>
+          <button class="rcat-btn p" :disabled="!pickIds.length || vqBusy" @click="sendToQueue">
+            送验证 {{ pickIds.length ? '(' + pickIds.length + ')' : '' }}
+          </button>
         </div>
       </div>
 
       <div class="rcat-tblwrap">
         <table class="rcat-tbl">
-          <thead><tr><th>等级</th><th>类型</th><th>目标</th><th>证据</th><th>状态</th><th></th></tr></thead>
+          <thead><tr>
+            <th class="rcat-chk"><input type="checkbox" :checked="allPicked" @change="pickAllVisible"></th>
+            <th>等级</th><th>类型</th><th>目标</th><th>证据</th><th>状态</th><th></th>
+          </tr></thead>
           <tbody>
-            <tr v-for="r in filteredRisks" :key="r.id">
+            <tr v-for="r in filteredRisks" :key="r.id" :class="{ picked: pickIds.includes(r.id) }">
+              <td class="rcat-chk"><input type="checkbox" :value="r.id" v-model="pickIds"></td>
               <td style="white-space:nowrap"><span class="rcat-dot" :style="{ background: LV_DOT[r.level] }"></span>{{ r.level }}</td>
               <td>{{ r.kind }}</td>
               <td class="rcat-mono" style="max-width:280px;overflow:hidden;text-overflow:ellipsis">{{ r.target }}</td>
@@ -349,7 +370,7 @@ const TPL = `
                 <span v-else class="rcat-faint" style="font-size:11px">已排除</span>
               </td>
             </tr>
-            <tr v-if="!filteredRisks.length"><td colspan="6" class="rcat-empty">还没有风险，先跑一次核查</td></tr>
+            <tr v-if="!filteredRisks.length"><td colspan="7" class="rcat-empty">还没有风险，先跑一次核查</td></tr>
           </tbody>
         </table>
       </div>
@@ -357,8 +378,87 @@ const TPL = `
 
     <!-- ══════════════ 验证 ══════════════ -->
     <template v-if="cur === 'verify'">
-      <div class="rcat-panel"><div class="rcat-ph"><h2>验证</h2><p>单点确认，把疑似变成结论</p></div></div>
-      <div class="rcat-split">
+      <div class="rcat-panel">
+        <div class="rcat-ph"><h2>验证</h2><p>批量自动判定，或单点手工确认</p></div>
+        <div class="rcat-tabs" style="margin-bottom:0">
+          <div class="rcat-tab" :class="{ on: vMode === 'queue' }" @click="openQueue">
+            批量队列 <b v-if="vqStats.pending">· {{ vqStats.pending }} 待执行</b>
+          </div>
+          <div class="rcat-tab" :class="{ on: vMode === 'single' }" @click="vMode = 'single'">单点验证</div>
+        </div>
+      </div>
+
+      <template v-if="vMode === 'queue'">
+        <div class="rcat-stats">
+          <div class="rcat-stat"><p class="rcat-stat-l">待执行</p><p class="rcat-stat-v">{{ vqStats.pending || 0 }}</p></div>
+          <div class="rcat-stat"><p class="rcat-stat-l">确认</p><p class="rcat-stat-v" style="color:var(--bad)">{{ vqStats['确认'] || 0 }}</p></div>
+          <div class="rcat-stat"><p class="rcat-stat-l">疑似</p><p class="rcat-stat-v" style="color:var(--warn)">{{ vqStats['疑似'] || 0 }}</p></div>
+          <div class="rcat-stat"><p class="rcat-stat-l">误报 / 需人工</p><p class="rcat-stat-v">{{ (vqStats['未命中'] || 0) }}<small> / {{ vqStats['需人工'] || 0 }}</small></p></div>
+        </div>
+
+        <div class="rcat-panel" style="padding:10px 12px">
+          <div class="rcat-row">
+            <button class="rcat-btn p" :disabled="vqBusy || !vqStats.pending" @click="runQueue">
+              {{ vqBusy ? '执行中…' : '开始执行' }}
+            </button>
+            <button class="rcat-btn" :disabled="vqBusy || !vq.length" @click="clearQueue(true)">清掉待执行</button>
+            <button class="rcat-btn" :disabled="vqBusy || !vq.length" @click="clearQueue(false)">全部清空</button>
+            <div style="flex:1"></div>
+            <span class="rcat-hint" v-if="!vq.length">队列是空的 —— 到「检测」勾几条风险点「送验证」</span>
+            <span class="rcat-hint" v-else>共 <b>{{ vq.length }}</b> 条 · 判定结果会直接回写风险状态</span>
+          </div>
+          <div v-if="vqRun" class="rcat-mt8">
+            <div class="rcat-hint">{{ vqRun.stage }} · {{ vqRun.status }}<span v-if="vqRun.total"> · {{ vqRun.done }}/{{ vqRun.total }}</span></div>
+            <div class="rcat-progress"><i :style="{ width: pct(vqRun) + '%' }"></i></div>
+          </div>
+        </div>
+
+        <div class="rcat-tblwrap">
+          <table class="rcat-tbl">
+            <thead><tr><th>判定</th><th>等级</th><th>类型</th><th>目标</th><th>依据</th><th>响应</th><th></th></tr></thead>
+            <tbody>
+              <template v-for="q in vq" :key="q.id">
+                <tr :class="{ picked: vqOpen[q.id] }">
+                  <td style="white-space:nowrap">
+                    <span class="rcat-badge" :class="VQ_CLASS[q.verdict] || 'rcat-b-gray'">{{ q.verdict || '待执行' }}</span>
+                  </td>
+                  <td style="white-space:nowrap"><span class="rcat-dot" :style="{ background: LV_DOT[q.level] }"></span>{{ q.level }}</td>
+                  <td>{{ q.kind }}</td>
+                  <td class="rcat-mono" style="max-width:260px;overflow:hidden;text-overflow:ellipsis">{{ q.target }}</td>
+                  <td class="rcat-muted" style="max-width:300px;overflow:hidden;text-overflow:ellipsis" :title="q.note">{{ q.note || '—' }}</td>
+                  <td class="rcat-faint" style="white-space:nowrap;font-size:11px">
+                    <template v-if="q.resp_status">{{ q.resp_status }} · {{ q.resp_ms }}ms</template>
+                    <template v-else>—</template>
+                  </td>
+                  <td style="text-align:right;white-space:nowrap">
+                    <button class="rcat-btn s" @click="toggleVq(q.id)">{{ vqOpen[q.id] ? '收起' : '详情' }}</button>
+                    <button class="rcat-btn s d" @click="removeVq(q)">删</button>
+                  </td>
+                </tr>
+                <tr v-if="vqOpen[q.id]">
+                  <td colspan="7" style="background:var(--sf2)">
+                    <div class="rcat-vq-note"><b>{{ q.kind }}</b> · 探测策略 <code>{{ q.expect }}</code> · 判定依据：{{ q.note || '无' }}</div>
+                    <div class="rcat-row rcat-mt8">
+                      <span class="rcat-hint">人工改判</span>
+                      <button class="rcat-btn s" @click="setVerdict(q, '确认')">确认</button>
+                      <button class="rcat-btn s" @click="setVerdict(q, '疑似')">疑似</button>
+                      <button class="rcat-btn s" @click="setVerdict(q, '未命中')">误报</button>
+                      <button class="rcat-btn s" @click="setVerdict(q, '需人工')">需人工</button>
+                      <div style="flex:1"></div>
+                      <button class="rcat-btn s" @click="q2Verify(q)">转到单点验证</button>
+                    </div>
+                    <div class="rcat-vq-snip" v-if="q.resp_snip">{{ q.resp_snip }}</div>
+                    <div class="rcat-hint rcat-mt8" v-else>没有响应体（未执行，或该策略不做网络请求）</div>
+                  </td>
+                </tr>
+              </template>
+              <tr v-if="!vq.length"><td colspan="7" class="rcat-empty">队列是空的</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <div class="rcat-split" v-else>
         <div class="rcat-list">
           <div class="rcat-list-h">待验证 {{ risks.filter(r => r.status === '待确认').length }} · 已确认 {{ risks.filter(r => r.status === '已确认').length }}</div>
           <div v-for="r in risks.filter(x => x.status !== '误报')" :key="r.id" class="rcat-list-i"
@@ -418,10 +518,10 @@ const TPL = `
     <!-- ══════════════ 分析 ══════════════ -->
     <template v-if="cur === 'analyze'">
       <div class="rcat-panel">
-        <div class="rcat-ph"><h2>分析</h2><p>ELF / PE 结构、保护机制、导入导出与入口反汇编</p></div>
+        <div class="rcat-ph"><h2>分析</h2><p>ELF / PE / APK 结构、保护机制、导入导出与入口反汇编 · APK 支持到 1GB</p></div>
         <div v-if="!aInfo" class="rcat-drop" @click="$refs.bin.click()" @dragover.prevent @drop.prevent="onBinDrop">
-          <b>拖入 ELF / PE 或点击选择</b>
-          结构解析与反汇编都是自研实现，不依赖 capstone / ghidra
+          <b>拖入 ELF / PE / APK 或点击选择</b>
+          APK 支持到 1GB（超过 32MB 自动分块上传），结构解析与反汇编都是自研实现
         </div>
         <div v-else class="rcat-row">
           <span class="rcat-mono">{{ aInfo.filename }}</span>
@@ -434,10 +534,15 @@ const TPL = `
         <input ref="bin" type="file" style="display:none" @change="onBinPick">
         <div class="rcat-row rcat-mt8" v-if="!aInfo">
           <input class="rcat-inp rcat-grow rcat-mono" v-model="aPath"
-                 placeholder="或填服务器上的路径，如 /tmp/app.apk（APK 动辄几十 MB，走这个）">
+                 placeholder="或填服务器上的路径，如 /data/app.apk（1GB 以内，按需读取，不占内存）">
           <button class="rcat-btn" @click="openByPath">按路径打开</button>
         </div>
-        <div v-if="aBusy" class="rcat-hint rcat-mt8">解析中…</div>
+        <div v-if="aBusy" class="rcat-mt8">
+          <div class="rcat-hint">
+            {{ aProg ? ('上传中 ' + aProg + '%（分块 4MB）') : '解析中…' }}
+          </div>
+          <div class="rcat-progress" v-if="aProg"><i :style="{ width: aProg + '%' }"></i></div>
+        </div>
       </div>
 
       <template v-if="aInfo">
@@ -446,7 +551,8 @@ const TPL = `
             <div><span>包名</span><b class="rcat-mono" style="font-size:11px">{{ aInfo.apk.package || '—' }}</b></div>
             <div><span>版本</span><b>{{ aInfo.apk.versionName || '—' }} <span class="rcat-faint">({{ aInfo.apk.versionCode }})</span></b></div>
             <div><span>SDK</span><b>{{ aInfo.apk.minSdk || '?' }} → {{ aInfo.apk.targetSdk || '?' }}</b></div>
-            <div><span>条目 / dex</span><b>{{ aInfo.apk.entries }} / {{ aInfo.apk.dex_count }}</b></div>
+            <div><span>条目 / dex</span><b>{{ aInfo.apk.entries }} / {{ aInfo.apk.dex_count }}<span
+              v-if="aInfo.apk.dex_skipped" class="rcat-faint" style="font-size:10px">（{{ aInfo.apk.dex_skipped }} 个未展开）</span></b></div>
           </div>
           <div class="rcat-kv" v-else>
             <div><span>类型</span><b>{{ aInfo.type }}</b></div>
@@ -974,9 +1080,11 @@ function mount(container, ctx) {
         // 验证
         risks2: [], vRisk: null, vMethod: 'POST', vUrl: '', vHeaders: '', vBody: '',
         vResp: null, vBusy: false, vTab: 'body', payloadKinds: [], payloads: [], pKind: '',
+        // 验证队列（检测 → 批量送验）
+        vMode: 'queue', pickIds: [], vq: [], vqStats: {}, vqRun: null, vqOpen: {}, vqBusy: false,
         // 分析
         aInfo: null, aFuncs: [], aDisasm: null, aStrings: null, aBusy: false, aTab: 'sections',
-        aPath: '', aClassQ: '',
+        aPath: '', aClassQ: '', aProg: 0,
         // 解码
         dInput: '', dCands: [], dChain: [], dOut: '', dSteps: [], dSolve: null,
         rsaOpen: false, rsaN: '', rsaE: '3', rsaC: '',
@@ -1007,6 +1115,7 @@ function mount(container, ctx) {
           ['rot13', 'ROT13'], ['reverse', '反转'], ['strip', '去空白'], ['json_pretty', 'JSON 美化'],
         ],
         LV_CLASS, LV_DOT, KIND_CLASS,
+        VQ_CLASS: { '确认': 'rcat-b-high', '疑似': 'rcat-b-mid', '未命中': 'rcat-b-gray', '需人工': 'rcat-b-info' },
       }
     },
 
@@ -1027,6 +1136,11 @@ function mount(container, ctx) {
           if (this.riskStatus && r.status !== this.riskStatus) return false
           return true
         })
+      },
+      // 只按"当前筛选出来的"判断全选, 否则筛了高危却全选了低危会让人意外
+      allPicked() {
+        const list = this.filteredRisks
+        return list.length > 0 && list.every(r => this.pickIds.includes(r.id))
       },
       respText() {
         if (!this.vResp || !this.vResp.ok) return ''
@@ -1108,6 +1222,7 @@ function mount(container, ctx) {
       clearTimers() {
         if (this._t1) { clearInterval(this._t1); this._t1 = null }
         if (this._t2) { clearInterval(this._t2); this._t2 = null }
+        if (this._t3) { clearInterval(this._t3); this._t3 = null }
       },
       toggleMini() {
         this.mini = !this.mini
@@ -1169,7 +1284,7 @@ function mount(container, ctx) {
       async onEnter(m) {
         if (m === 'recon') await this.loadAssets()
         if (m === 'detect') { await this.loadAssets(); await this.loadRisks() }
-        if (m === 'verify') await this.loadRisks()
+        if (m === 'verify') { await this.loadRisks(); await this.loadQueue() }
         if (m === 'forensic') await this.loadArtifacts()
         if (m === 'env') await this.loadEnv()
         if (m === 'tasks') await this.loadTasks()
@@ -1287,6 +1402,131 @@ function mount(container, ctx) {
       },
 
       // ── 验证 ──
+      // 检测表格的「验证」按钮：切到单点验证并带上地址
+      toVerify(r) {
+        this.pickRisk(r)
+        this.vMode = 'single'
+        this.cur = 'verify'
+        this.onEnter('verify')
+      },
+
+      // ── 验证队列：检测 → 批量送验 ──
+      pickAllVisible() {
+        const ids = this.filteredRisks.map(r => r.id)
+        if (this.allPicked) this.pickIds = this.pickIds.filter(x => !ids.includes(x))
+        else this.pickIds = Array.from(new Set(this.pickIds.concat(ids)))
+      },
+      async sendToQueue() {
+        if (!this.taskId) { this.flash('先选任务', true); return }
+        if (!this.pickIds.length) { this.flash('先勾选风险', true); return }
+        this.vqBusy = true
+        try {
+          const r = await ctx.invoke('atk.verify.enqueue', {
+            task_id: this.taskId, risk_ids: this.pickIds,
+          })
+          this.pickIds = []
+          this.cur = 'verify'
+          this.vMode = 'queue'
+          await this.loadQueue()
+          let msg
+          if (!r.added && r.skipped) msg = '这 ' + r.skipped + ' 条都已在队列里，没有新增'
+          else {
+            msg = '已入队 ' + r.added + ' 条'
+            if (r.skipped) msg += '，跳过 ' + r.skipped + ' 条已在队列里的'
+            if (r.unprobeable) msg += '，' + r.unprobeable + ' 条无法自动探测'
+          }
+          this.flash(msg)
+          this.log('入队策略: ' + JSON.stringify(r.kinds || {}))
+        } catch (e) { this.flash('入队失败：' + e.message, true) }
+        this.vqBusy = false
+      },
+      openQueue() {
+        this.vMode = 'queue'
+        this.loadQueue()
+      },
+      async loadQueue() {
+        if (!this.taskId) { this.vq = []; this.vqStats = {}; return }
+        try {
+          const r = await ctx.invoke('atk.verify.queue', { task_id: this.taskId })
+          this.vq = r.items || []
+          this.vqStats = r.stats || {}
+          const last = await ctx.invoke('atk.verify.queueStatus', { task_id: this.taskId }).catch(() => null)
+          if (last && last.run) this.vqRun = last.run
+        } catch (e) { /* 静默 */ }
+      },
+      async runQueue() {
+        this.vqBusy = true
+        try {
+          const r = await ctx.invoke('atk.verify.runQueue', { task_id: this.taskId })
+          this.vqRun = r.run
+          this.log('队列执行中 ' + r.run_id + ' · ' + r.count + ' 条')
+          this.pollQueue(r.run_id)
+        } catch (e) {
+          this.flash('启动失败：' + e.message, true)
+          this.vqBusy = false
+        }
+      },
+      pollQueue(runId) {
+        if (this._t3) clearInterval(this._t3)
+        const tick = async () => {
+          try {
+            const [s, q] = await Promise.all([
+              ctx.invoke('atk.verify.queueStatus', { run_id: runId }),
+              ctx.invoke('atk.verify.queue', { task_id: this.taskId }),
+            ])
+            this.vqRun = s.run
+            this.vq = q.items || []
+            this.vqStats = q.stats || {}
+            if (this.vqRun && !['queued', 'running'].includes(this.vqRun.status)) {
+              clearInterval(this._t3); this._t3 = null
+              this.vqBusy = false
+              this.log('队列结束：' + this.vqRun.status + ' ' + JSON.stringify(this.vqRun.stats || {}))
+              await this.loadRisks()
+              this.loadTasks()
+            }
+          } catch (e) {
+            clearInterval(this._t3); this._t3 = null
+            this.vqBusy = false
+            this.flash('轮询失败：' + e.message, true)
+          }
+        }
+        tick()
+        this._t3 = setInterval(tick, 800)
+      },
+      toggleVq(id) {
+        const o = Object.assign({}, this.vqOpen)
+        o[id] = !o[id]
+        this.vqOpen = o
+      },
+      async setVerdict(q, v) {
+        try {
+          await ctx.invoke('atk.verify.verdict', { queue_id: q.id, verdict: v })
+          await Promise.all([this.loadQueue(), this.loadRisks()])
+          this.flash('已改判为「' + v + '」')
+        } catch (e) { this.flash(e.message, true) }
+      },
+      async removeVq(q) {
+        try {
+          await ctx.invoke('atk.verify.queueRemove', { queue_id: q.id })
+          await this.loadQueue()
+        } catch (e) { this.flash(e.message, true) }
+      },
+      async clearQueue(keepDone) {
+        if (!confirm(keepDone ? '清掉所有未执行的项？' : '清空整个队列？已完成的结果也会一起没。')) return
+        try {
+          await ctx.invoke('atk.verify.queueClear', { task_id: this.taskId, keep_done: keepDone })
+          await this.loadQueue()
+          this.flash('已清理')
+        } catch (e) { this.flash(e.message, true) }
+      },
+      q2Verify(q) {
+        this.vMode = 'single'
+        this.vUrl = (q.probe && q.probe.url) || q.target
+        this.vMethod = 'GET'
+        this.vTab = 'body'
+        this.vRisk = this.risks.find(r => r.id === q.risk_id) || null
+        this.log('已把队列项带到单点验证')
+      },
       pickRisk(r) {
         this.vRisk = r
         this.vUrl = r.target.startsWith('http') ? r.target : 'https://' + r.target
@@ -1358,32 +1598,63 @@ function mount(container, ctx) {
         const f = e.dataTransfer.files && e.dataTransfer.files[0]
         if (f) this.readBin(f)
       },
-      readBin(f) {
-        if (f.size > 32 * 1024 * 1024) { this.flash('样本超过 32MB', true); return }
+      // 32MB 以内一次发完; 更大的走分块 —— 宿主单帧 8MB, 1GB 整份 base64 是 1.37GB
+      async readBin(f) {
+        const MAX = 1024 * 1024 * 1024
+        if (f.size > MAX) { this.flash('样本 ' + this.fmtSize(f.size) + ' 超过 1GB 上限', true); return }
         this.aBusy = true
-        const fr = new FileReader()
-        fr.onload = async () => {
-          try {
-            const b64 = String(fr.result).split(',')[1] || ''
-            const r = await ctx.invoke('atk.analyze.upload', {
+        this.aProg = 0
+        try {
+          let r
+          if (f.size <= 32 * 1024 * 1024) {
+            const b64 = await this.blobB64(f)
+            r = await ctx.invoke('atk.analyze.upload', {
               task_id: this.taskId, filename: f.name, data_b64: b64,
-            })
-            this.applySample(r)
-            this.log('已解析 ' + f.name + ' → ' + r.kind)
-          } catch (e) { this.flash('解析失败：' + e.message, true) }
-          this.aBusy = false
+            }, { timeoutMs: 120000 })
+          } else {
+            r = await this.uploadChunked(f)
+          }
+          this.applySample(r)
+          this.log('已解析 ' + f.name + ' (' + this.fmtSize(r.size) + ') → ' + r.kind)
+        } catch (e) {
+          this.flash('解析失败：' + e.message, true)
         }
-        fr.onerror = () => { this.aBusy = false; this.flash('读文件失败', true) }
-        fr.readAsDataURL(f)
+        this.aBusy = false
+        this.aProg = 0
+      },
+      blobB64(blob) {
+        return new Promise((res, rej) => {
+          const fr = new FileReader()
+          fr.onload = () => res(String(fr.result).split(',')[1] || '')
+          fr.onerror = () => rej(new Error('读文件失败'))
+          fr.readAsDataURL(blob)
+        })
+      },
+      async uploadChunked(f) {
+        const CH = 4 * 1024 * 1024
+        const total = Math.ceil(f.size / CH)
+        // upload_id 只用于给临时分片文件命名, 服务端会过滤非字母数字字符
+        const uid = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+        let last = null
+        for (let i = 0; i < total; i++) {
+          const b64 = await this.blobB64(f.slice(i * CH, (i + 1) * CH))
+          last = await ctx.invoke('atk.analyze.chunk', {
+            task_id: this.taskId, upload_id: uid, filename: f.name,
+            index: i, total, data_b64: b64,
+          }, { timeoutMs: 180000 })
+          this.aProg = Math.round((i + 1) / total * 100)
+        }
+        return last
       },
       async openByPath() {
         const p = (this.aPath || '').trim()
         if (!p) { this.flash('填文件路径', true); return }
         this.aBusy = true
         try {
-          const r = await ctx.invoke('atk.analyze.open', { task_id: this.taskId, path: p })
+          const r = await ctx.invoke('atk.analyze.open', { task_id: this.taskId, path: p },
+            { timeoutMs: 180000 })
           this.applySample(r)
-          this.log('已打开 ' + p + ' → ' + r.kind)
+          this.log('已打开 ' + p + ' (' + this.fmtSize(r.size) + ') → ' + r.kind)
         } catch (e) { this.flash('打开失败：' + e.message, true) }
         this.aBusy = false
       },
@@ -1393,8 +1664,13 @@ function mount(container, ctx) {
         this.aInfo.filename = r.filename
         this.aInfo.size = r.size
         this.aFuncs = []; this.aDisasm = null; this.aStrings = null
-        this.aTab = (r.info.format === 'APK') ? 'strings' : 'sections'
-        if (r.info.format === 'APK') { this.loadStrings(); return }
+        this.aTab = (r.info.format === 'APK') ? 'classes' : 'sections'
+        if (r.info.format === 'APK') {
+          // 字符串要解 dex 全文扫, 1GB 包上要十几秒 —— 大包不自动跑,
+          // 等用户点「字符串」页签时再加载(类列表和 so 已经解析好了, 够看)
+          if (r.size <= 128 * 1024 * 1024) this.loadStrings()
+          return
+        }
         this.loadFuncs().then(() => this.disasmAt(this.aInfo.entry))
       },
       async loadFuncs() {

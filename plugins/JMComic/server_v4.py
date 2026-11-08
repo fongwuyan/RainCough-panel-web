@@ -145,6 +145,9 @@ def _chapter_files(aid, cid):
 _COVER_INFLIGHT = set()
 _COVER_INFLIGHT_LOCK = _th.Lock()
 
+# 同时生成几张封面。JM 接口并发高了会互相干扰（实测 6 并发有 1/3 失败）
+_COVER_SEM = _th.BoundedSemaphore(3)
+
 # 确认拿不到封面的 aid（本子无图 / 取图失败）。
 # 记下来有两个作用：不必反复重试；顺序裁剪时可以跳过它，避免堵住后面。
 _COVER_FAILED = set()
@@ -271,6 +274,66 @@ def _thumb_url_if_exists(aid):
     return ''
 
 
+def _write_cover(aid, ext, data):
+    """把封面字节落到 cache/<aid>.<ext>，返回路径。"""
+    cache = _cover_cache_dir()
+    os.makedirs(cache, exist_ok=True)
+    out = os.path.join(cache, '%s.%s' % (aid, ext))
+    if os.path.isfile(out) and os.path.getsize(out) > 0:
+        return out
+    tmp = out + '.tmp'
+    with open(tmp, 'wb') as f:
+        f.write(data)
+    os.replace(tmp, out)
+    return out
+
+
+def _local_cover_src(aid):
+    """本地已有这本的图时，直接拿第一页当封面。**0 网络请求**。
+
+    背景：服务端没缓存过封面时只能去 CDN 取，实测 TTFB 41 秒；一屏 20 本排队
+    就是几分钟，客户端必然超时 —— 这就是"云端封面部分不显示"的真因。
+    但这本往往已经下载到服务器上了：zip 里就是解好密的页面，读一条就是封面。
+    """
+    import zipfile
+    exts = ('webp', 'jpg', 'jpeg', 'png', 'gif')
+
+    def is_img(n):
+        return (not n.endswith('/')) and n.rsplit('.', 1)[-1].lower() in exts
+
+    cands = [os.path.join(_cover_cache_dir(), '%s.zip' % aid)]
+    for base in M.storage_paths():
+        cands.append(os.path.join(base, '%s.zip' % aid))
+    for zp in cands:
+        try:
+            if not (os.path.isfile(zp) and os.path.getsize(zp) > 0):
+                continue
+            with zipfile.ZipFile(zp) as zf:
+                names = sorted(n for n in zf.namelist() if is_img(n))
+                if not names:
+                    continue
+                data = zf.read(names[0])
+            if data:
+                return _write_cover(aid, names[0].rsplit('.', 1)[-1].lower(), data)
+        except Exception:
+            continue
+
+    for base in M.storage_paths():
+        d = os.path.join(base, str(aid))
+        if not os.path.isdir(d):
+            continue
+        for root, _dirs, files in os.walk(d):
+            imgs = sorted(f for f in files if f.rsplit('.', 1)[-1].lower() in exts)
+            if not imgs:
+                continue
+            try:
+                with open(os.path.join(root, imgs[0]), 'rb') as f:
+                    return _write_cover(aid, imgs[0].rsplit('.', 1)[-1].lower(), f.read())
+            except Exception:
+                return ''
+    return ''
+
+
 def _cached_cover(aid):
     """只看磁盘缓存，不发起网络请求。有原图但没缩略图时顺手生成。"""
     if not aid or not aid.isdigit():
@@ -289,15 +352,51 @@ def _cached_cover(aid):
                 return _cover_url('%s_t.webp' % aid)
             # 缩略图生成失败（Pillow 缺失/图片损坏）就退回原图，别让封面消失
             return _cover_url('%s.%s' % (aid, ext))
+
+    # 缓存里没有 → 从本地 zip / 图片目录取第一页（不发网络请求）
+    src = _local_cover_src(aid)
+    if src:
+        t = _make_thumb(src, aid)
+        if t:
+            return _cover_url('%s_t.webp' % aid)
+        return _cover_url(os.path.basename(src))
     return ''
 
 
-def _ensure_cover(aid, claim=True):
-    """封面: 缩略图 > 原图 > 在线取第一页并生成。返回 URL 或 ''。
+def _generate_cover(aid):
+    """真正去抓一张封面（含解码、缩略图）。失败抛异常，由调用方决定重试。"""
+    hit = _cached_cover(aid)
+    if hit:
+        return hit
+    cache = _cover_cache_dir()
+    client = M.jm()
+    album = client.get_album_detail(aid)
+    photo_id = str(album.episode_list[0][0])
+    if photo_id == '1' and len(album.episode_list) == 1:
+        photo_id = str(album.album_id)
+    photo = client.get_photo_detail(photo_id)
+    if not photo.page_arr:
+        return ''
+    filename = photo.page_arr[0]
+    ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else 'jpg'
+    save_path = os.path.join(cache, '%s.%s' % (aid, ext))
+    os.makedirs(cache, exist_ok=True)
+    data = M._download_image(aid, photo_id, filename, save_path)
+    if not data:
+        raise RuntimeError('download empty')
+    M.decode_jm_image(data, photo.scramble_id, photo_id, filename, save_path)
+    t = _make_thumb(save_path, aid)
+    _perf('cover', False, 0.0)
+    if t:
+        return _cover_url('%s_t.webp' % aid)
+    return _cover_url('%s.%s' % (aid, ext))
 
-    [claim] True  —— 占用 inflight 名额；若该 aid 正在生成中，直接返回 ''，
-                     本次拿不到，等下一次查询（避免重复生成）。
-             False —— 只查缓存，不触发生成、不占名额（前端轮询用）。
+
+def _ensure_cover(aid, claim=True):
+    """封面: 缩略图 > 原图 > 本地 zip > 在线取第一页并生成。返回 URL 或 ''。
+
+    [claim] True  —— 参与生成；同一 aid 正在生成时等它，而不是直接返回空。
+             False —— 只查缓存，不触发生成（轮询用）。
     """
     if not aid or not aid.isdigit():
         return ''
@@ -308,41 +407,32 @@ def _ensure_cover(aid, claim=True):
     if not claim:
         return ''
 
-    # 抢占：同一 aid 同时只允许一个生成任务
     with _COVER_INFLIGHT_LOCK:
-        if aid in _COVER_INFLIGHT:
-            return ''
-        _COVER_INFLIGHT.add(aid)
-
-    cache = _cover_cache_dir()
-    try:
-        client = M.jm()
-        album = client.get_album_detail(aid)
-        photo_id = str(album.episode_list[0][0])
-        if photo_id == '1' and len(album.episode_list) == 1:
-            photo_id = str(album.album_id)
-        photo = client.get_photo_detail(photo_id)
-        if not photo.page_arr:
-            return ''
-        filename = photo.page_arr[0]
-        ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else 'jpg'
-        save_path = os.path.join(cache, '%s.%s' % (aid, ext))
-        os.makedirs(cache, exist_ok=True)
-        with _SERVE_LOCK:
-            # 双检：等锁期间别的线程可能已经下好了
+        busy = aid in _COVER_INFLIGHT
+        if not busy:
+            _COVER_INFLIGHT.add(aid)
+    if busy:
+        # 别人正在生成：等它（最多 8 秒，桥的超时是 15 秒）。
+        # 旧实现这里直接返回空，客户端会把"正在生成"当成"没有封面"。
+        for _ in range(32):
+            _time.sleep(0.25)
             hit = _cached_cover(aid)
             if hit:
                 return hit
-            data = M._download_image(aid, photo_id, filename, save_path)
-            if not data:
-                return ''
-            M.decode_jm_image(data, photo.scramble_id, photo_id, filename, save_path)
-            t = _make_thumb(save_path, aid)
-        _perf('cover', False, 0.0)
-        if t:
-            return _cover_url('%s_t.webp' % aid)
-        return _cover_url('%s.%s' % (aid, ext))
-    except Exception:
+        return ''
+
+    try:
+        # ★ 并发生成限制在 3：JM 的 album/chapter 接口并发一高就互相干扰，
+        #   表现为"一屏封面里总有几张永远出不来"。失败退避 0.4 秒再试一次。
+        with _COVER_SEM:
+            for attempt in range(2):
+                try:
+                    return _generate_cover(aid)
+                except Exception:
+                    if attempt == 0:
+                        _time.sleep(0.4)
+                    else:
+                        return ''
         return ''
     finally:
         with _COVER_INFLIGHT_LOCK:
@@ -855,6 +945,21 @@ def jm_image(params):
     if not url:
         _err('图片加载失败')
     return {'ok': True, 'url': url}
+
+
+@rc.interface("jmcomic.zip")
+def jm_zip(params):
+    """整包下载：返回 cache 下的 zip 地址，由面板 REST 桥流给客户端。
+
+    App 端改成「下一个 zip 再本地解压」之后，几百次逐页请求变成一次文件传输。
+    """
+    aid = str(_p(params).get('aid') or '').strip()
+    if not aid.isdigit():
+        _err('缺少漫画ID')
+    path = M.ensure_zip(aid)
+    if not path:
+        _err('这本还没下载到服务器，先触发服务端下载')
+    return {'zip': '/api/plugins/JMComic/cache/%s.zip' % aid}
 
 
 @rc.interface("jmcomic.library.list")

@@ -1,9 +1,15 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useTerminal } from './useTerminal'
+import { useUi } from '../../stores/ui'
 
 const tm = useTerminal()
 const { sessions, activeId, activeState, hosts, commands, toast } = tm
+
+// 切主题时同步 xterm 配色。syncTheme 早就实现了, 但一直没人调用 ——
+// 表现是"在设置里切了深浅, 终端还是旧配色, 要重进页面才好"。
+const { scheme } = useUi()
+watch(scheme, () => tm.syncTheme())
 
 const panel = ref('') // '' | hosts | cmds
 const hostForm = reactive({ open: false, old: '', ps: '', host: '', port: 22, username: '', password: '' })

@@ -5,9 +5,10 @@ import Settings from './components/settings/Settings.vue'
 import Terminal from './components/terminal/Terminal.vue'
 import PluginHub from './components/plugins/PluginHub.vue'
 import FmMain from './components/filemanager/FmMain.vue'
+import Tasks from './components/tasks/Tasks.vue'
 import Login from './views/Login.vue'
 
-// 内置功能共 5 项: 工作台 / 文件管理 / 终端 / 插件 / 设置
+// 内置功能共 6 项: 工作台 / 文件管理 / 终端 / 任务列表 / 插件 / 设置
 // (系统扩展与开发文档页已移除; 面板更新走侧边栏常驻浮窗, 不占路由)
 //
 // /login 是公开路由, 不受鉴权守卫拦截; 其它所有路由默认要求已登录。
@@ -18,6 +19,7 @@ const router = createRouter({
     { path: '/', name: 'workspace', component: Workspace },
     { path: '/fm', name: 'fm', component: FmMain },
     { path: '/terminal', name: 'terminal', component: Terminal },
+    { path: '/tasks', name: 'tasks', component: Tasks },
     { path: '/plugins', name: 'plugins', component: PluginHub },
     { path: '/settings', name: 'settings', component: Settings },
     // 插件运行位(前端产物由 /api/plugins/<name>/assets/plugin.js 提供)

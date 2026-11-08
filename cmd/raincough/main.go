@@ -57,6 +57,8 @@ func main() {
 	flag.Parse()
 
 	cfg := config.Load()
+	// 多盘策略落盘：插件后端读 <DataDir>/storage-targets.json 决定新数据写哪
+	writeStorageTargets(cfg.DataDir)
 
 	// ---- 离线 CLI: 旧库迁移(不启动服务) ----
 	if *migrateDB != "" {
@@ -397,6 +399,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/workspace/history", s.handleWSHistory)
 	mux.HandleFunc("/api/disks", s.handleDisks)
 	mux.HandleFunc("/api/disks/unmount", s.handleDiskUnmount)
+	// 多盘存储策略：阈值到了自动切下一块盘（只影响新写入）
+	mux.HandleFunc("/api/storage", s.handleStorage)
+	mux.HandleFunc("/api/storage/target", s.handleStorageTarget)
 	mux.HandleFunc("/api/net/status", s.handleNetStatus)
 
 	// ---- 文件管理 ----

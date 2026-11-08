@@ -65,8 +65,56 @@
   --ring: 0 0 0 2px var(--accent-soft), 0 0 0 4px rgba(109, 92, 255, 0.06);
 }
 
+/* ============================================================
+   雨咯主题 — 毛玻璃 / 半透明 / 无染色
+   ------------------------------------------------------------
+   玻璃不给任何色相: 表面全是白色 alpha, 强调色用近白,
+   真正的"颜色"只来自用户自己上传的背景图(--rc-wallpaper)。
+   没有上传图时用中性深灰兜底。
+   ============================================================ */
+:root[data-theme="yuluo"] {
+  /* 纯透明: 大块容器一律不铺底色, 直接看背景图; 只有输入框/悬停/浮层
+     这些"必须看得见边界"的元素才用极低的黑 alpha, 避免照片亮处吃掉内容。
+     --bg 例外: 它被插件当作"整页/全屏壳"的底色(如 QQBot 全屏 IM),
+     全透明会让面板侧栏透上来, 所以给一层中等深度的中性底。 */
+  --bg: rgba(6, 8, 10, 0.9);
+  --bg-raised: transparent;
+  --surface: transparent;
+  --surface-2: rgba(255, 255, 255, 0.08);
+  --surface-3: rgba(255, 255, 255, 0.14);
+  --border: rgba(255, 255, 255, 0.22);
+  --border-strong: rgba(255, 255, 255, 0.4);
+  --text: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.85);
+  --text-faint: rgba(255, 255, 255, 0.62);
+  --accent: #ffffff;
+  --accent-hover: #f2f6f9;
+  --accent-press: #dfe6ec;
+  /* 强调色是白的, "选中"再用提亮就白上白 —— 所以反相成压暗 */
+  --accent-soft: rgba(0, 0, 0, 0.28);
+  --success: #7be3a3;
+  --success-soft: rgba(123, 227, 163, 0.18);
+  --danger: #ff9a9a;
+  --danger-soft: rgba(255, 154, 154, 0.18);
+  --warning: #f5d27a;
+  --warning-soft: rgba(245, 210, 122, 0.18);
+  --radius: 10px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --ring: 0 0 0 2px rgba(255, 255, 255, 0.35), 0 0 0 4px rgba(0, 0, 0, 0.25);
+  --glass-blur: 14px;
+  --glass-tint: transparent;
+  --glass-edge: rgba(255, 255, 255, 0.32);
+  /* 默认中性深灰; 上传背景图后由 JS 在 <html> 上覆盖成 url(...) */
+  --rc-wallpaper: linear-gradient(160deg, #1b2026 0%, #14181d 50%, #0b0e11 100%);
+}
+
 :root { color-scheme: light; }
-:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-scheme="dark"] { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -113,6 +161,9 @@ a:hover { color: var(--accent-hover); }
 .sidebar {
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
+  /* 搜索下拉(.search-pop)是 absolute, 必须锚在侧栏上;
+     以前没有这个定位上下文, 下拉会按视口左右 10px 铺满整屏 */
+  position: relative;
   background: var(--bg-raised);
   border-right: 1px solid var(--border);
   display: flex;
@@ -585,3 +636,301 @@ h3 { font-size: 14px; font-weight: 700; }
 .search-pop { position: absolute; left: 10px; right: 10px; z-index: 60; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow); margin-top: 4px; }
 .search-item { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .search-item:hover { background: var(--surface-2); }
+
+/* ============================================================
+   雨咯主题 · 纯透明玻璃层
+   ------------------------------------------------------------
+   容器不铺底色, 只留 1px 白描边 + backdrop 模糊, 照片完整透出来。
+   文字靠 text-shadow 在亮处保持可读。
+   ★ 插件页的模糊必须挂在 ::before 上:
+     backdrop-filter 会让元素成为 fixed 子元素的包含块,
+     直接写在 .plugin-mount 上会把 QQBot 全屏 IM(position:fixed) 压成 200px。
+   ============================================================ */
+:root[data-theme="yuluo"] body {
+  background: var(--rc-wallpaper) center / cover no-repeat fixed;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75), 0 0 10px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="yuluo"] .sidebar,
+:root[data-theme="yuluo"] .card,
+:root[data-theme="yuluo"] .ws-card,
+:root[data-theme="yuluo"] .fm-card,
+:root[data-theme="yuluo"] .rc-glass {
+  backdrop-filter: blur(var(--glass-blur)) saturate(110%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(110%);
+  border-color: var(--glass-edge);
+}
+
+:root[data-theme="yuluo"] .sidebar { border-right: 1px solid var(--glass-edge); }
+/* 趋势图是 SVG, 底色走 --bg; 纯透明主题下不要实底, 只留网格线 */
+:root[data-theme="yuluo"] .rchart svg { background: transparent; }
+:root[data-theme="yuluo"] .card:hover { border-color: var(--accent); }
+:root[data-theme="yuluo"] .btn-primary { color: #14181c; box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35); }
+/* 浅色系的状态色上要用深字, 否则白字看不清 */
+:root[data-theme="yuluo"] .btn-danger { color: #2a0f10; }
+/* 白强调色下的选中态: 白底不能配白字 */
+:root[data-theme="yuluo"] .plugin-item.active .nav-icon { color: #14181c; }
+:root[data-theme="yuluo"] .tag-chip.clickable:hover,
+:root[data-theme="yuluo"] ::selection { color: #14181c; }
+/* 开关: 打开时轨道是白的, 圆点要压暗 */
+:root[data-theme="yuluo"] .switch input:checked + .slider::before { background: #14181c; box-shadow: none; }
+:root[data-theme="yuluo"] ::-webkit-scrollbar-thumb { border-color: transparent; background: rgba(255, 255, 255, 0.35); }
+:root[data-theme="yuluo"] ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.55); }
+
+/* 可调底色: 侧栏选项卡 / 内容区(除背景) 各自选色 + 不透明度。
+   1% ≈ 纯透明看背景图, 100% = 完全实底; 颜色来自设置页调色盘。 */
+:root[data-theme="yuluo"] .plugin-item {
+  background: rgba(var(--rc-side-rgb, 8, 10, 13), var(--rc-side-alpha, 0.01));
+}
+:root[data-theme="yuluo"] .plugin-item:hover {
+  background: rgba(var(--rc-side-rgb, 8, 10, 13), calc(var(--rc-side-alpha, 0.01) + 0.06));
+}
+:root[data-theme="yuluo"] .plugin-item.active {
+  background: rgba(var(--rc-side-rgb, 8, 10, 13), calc(var(--rc-side-alpha, 0.01) + 0.1));
+}
+/* 内容区: 一整层铺在 .content 上(背景图在它下面), 卡片本身保持透明 */
+:root[data-theme="yuluo"] .content {
+  background: rgba(var(--rc-content-rgb, 8, 10, 13), var(--rc-content-alpha, 0.01));
+}
+
+/* 必须有边界的控件: 深色薄底, 否则照片亮处会让输入框消失 */
+:root[data-theme="yuluo"] .input,
+:root[data-theme="yuluo"] .select,
+:root[data-theme="yuluo"] textarea {
+  background: rgba(0, 0, 0, 0.32);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+:root[data-theme="yuluo"] .btn:not(.btn-primary):not(.btn-danger):not(.btn-ghost) {
+  background: rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* 浮层必须有底: 模态/下拉/提示浮在内容之上, 全透明会看不清字 */
+:root[data-theme="yuluo"] .modal,
+:root[data-theme="yuluo"] .search-pop,
+:root[data-theme="yuluo"] .rc-toast {
+  background: rgba(10, 12, 15, 0.72);
+  border-color: var(--glass-edge);
+  backdrop-filter: blur(18px) saturate(110%);
+  -webkit-backdrop-filter: blur(18px) saturate(110%);
+}
+
+/* 插件页: 玻璃挂伪元素, 不改变插件的 fixed 定位基准 */
+:root[data-theme="yuluo"] .plugin-mount {
+  position: relative;
+  isolation: isolate;
+  /* 内容不能贴着描边: 插件自带标题/工具条都是顶格排, 不给内边距会压线 */
+  padding: 12px 14px 14px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-lg);
+}
+:root[data-theme="yuluo"] .plugin-mount::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: transparent;
+  backdrop-filter: blur(18px) saturate(110%);
+  -webkit-backdrop-filter: blur(18px) saturate(110%);
+}
+
+/* QQBot「消息」是全屏 IM(position:fixed; inset:0)。它的壳拿 --bg 当底,
+   而本主题 --bg 是半透明的, 面板侧栏会从下面透上来 —— 给这个全屏壳补自己的玻璃底。
+   (只影响这个全屏视图, 普通插件卡片仍是纯透明) */
+:root[data-theme="yuluo"] .plugin-mount .rcq-im {
+  background: rgba(8, 10, 13, 0.82);
+  backdrop-filter: blur(26px) saturate(110%);
+  -webkit-backdrop-filter: blur(26px) saturate(110%);
+}
+
+/* 不支持 backdrop-filter 时给浮层补不透明底 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-theme="yuluo"] .modal,
+  :root[data-theme="yuluo"] .search-pop,
+  :root[data-theme="yuluo"] .rc-toast { background: rgba(10, 12, 15, 0.92); }
+}
+
+/* ---------- 插件与面板的类名冲突兜底 ---------- */
+/* 面板 .badge 是卡片左上角的绝对定位角标; QQBot 会话行复用了同名类放未读数,
+   不覆盖的话数字会飘到全屏 IM 的左上角(所有主题都会)。只放宽定位, 颜色仍归插件。 */
+.plugin-mount .im-row .badge { position: static; margin-left: auto; }
+
+/* ---------- 轻量 toast(面板 + 插件共用) ---------- */
+.rc-toasts {
+  position: fixed; right: 18px; bottom: 18px; z-index: 300;
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: min(420px, 80vw); pointer-events: none;
+}
+.rc-toast {
+  pointer-events: auto; padding: 10px 14px; font-size: 12.5px; line-height: 1.5;
+  color: var(--text); background: var(--bg-raised);
+  border: 1px solid var(--border-strong); border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md); box-shadow: var(--shadow);
+  cursor: pointer; word-break: break-word;
+  animation: rc-toast-in 160ms ease;
+}
+.rc-toast-error { border-left-color: var(--danger); }
+.rc-toast-success, .rc-toast-ok { border-left-color: var(--success); }
+.rc-toast-warn, .rc-toast-warning { border-left-color: var(--warning); }
+@keyframes rc-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+:root[data-theme="yuluo"] .rc-toast {
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  background: rgba(20, 24, 28, 0.82);
+}
+
+/* ============================================================
+   雨咯主题 · 插件专属样式
+   ------------------------------------------------------------
+   纯透明下插件内容会直接浮在照片上, 所以这里给"内容面板"补一层
+   深玻璃: 统一 rgba 底 + 1px 白描边 + 圆角, 只改外观不动结构/功能。
+   作用域用挂载点上的 data-plugin, 互不串味。
+   ============================================================ */
+:root[data-theme="yuluo"] .plugin-mount {
+  --rcp-bg: rgba(8, 10, 13, 0.46);
+  --rcp-bg2: rgba(8, 10, 13, 0.62);
+  --rcp-line: rgba(255, 255, 255, 0.2);
+}
+
+/* ---------- 通用: 插件里的卡片/分区 ---------- */
+:root[data-theme="yuluo"] .plugin-mount .card,
+:root[data-theme="yuluo"] .plugin-mount .section,
+:root[data-theme="yuluo"] .plugin-mount .rcjm-card,
+:root[data-theme="yuluo"] .plugin-mount .rcvm-card,
+:root[data-theme="yuluo"] .plugin-mount .rcvm-drawer,
+:root[data-theme="yuluo"] .plugin-mount .rcq-pnl,
+:root[data-theme="yuluo"] .plugin-mount .rcq-icard,
+:root[data-theme="yuluo"] .plugin-mount .rcq-mcard {
+  background: var(--rcp-bg);
+  border: 1px solid var(--rcp-line);
+  border-radius: 14px;
+}
+:root[data-theme="yuluo"] .plugin-mount .card:hover,
+:root[data-theme="yuluo"] .plugin-mount .rcjm-card:hover,
+:root[data-theme="yuluo"] .plugin-mount .rcvm-card:hover {
+  background: var(--rcp-bg2);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+:root[data-theme="yuluo"] .plugin-mount .section { padding: 14px 16px; }
+
+/* ---------- JMComic (rcjm-*) ---------- */
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-sticky {
+  background: rgba(8, 10, 13, 0.6);
+  border: 1px solid var(--rcp-line);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-ch { border-color: var(--rcp-line); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-tag,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-chip,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-recent {
+  background: rgba(0, 0, 0, 0.32);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-thumb,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-skel {
+  background-color: rgba(0, 0, 0, 0.5);
+}
+/* 本子库卡片: 封面下还有标题/按钮, 必须压住照片否则字看不清 */
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-card {
+  background: rgba(8, 10, 13, 0.72);
+  overflow: hidden;
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-card .rcjm-thumb { border-radius: 10px 10px 0 0; }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="JMComic"] .rcjm-page-img { border-color: var(--rcp-line); }
+
+/* ---------- 虚拟机 (rcvm-*) ---------- */
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-bar { color: rgba(255, 255, 255, 0.8); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-card { padding: 14px; }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-acts { border-top-color: rgba(255, 255, 255, 0.14); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-empty {
+  border: 1px dashed rgba(255, 255, 255, 0.3);
+  border-radius: 14px;
+  background: rgba(8, 10, 13, 0.3);
+  color: rgba(255, 255, 255, 0.7);
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-drawer {
+  background: rgba(8, 10, 13, 0.55);
+  overflow: hidden;
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-drawer-hd { border-bottom: 1px solid rgba(255, 255, 255, 0.14); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-sec { border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-item,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-row { border-color: rgba(255, 255, 255, 0.12); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-meter { background: rgba(255, 255, 255, 0.14); border-radius: 999px; }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-modal-bg {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-modal { background: rgba(10, 12, 15, 0.85); border: 1px solid var(--rcp-line); border-radius: 16px; }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-modal-hd,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="vm"] .rcvm-modal-ft { border-color: rgba(255, 255, 255, 0.14); }
+
+/* ---------- 雨咯Bot / QQBot (rcq-*) ---------- */
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-bar {
+  background: rgba(8, 10, 13, 0.55);
+  border: 1px solid var(--rcp-line);
+  border-radius: 12px;
+  padding: 5px 6px;
+  margin-bottom: 14px;
+}
+/* 消息页内嵌后的底与气泡文字色：雨咯的强调色是白的, 自己发的气泡要深字 */
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-im {
+  background: rgba(8, 10, 13, 0.55);
+  --im-self-t: #14181c;
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-im .im-nav.on {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-im .im-row .pin svg { fill: #14181c; }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-im .im-jump {
+  background: rgba(8, 10, 13, 0.8);
+  border-color: var(--rcp-line);
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-sec { border-top-color: rgba(255, 255, 255, 0.14); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-counters {
+  background: var(--rcp-bg);
+  border: 1px solid var(--rcp-line);
+  border-radius: 14px;
+  padding: 6px 0;
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-row { border-color: rgba(255, 255, 255, 0.1); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-row:hover { background: rgba(255, 255, 255, 0.06); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-log {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--rcp-line);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-fi,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-ta,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-num,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-msgs {
+  background: rgba(0, 0, 0, 0.32);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-msg { border-color: rgba(255, 255, 255, 0.12); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-ava { box-shadow: 0 0 0 1px var(--rcp-line); }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-empty,
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-empty2 {
+  color: rgba(255, 255, 255, 0.6);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="QQBot"] .rcq-toast {
+  background: rgba(10, 12, 15, 0.9);
+  border: 1px solid var(--rcp-line);
+  border-radius: 999px;
+}
+
+/* ---------- 来张图 (复用了面板的 .card/.section/.input) ---------- */
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="laizhangtu"] .section-title {
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="laizhangtu"] .card { padding: 8px; }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="laizhangtu"] .card img { border-radius: 10px; }
+:root[data-theme="yuluo"] .plugin-mount[data-plugin="laizhangtu"] .hint { color: rgba(255, 255, 255, 0.7); }

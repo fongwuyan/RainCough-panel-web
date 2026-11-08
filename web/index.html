@@ -5,10 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RainCough 面板</title>
   <script>
-    // 主题: 默认浅色; 仅当用户选择深色时设置 rc_theme=dark
-    if (localStorage.getItem('rc_theme') === 'dark') {
-      document.documentElement.dataset.theme = 'dark'
-    }
+    // 主题: 首屏渲染前先落属性, 否则深色/雨咯主题会先闪一下白。
+    // 与 stores/ui.js 的 THEMES 对齐: 非 light 的主题都写 data-theme,
+    // 亮暗只用 data-scheme 表达(目前所有非 light 主题都是暗色)。
+    (function () {
+      var t = 'light'
+      try { t = localStorage.getItem('rc_theme') || 'light' } catch (e) {}
+      var scheme = (t === 'light') ? 'light' : 'dark'
+      if (t !== 'light') document.documentElement.dataset.theme = t
+      document.documentElement.dataset.scheme = scheme
+      document.documentElement.style.colorScheme = scheme
+      // 背景图同样要在首屏前落好, 否则会先看到默认深灰再跳成照片
+      try {
+        var bg = localStorage.getItem('rc_theme_bg')
+        if (bg) document.documentElement.style.setProperty('--rc-wallpaper', 'url("' + bg + '")')
+        var sa = localStorage.getItem('rc_side_alpha')
+        var sc = localStorage.getItem('rc_side_color')
+        var ca = localStorage.getItem('rc_content_alpha') || localStorage.getItem('rc_card_alpha')
+        var cc = localStorage.getItem('rc_content_color')
+        function rcRgb(hex) {
+          var h = String(hex || '').replace('#', '')
+          if (!/^[0-9a-fA-F]{6}$/.test(h)) return '8, 10, 13'
+          var n = parseInt(h, 16)
+          return [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(', ')
+        }
+        if (sa) document.documentElement.style.setProperty('--rc-side-alpha', (Number(sa) / 100).toFixed(3))
+        if (sc) document.documentElement.style.setProperty('--rc-side-rgb', rcRgb(sc))
+        if (ca) document.documentElement.style.setProperty('--rc-content-alpha', (Number(ca) / 100).toFixed(3))
+        if (cc) document.documentElement.style.setProperty('--rc-content-rgb', rcRgb(cc))
+      } catch (e) {}
+    })()
   </script>
 </head>
 <body>

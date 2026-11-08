@@ -13,6 +13,31 @@ const NAME = 'JMComic'
  */
 const MAX_COVER_POLL = 260
 
+/**
+ * 搜索筛选。
+ *
+ * mode 直接用服务端的约定：
+ *   site      站内搜索
+ *   tag       按标签搜（关键词就是标签名，多个逗号分隔 = 交集）
+ *   cat:xxx   按分类（关键词可以为空 = 翻这个分类的最新）
+ *
+ * ★ 分类只有同人/单本/短篇/韩漫/美漫/其他这 6 个在移动端接口上生效；
+ *   cosplay / 3D / 英文站 只有网页端支持，而网页端域名在服务器上连不通。
+ *   真人 / 女性向 / cosplay 是**标签**，不是分类。
+ */
+const FILTERS = [
+  { id: 'all', label: '全部', mode: 'site' },
+  { id: 'real', label: '真人', mode: 'tag', preset: '真人' },
+  { id: 'female', label: '女性向', mode: 'tag', preset: '女性向' },
+  { id: 'cosplay', label: 'Cosplay', mode: 'tag', preset: 'cosplay' },
+  { id: 'doujin', label: '同人', mode: 'cat:doujin' },
+  { id: 'single', label: '单本', mode: 'cat:single' },
+  { id: 'short', label: '短篇', mode: 'cat:short' },
+  { id: 'hanman', label: '韩漫', mode: 'cat:hanman' },
+  { id: 'meiman', label: '美漫', mode: 'cat:meiman' },
+  { id: 'another', label: '其他', mode: 'cat:another' },
+]
+
 const STYLE_ID = 'rc-jmcomic-style'
 const RECENT_KEY = 'rc_jmcomic_recent'
 
@@ -32,6 +57,9 @@ const CSS = `
 .rcjm-sticky{position:sticky;top:0;background:var(--bg,#0d1117);z-index:20;padding:8px 0;margin:-2px 0 8px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .rcjm-recent{display:inline-block;font-size:11px;padding:2px 10px;border:1px solid var(--border);border-radius:12px;margin:2px 6px 0 0;color:var(--text-muted);cursor:pointer}
 .rcjm-recent:hover{border-color:var(--accent);color:var(--accent)}
+.rcjm-chip{display:inline-block;font-size:12px;padding:3px 11px;border:1px solid var(--border);border-radius:14px;margin:2px 6px 2px 0;color:var(--text-muted);cursor:pointer;white-space:nowrap;transition:all .12s ease}
+.rcjm-chip:hover{border-color:var(--accent);color:var(--accent)}
+.rcjm-chip.on{background:rgba(58,120,168,.16);border-color:var(--accent);color:var(--accent);font-weight:600}
 `
 
 function mount(container, ctx) {
@@ -50,7 +78,16 @@ function mount(container, ctx) {
         // coverGiveUp：服务端确认拿不到封面的 aid，UI 跳过它们不再重试
         coverGiveUp: {}, coverRetryCursor: 0,
         coverPrefetchTimer: null,
-        prefetchIdx: 0 }
+        prefetchIdx: 0, filterId: 'all' }
+    },
+    computed: {
+      activeFilter() {
+        return FILTERS.find((f) => f.id === this.filterId) || FILTERS[0]
+      },
+      /** 分类模式允许空关键词（= 翻这个分类的最新） */
+      browsing() {
+        return this.activeFilter.mode.startsWith('cat:')
+      },
     },
     mounted() {
       if (!document.getElementById(STYLE_ID)) {
@@ -107,7 +144,7 @@ function mount(container, ctx) {
         clearTimeout(this.searchTimer)
         if (this.kw.trim().length) {
           this.searchTimer = setTimeout(() => this.search(1), 300)
-        } else {
+        } else if (!this.browsing) {
           this.results = []; this.coverQueueStop = true
         }
       },
@@ -121,16 +158,19 @@ function mount(container, ctx) {
       },
       delRecent(kw) { this.recent = this.recent.filter((x) => x !== kw); try { localStorage.setItem(RECENT_KEY, JSON.stringify(this.recent)) } catch (e) {} },
       async search(p = 1) {
-        if (!this.kw.trim() || this.loading) return
+        const f = this.activeFilter
+        const kw = this.kw.trim()
+        // 分类模式可以空关键词；其它模式必须有词
+        if ((!kw && !this.browsing) || this.loading) return
         clearTimeout(this.searchTimer)
         this.loading = true; this.err = ''; this.coverQueueStop = true
         const t0 = Date.now()
         try {
-          const r = await ctx.invoke('jmcomic.search', { keyword: this.kw, page: p, mode: 'keyword' })
+          const r = await ctx.invoke('jmcomic.search', { keyword: kw, page: p, mode: f.mode })
           this.results = (r && r.items) || []
           this.page = p; this.pageCount = (r && r.page_count) || 1
           this.searchMs = Date.now() - t0
-          this.saveRecent()
+          if (kw) this.saveRecent()
           // 换了一批结果：清掉旧的重试队列（coverMap 保留，已取到的不用重取）
           this.coverPending = {}
           this.coverGiveUp = {}
@@ -643,13 +683,27 @@ function mount(container, ctx) {
       const searchBar = this.tab === 'search'
         ? h('div', null, [
             h('div', { class: 'flex', style: 'gap:6px;margin-bottom:6px;' }, [
-              h('input', { class: 'input', style: 'flex:1;', placeholder: '输入关键词，自动搜索', value: this.kw, oninput: (e) => this.onKwInput(e), onkeyup: (e) => { if (e.key === 'Enter') this.search(1) } }),
+              h('input', { class: 'input', style: 'flex:1;', placeholder: this.activeFilter.mode === 'tag' ? '标签名，多个用逗号' : (this.browsing ? '分类浏览（关键词可空）' : '输入关键词，自动搜索'), value: this.kw, oninput: (e) => this.onKwInput(e), onkeyup: (e) => { if (e.key === 'Enter') this.search(1) } }),
               this.kw ? h('button', { class: 'btn btn-sm', onclick: () => this.clearKw() }, '清除') : null,
               h('button', { class: 'btn btn-primary', disabled: this.loading, onclick: () => this.search(1) }, this.loading ? '搜索中…' : '搜索'),
               h('button', { class: 'btn btn-sm', disabled: this.loading || this.page <= 1, onclick: () => this.search(this.page - 1) }, '上一页'),
               h('button', { class: 'btn btn-sm', disabled: this.loading || this.page >= this.pageCount, onclick: () => this.search(this.page + 1) }, '下一页'),
             ]),
-            this.recent.length && !this.results.length ? h('div', { style: 'margin-bottom:6px;' }, this.recent.map((kw) => h('span', { key: kw, class: 'rcjm-recent', onclick: () => { this.kw = kw; this.search(1) }, title: '点击搜索' }, kw))) : null,
+            h('div', { style: 'margin-bottom:6px;white-space:nowrap;overflow-x:auto;' },
+              FILTERS.map((f) => h('span', {
+                key: f.id,
+                class: 'rcjm-chip' + (f.id === this.filterId ? ' on' : ''),
+                title: f.preset ? ('标签：' + f.preset) : (f.mode.startsWith('cat:') ? '分类' : '不限'),
+                onclick: () => {
+                  const wasTag = this.activeFilter.mode === 'tag'
+                  this.filterId = f.id
+                  if (f.preset) this.kw = f.preset
+                  // 从标签切到分类：框里那个词是标签名，不是关键词，别带过去
+                  else if (wasTag) this.kw = ''
+                  this.search(1)
+                },
+              }, f.label))),
+            this.recent.length && !this.results.length ? h('div', { style: 'margin-bottom:6px;' }, this.recent.map((kw) => h('span', { key: kw, class: 'rcjm-recent', onclick: () => { this.filterId = 'all'; this.kw = kw; this.search(1) }, title: '点击搜索' }, kw))) : null,
           ])
         : null
       const statusLine = this.okMsg ? h('p', { style: 'color:var(--success);font-size:12px;margin:4px 0;' }, this.okMsg) : null

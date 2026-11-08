@@ -1,8 +1,8 @@
 {
   "name": "QQBot",
   "label": "雨咯Bot",
-  "version": "1.3.0",
-  "description": "NapCat 多实例 + RainCough Bot 统一控制台",
+  "version": "1.4.0",
+  "description": "QQ 机器人控制台（SnowLuma 单后端）",
   "author": "RainCough",
   "icon": "",
   "requirements": [],
@@ -48,10 +48,10 @@
       "description": "保存连接地址"
     },
     {
-      "id": "qqbot.nc.overview",
+      "id": "qqbot.overview",
       "visibility": "all",
       "version": "1",
-      "description": "NapCat 概览（账号/系统/网络计数）"
+      "description": "概览（账号 / 版本 / 系统 / 计数）"
     },
     {
       "id": "qqbot.chat.query",
@@ -225,7 +225,7 @@
       "id": "qqbot.account.qrcode",
       "visibility": "main",
       "version": "1",
-      "description": "取登录二维码（NapCat 扫码登录）"
+      "description": "取登录入口（SnowLuma 远程桌面）"
     },
     {
       "id": "qqbot.account.refresh_qrcode",
@@ -249,13 +249,13 @@
       "id": "qqbot.account.logs",
       "visibility": "main",
       "version": "1",
-      "description": "NapCat 运行日志"
+      "description": "SnowLuma 容器日志"
     },
     {
       "id": "qqbot.account.logs.clear",
       "visibility": "main",
       "version": "1",
-      "description": "清空实时日志缓冲"
+      "description": "清空实时日志缓冲（容器日志由 Docker 管理）"
     },
     {
       "id": "qqbot.chat.sessions",
@@ -304,22 +304,20 @@
     "level": "apply",
     "check": [
       {
-        "id": "napcat",
-        "label": "NapCat 协议端",
+        "id": "snowluma",
+        "label": "SnowLuma 容器在运行",
         "required": true,
-        "run": "curl -fsS -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:6099/webui/",
-        "expect": "^2",
-        "hint": "NapCat 未运行或未安装（第三方客户端，面板无法代装）",
-        "guide": "https://napcat.napneko.icu/guide/start"
+        "run": "docker inspect -f '{{.State.Status}}' snowluma 2>/dev/null || echo absent",
+        "expect": "^running$",
+        "hint": "SnowLuma 容器未运行或不存在 —— 去「QQ 账户」点「启动」或「扫码登录」拉起它"
       },
       {
         "id": "onebot",
-        "label": "QQ 已登录(OneBot 协议端)",
+        "label": "QQ 已登录（OneBot get_login_info）",
         "required": true,
-        "run": "command -v ss >/dev/null 2>&1 || { echo '缺少 ss(iproute2), 无法探测端口'; exit 2; }; ss -ltn 2>/dev/null | grep -q ':6700 ' || { echo 'NapCat OneBot(6700) 未监听: QQ 未登录或 NapCat 未运行'; exit 1; }; echo listening",
-        "expect": "^listening$",
-        "hint": "NapCat 在跑但 QQ 没登录 —— 需要扫一次二维码(会话失效时重扫即可)",
-        "guide": "https://napcat.napneko.icu/guide/start"
+        "run": "curl -s -m 5 -X POST http://127.0.0.1:3000/get_login_info -H 'Authorization: Bearer rcsnow' -H 'Content-Type: application/json' -d '{}' | grep -q '\"user_id\"' || { echo 'QQ 未登录或 OneBot 未就绪'; exit 1; }; echo logged_in",
+        "expect": "^logged_in$",
+        "hint": "容器在跑但 QQ 没登录 —— 打开「QQ 账户」里的远程桌面扫码（登录态失效时重扫即可）"
       },
       {
         "id": "deps",

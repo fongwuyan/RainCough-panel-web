@@ -435,6 +435,168 @@ _load_scramble_cache()
 _cdn_lock = threading.BoundedSemaphore(4)
 
 
+# ---------------------------------------------------------------- 封面
+# 封面是列表里最先看到的东西，却要现抓现转（调 JM 接口 + 下载 + 解码打乱），
+# 单张几秒。一屏 20 本并发请求，_cdn_lock 只有 4 个并发额度，后面的排队十几秒 ——
+# 客户端（Coil）10s 超时，表现就是「部分封面不显示」。
+# 解法是提前做：列表返回时就把这一屏的封面丢后台生成，等客户端真要图时已经命中缓存。
+
+_COVER_EXTS = ('jpg', 'jpeg', 'webp', 'png', 'gif')
+_cover_inflight = set()
+_cover_inflight_lock = threading.Lock()
+
+
+def cover_path(aid):
+    """已有封面文件的路径；没有返回 None。"""
+    for ext in _COVER_EXTS:
+        p = os.path.join(IMG_DIR, '%s.%s' % (aid, ext))
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def make_cover(aid):
+    """抓一张封面并落盘。
+
+    同一本正在抓时不再并发抓一遍（列表滚回去会重复请求同一张），最多等 8 秒看结果。
+    """
+    p = cover_path(aid)
+    if p:
+        return p
+    with _cover_inflight_lock:
+        busy = aid in _cover_inflight
+        if not busy:
+            _cover_inflight.add(aid)
+    if busy:
+        for _ in range(40):
+            time.sleep(0.2)
+            p = cover_path(aid)
+            if p:
+                return p
+        return None
+    try:
+        return _fetch_cover(aid)
+    finally:
+        with _cover_inflight_lock:
+            _cover_inflight.discard(aid)
+
+
+def _fetch_cover(aid):
+    try:
+        client = jm()
+        album = client.get_album_detail(aid)
+        photo_id = str(album.episode_list[0][0])
+        if photo_id == '1' and len(album.episode_list) == 1:
+            photo_id = str(album.album_id)
+        photo = client.get_photo_detail(photo_id)
+        if not photo.page_arr:
+            return None
+        filename = photo.page_arr[0]
+        ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else 'jpg'
+        save_path = os.path.join(IMG_DIR, '%s.%s' % (aid, ext))
+        with _cdn_lock:
+            p = cover_path(aid)
+            if p:
+                return p
+            data = _download_image(aid, photo_id, filename, save_path)
+            if not data:
+                return None
+            decode_jm_image(data, photo.scramble_id, photo_id, filename, save_path)
+        return cover_path(aid)
+    except Exception:
+        return None
+
+
+def warm_covers(aids, limit=24):
+    """后台预热一批封面。列表接口调用，不阻塞响应。"""
+    todo = [a for a in (aids or []) if a][:limit]
+    if not todo:
+        return
+
+    def run():
+        for a in todo:
+            try:
+                if not cover_path(a):
+                    make_cover(a)
+            except Exception:
+                pass
+
+    threading.Thread(target=run, daemon=True, name='cover-warm').start()
+
+
+# ---------------------------------------------------------------- 整包下载
+# 手机端逐页拉图片是「每页一次 HTTP + 一次目录查找」的平方级开销，
+# 几百页下来在 SAF 目录上直接卡死。改成服务端打成一个 zip，客户端下一个文件。
+
+def zip_cache_dir():
+    d = os.path.join(PLUGIN_DIR, 'cache')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def ensure_zip(aid):
+    """确保 `<cache>/<aid>.zip` 存在，返回它的路径；拿不到返回 None。
+
+    顺序：缓存已有 → 下载目录里现成的 zip（硬链过来）→ 用解好的图片目录现打。
+    """
+    aid = str(aid or '')
+    if not aid.isdigit():
+        return None
+    zpath = os.path.join(zip_cache_dir(), '%s.zip' % aid)
+    try:
+        if os.path.isfile(zpath) and os.path.getsize(zpath) > 0:
+            return zpath
+    except OSError:
+        pass
+
+    bases = storage_paths()
+    # 下载完成时 server.py 已经在下载目录里生成过 zip，直接硬链，省一次压缩
+    for base in bases:
+        p = os.path.join(base, '%s.zip' % aid)
+        try:
+            if not (os.path.isfile(p) and os.path.getsize(p) > 0):
+                continue
+        except OSError:
+            continue
+        try:
+            os.link(p, zpath)
+            return zpath
+        except OSError:
+            try:
+                shutil.copy2(p, zpath)
+                return zpath
+            except OSError:
+                pass
+
+    # 只有图片目录：现场打一个
+    import zipfile
+    for base in bases:
+        d = os.path.join(base, aid)
+        if not os.path.isdir(d):
+            continue
+        tmp = zpath + '.part'
+        try:
+            with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for root, _dirs, files in os.walk(d):
+                    for f in files:
+                        if f.startswith('.'):
+                            continue
+                        fp = os.path.join(root, f)
+                        try:
+                            zf.write(fp, os.path.relpath(fp, base))
+                        except OSError:
+                            continue
+            os.replace(tmp, zpath)
+            return zpath
+        except Exception:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return None
+    return None
+
+
 def _persist_scramble():
     try:
         with open(_SCRAMBLE_FILE, 'w', encoding='utf-8') as f:
@@ -917,6 +1079,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if m:
                         item['author'] = m.get('author', '')
                         item['tags'] = m.get('tags', [])
+                warm_covers([str(x.get('id', '')) for x in items])
                 return 200, {'items': items, 'total': total, 'page_count': page_count}
             if mode == 'author':
                 result = client.search_author(search_query=keyword, page=page)
@@ -935,6 +1098,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     item['tags'] = m.get('tags', [])
             total = getattr(result, 'total', 0)
             page_count = getattr(result, 'page_count', 1)
+            warm_covers([str(x.get('id', '')) for x in items])
             return 200, {'items': items, 'total': total, 'page_count': page_count}
         except Exception as e:
             return 502, {'error': '搜索失败: %s' % str(e)}
@@ -1117,16 +1281,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _rt_zip(self, aid):
         if not aid or not aid.isdigit():
             return 400, {'error': '缺少漫画ID'}
-        zip_path = None
-        for base in storage_paths():
-            p = os.path.join(base, f'{aid}.zip')
-            if os.path.isfile(p):
-                zip_path = p
-                break
-        if zip_path:
-            self._file(zip_path, 'application/zip', as_attach=True)
-            return None
-        return 404, {'error': 'ZIP 文件不存在'}
+        p = ensure_zip(aid)
+        if not p:
+            return 404, {'error': 'ZIP 文件不存在'}
+        self._file(p, 'application/zip', as_attach=True)
+        return None
 
     # ---- 路由: /image/<aid>/<cid>/<filename> ----
     def _rt_image(self, rest):
@@ -1155,47 +1314,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _rt_cover(self, aid):
         if not aid or not aid.isdigit():
             return 400, {'error': '缺少漫画ID'}
-
-        def _find_cover():
-            for ext in ('jpg', 'jpeg', 'webp', 'png', 'gif'):
-                p = os.path.join(IMG_DIR, f'{aid}.{ext}')
-                if os.path.isfile(p):
-                    return p
-            return None
-
-        p = _find_cover()
-        if p:
-            ext = os.path.splitext(p)[1][1:] or 'webp'
-            self._file(p, _guess_mime('x.' + ext))
-            return None
-        try:
-            client = jm()
-            album = client.get_album_detail(aid)
-            # 当前库顺序: episode_list[0] = (cid, index, name)
-            photo_id = str(album.episode_list[0][0])
-            if photo_id == '1' and len(album.episode_list) == 1:
-                photo_id = str(album.album_id)
-            photo = client.get_photo_detail(photo_id)
-            if not photo.page_arr:
-                return 404, {'error': '该漫画无图片'}
-            filename = photo.page_arr[0]
-            ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else 'jpg'
-            save_path = os.path.join(IMG_DIR, f'{aid}.{ext}')
-            with _cdn_lock:
-                p = _find_cover()
-                if p:
-                    ext2 = os.path.splitext(p)[1][1:] or 'webp'
-                    self._file(p, _guess_mime('x.' + ext2))
-                    return None
-                data = _download_image(aid, photo_id, filename, save_path)
-                if not data:
-                    return 502, {'error': '封面下载失败'}
-                decode_jm_image(data, photo.scramble_id, photo_id, filename, save_path)
-            ext2 = os.path.splitext(save_path)[1][1:] or 'webp'
-            self._file(save_path, _guess_mime('x.' + ext2))
-            return None
-        except Exception as e:
-            return 502, {'error': '获取封面失败: %s' % str(e)}
+        p = cover_path(aid) or make_cover(aid)
+        if not p:
+            return 404, {'error': '封面不可用'}
+        ext = os.path.splitext(p)[1][1:] or 'webp'
+        self._file(p, _guess_mime('x.' + ext))
+        return None
 
     # ---- 路由: /library GET / DELETE ----
     def _rt_library_get(self, q):
@@ -1205,6 +1329,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         total = len(items)
         start = (page - 1) * page_size
         paged = items[start:start + page_size]
+        # 这一屏的封面先在后台生成，等客户端来取时就有缓存了
+        warm_covers([str(x.get('aid', '')) for x in paged])
         return 200, {
             'items': paged, 'total': total, 'page': page,
             'page_size': page_size, 'page_count': (total + page_size - 1) // page_size,

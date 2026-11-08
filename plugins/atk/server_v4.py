@@ -28,8 +28,9 @@ from modules import forensic as m_forensic  # noqa: E402
 from modules import recon as m_recon      # noqa: E402
 from modules import task as m_task        # noqa: E402
 from modules import verify as m_verify    # noqa: E402
+from modules import vqueue as m_vqueue    # noqa: E402
 
-VERSION = "1.0.8"
+VERSION = "1.1.0"
 LABEL = "网络攻防工具库"
 
 
@@ -227,6 +228,69 @@ def verify_poc(params):
     return m_verify.gen_poc(_p(params))
 
 
+# ── 验证队列: 检测结果一键批量送验 ──
+
+@rc.interface("atk.verify.enqueue")
+def verify_enqueue(params):
+    tid = _i(params, "task_id")
+    _task(tid)
+    ids = _p(params).get("risk_ids") or []
+    levels = _p(params).get("levels") or []
+    return m_vqueue.enqueue(tid, ids, levels)
+
+
+@rc.interface("atk.verify.queue")
+def verify_queue(params):
+    tid = _i(params, "task_id")
+    _task(tid)
+    return {"items": m_vqueue.rows(tid), "stats": store.vq_stats(tid)}
+
+
+@rc.interface("atk.verify.runQueue")
+def verify_run_queue(params):
+    tid = _i(params, "task_id")
+    _task(tid)
+    ids = [int(x) for x in (_p(params).get("ids") or []) if str(x).isdigit()]
+    rid, n = m_vqueue.run(tid, ids)
+    return {"run_id": rid, "count": n, "run": store.run_get(rid)}
+
+
+@rc.interface("atk.verify.queueStatus")
+def verify_queue_status(params):
+    rid = _s(params, "run_id")
+    if rid:
+        r = store.run_get(rid)
+        if not r:
+            raise ValueError("运行记录不存在")
+        return {"run": r}
+    return {"run": store.run_latest(_i(params, "task_id"), "verify")}
+
+
+@rc.interface("atk.verify.verdict")
+def verify_verdict(params):
+    vid = _i(params, "queue_id")
+    if not vid:
+        raise ValueError("缺少 queue_id")
+    return m_vqueue.set_verdict(vid, _s(params, "verdict"))
+
+
+@rc.interface("atk.verify.queueClear")
+def verify_queue_clear(params):
+    tid = _i(params, "task_id")
+    _task(tid)
+    store.vq_clear(tid, bool(_p(params).get("keep_done")))
+    return {"ok": True, "stats": store.vq_stats(tid)}
+
+
+@rc.interface("atk.verify.queueRemove")
+def verify_queue_remove(params):
+    vid = _i(params, "queue_id")
+    if not vid:
+        raise ValueError("缺少 queue_id")
+    store.vq_remove(vid)
+    return {"ok": True}
+
+
 # ══════════════════════════════════════════════════════════ 分析
 # 结构解析与反汇编全部自研(见 modules/analyze.py 与 core/x86.py),
 # 不依赖 capstone / pyelftools / pefile。
@@ -240,6 +304,14 @@ def analyze_upload(params):
 @rc.interface("atk.analyze.open")
 def analyze_open(params):
     return m_analyze.open_path(_i(params, "task_id"), _s(params, "path"))
+
+
+@rc.interface("atk.analyze.chunk")
+def analyze_chunk(params):
+    """分块上传。单块 4MB, 最后一块到了直接解析 —— 支持到 1GB。"""
+    return m_analyze.chunk(_i(params, "task_id"), _s(params, "upload_id"),
+                           _s(params, "filename"), _i(params, "index"),
+                           _i(params, "total"), _s(params, "data_b64"))
 
 
 @rc.interface("atk.analyze.info")

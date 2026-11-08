@@ -1,4 +1,4 @@
-// QQ Bot 插件前端 —— NapCat + RainCough Bot 统一控制台
+// QQ Bot 插件前端 —— SnowLuma + RainCough Bot 统一控制台
 //
 // 形态约束（对齐 atk / docker 等插件的做法）：
 //  · 不自带左侧栏 —— 宿主已有主导航，插件内导航放顶部横向选项卡
@@ -6,7 +6,6 @@
 //  · 颜色、圆角、按钮、输入框全走宿主 CSS 变量与 .btn/.input/.switch 等既有类
 //  · ctx.invoke 已解包：成功直接返回 result，失败抛异常 → try/catch
 import { createApp, reactive } from 'vue'
-import qrcode from './qrcode.mjs'
 // 消息页（仿 QQ 桌面端）：整屏 overlay，独立样式与数据层
 import { IM } from './im/shell.js'
 import { injectIMStyle } from './im/tokens.js'
@@ -84,18 +83,6 @@ function mediaFileUrl(m) {
 function mediaAlive(md) {
   if (!md || !md.local) return false
   return md.exists !== 0
-}
-
-function makeQr(text) {
-  if (!text) return ''
-  try {
-    const qr = qrcode(0, 'M')
-    qr.addData(text)
-    qr.make()
-    return qr.createSvgTag({ cellSize: 5, margin: 0, scalable: true })
-  } catch (e) {
-    return ''
-  }
 }
 
 // ------------------------------------------------------------------ 样式
@@ -200,7 +187,7 @@ const CSS = `
 .rcq-qr svg{width:100%;height:100%;display:block}
 .rcq-qr .ph{color:#999;font-size:12px;text-align:center;padding:0 10px}
 
-/* 日志（NapCat 猫猫日志风格：纯文本行，按级别着色） */
+/* 日志（SnowLuma 容器日志：纯文本行，按级别着色） */
 .rcq-log{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);
  padding:11px 13px;font-family:var(--font-mono);font-size:11.5px;line-height:1.85;
  max-height:min(64vh,640px);overflow:auto;white-space:pre-wrap;word-break:break-word}
@@ -437,7 +424,7 @@ function injectStyle() {
 }
 
 
-// ------------------------------------------------------------------ 概览（仿 NapCat 基础信息）
+// ------------------------------------------------------------------ 概览（SnowLuma）
 
 const Overview = {
   data() { return { S, ov: null, busy: false, err: '', timer: null } },
@@ -449,13 +436,10 @@ const Overview = {
     mem() { return this.sysinfo.memory || {} },
     cnt() { return (this.ov && this.ov.counters) || {} },
     botst() { return (this.ov && this.ov.bot) || null },
-    // 框架不同，版本区三行的含义不同（NapCat 有 WebUI，SnowLuma 只有 OneBot）
-    isSnow() { return ((this.ov && this.ov.backend) || '') === 'snowluma' },
+    // 单后端：版本区三行固定是框架 / QQ / OneBot 网关
     vers() {
       const v = this.ver
-      return this.isSnow
-        ? [['框架版本', v.napcat], ['QQ 版本', v.qq], ['OneBot 版本', v.webui]]
-        : [['NapCat 版本', v.napcat], ['QQ 版本', v.qq], ['WebUI 版本', v.webui]]
+      return [['框架版本', v.framework], ['QQ 版本', v.qq], ['OneBot 版本', v.webui]]
     },
     cpuPct() {
       const v = parseFloat((this.cpu.usage || {}).system)
@@ -483,7 +467,7 @@ const Overview = {
     async load(silent) {
       if (!silent) this.busy = true
       try {
-        this.ov = await call('qqbot.nc.overview')
+        this.ov = await call('qqbot.overview')
         this.err = (this.ov.errors || []).join('；')
       } catch (e) {
         this.err = errText(e)
@@ -574,24 +558,17 @@ const Overview = {
       </div>
     </div>
 
-    <div class="rcq-counters" v-if="isSnow" style="grid-template-columns:repeat(4,1fr)">
+    <div class="rcq-counters" style="grid-template-columns:repeat(4,1fr)">
       <div class="rcq-ct"><b>{{ cnt.groups || 0 }}</b><span>群聊</span></div>
       <div class="rcq-ct"><b>{{ cnt.friends || 0 }}</b><span>好友</span></div>
       <div class="rcq-ct"><b>{{ cnt.sessions || 0 }}</b><span>会话</span></div>
       <div class="rcq-ct"><b>{{ cnt.messages || 0 }}</b><span>消息</span></div>
     </div>
-    <div class="rcq-counters" v-else>
-      <div class="rcq-ct"><b>{{ cnt.configs || 0 }}</b><span>网络配置</span></div>
-      <div class="rcq-ct"><b>{{ cnt.httpServers || 0 }}</b><span>HTTP 服务器</span></div>
-      <div class="rcq-ct"><b>{{ cnt.httpClients || 0 }}</b><span>HTTP 客户端</span></div>
-      <div class="rcq-ct"><b>{{ cnt.wsServers || 0 }}</b><span>WS 服务器</span></div>
-      <div class="rcq-ct"><b>{{ cnt.wsClients || 0 }}</b><span>WS 客户端</span></div>
-    </div>
 
     <div class="rcq-pnl">
       <div class="rcq-ph"><b>RainCough Bot</b><span class="sp"></span>
         <span class="rcq-lamp" v-if="botst"><b :class="botst.onebot && botst.onebot.connected ? 'on' : 'off'"></b>
-          {{ botst.onebot && botst.onebot.connected ? (isSnow ? '已连 SnowLuma' : '已连 NapCat') : '未连接' }}</span>
+          {{ botst.onebot && botst.onebot.connected ? '已连 SnowLuma' : '未连接' }}</span>
         <span class="rcq-lamp" v-else><b class="off"></b>rcbot 未运行</span>
       </div>
       <div class="rcq-row2" style="margin-top:0">
@@ -608,37 +585,24 @@ const Overview = {
   </div>`,
 }
 
-// ------------------------------------------------------------------ QQ 账户（多实例）
+// ------------------------------------------------------------------ QQ 账户（SnowLuma 单后端）
 //
-// 一个 QQ 号 = 一个 NapCat 实例 = 一套 systemd 单元。
-// 端口：WebUI = 6099+index，OneBot = 6700+2*index（避开 rcbot 的 6710）。
+// 一个 QQ 号 = 一个 SnowLuma 容器（Docker）。框架没有二维码 API，
+// 登录只能在内嵌的 noVNC 远程桌面里完成 —— 所以这里不再有二维码图片、
+// 「刷新二维码」、后端切换下拉与快登按钮。
 
 const Accounts = {
   data() {
     return {
       S,
-      // 单账户：只有一个 QQ 号
       acc: null,
-      busy: '', err: '', qr: '', qrErr: '', qrBusy: false,
-      qrOpen: false, msg: '',
-      // 后端（napcat / snowluma）与内嵌远程桌面
-      be: null, novncUrl: '', novncPw: '', switching: false,
+      busy: '', err: '', vncBusy: false,
+      loginOpen: false, msg: '', vncErr: '',
+      novncUrl: '', novncPw: '',
     }
   },
   computed: {
     login() { return !!(this.acc && this.acc.login) },
-    // 当前是不是 SnowLuma（扫码要靠 noVNC 远程桌面，不是二维码图片）
-    isSL() { return (this.acc && this.acc.backend === 'snowluma') },
-    beKind() { return (this.be && this.be.kind) || (this.acc && this.acc.backend) || 'napcat' },
-    // 框架下拉项：后端会告诉我们哪个"没装"（比如 NapCat 已被卸载），
-    // 没装的就置灰，免得切过去报"服务不存在"
-    beOpts() {
-      const list = (this.be && this.be.options) || []
-      if (list.length) return list
-      return [{ value: 'napcat', label: 'NapCat（原生安装）' },
-              { value: 'snowluma', label: 'SnowLuma（Docker）' }]
-    },
-    napcatOk() { return (this.beOpts.find((o) => o.value === 'napcat') || {}).installed !== false },
     ready() { return !!(this.acc && this.acc.core_ready) },
     online() { return !!(this.acc && (this.acc.online || this.acc.connected)) },
     uin() { return (this.acc && this.acc.uin) || '' },
@@ -653,10 +617,6 @@ const Accounts = {
       if (!this.acc) return '未知'
       if (this.online && this.ready) return '已登录'
       if (this.acc.login) return '已登录（初始化中）'
-      if (this.acc.accepted) return '手机已确认，正在登录…'
-      // 两个后端的 state 词不一样：
-      //   NapCat   : active / inactive / failed
-      //   SnowLuma : running / exited / absent（容器状态）
       const st = this.acc.state || ''
       if (st === 'failed') return '启动失败'
       if (st === 'inactive' || st === 'exited') return '已停止'
@@ -671,9 +631,6 @@ const Accounts = {
     },
   },
   async mounted() {
-    // ★ 必须先把后端信息拉回来：框架下拉要用 options（哪个装没装），
-    //   不拉的话 beOpts 走兜底，"NapCat（未安装）"就不会出现。
-    await this.loadBackend()
     await this.load()
     this.timer = setInterval(() => this.load(true), 5000)
   },
@@ -684,62 +641,27 @@ const Accounts = {
       try {
         this.acc = await callData('qqbot.account.info')
         this.err = (this.acc && this.acc.error) || ''
-        // 登录中就自动刷新二维码区
-        if (this.qrOpen && this.acc && !this.acc.login) {
-          this.pollStatus(0)
-        }
+        if (this.loginOpen && this.acc && !this.acc.login) this.pollStatus(0)
       } catch (e) {
         this.err = errText(e)
       } finally {
         this.busy = ''
       }
     },
-    async loadBackend() {
-      try { this.be = await callData('qqbot.backend.get') } catch (e) { this.be = null }
-    },
-    // 下拉里只显示短名（"NapCat（原生安装）" → "NapCat"），没装的加后缀
-    optLabel(o) {
-      const short = String((o && o.label) || (o && o.value) || '').split('（')[0]
-      return (o && o.installed === false) ? short + '（未安装）' : short
-    },
     // noVNC 地址：主机名用当前页面的（后端不知道面板对外的 IP），
     // 端口与路径由后端给（含远程桌面密码，打开即自动连）
     buildNovnc(d) {
       if (!d || !d.novnc_path) return ''
-      let host = (this.be && this.be.snowluma && this.be.snowluma.public_host) || ''
-      if (!host) host = location.hostname
+      let host = location.hostname
       if (!host || host === 'localhost') host = '127.0.0.1'
       return location.protocol + '//' + host + ':' + (d.novnc_port || 6081) + d.novnc_path
     },
-    async switchBackend(k) {
-      if (k === this.beKind) return
-      const label = k === 'snowluma' ? 'SnowLuma（Docker）' : 'NapCat（原生）'
-      if (!confirm('切换到 ' + label + '？\n\n两套环境互不影响，随时可以再切回来。\n'
-        + '切换后 rcbot 会改连另一个 OneBot 端口。')) return
-      this.switching = true
-      try {
-        await callData('qqbot.backend.set', { kind: k })
-        toast('已切换到 ' + label, 'ok')
-        this.qrOpen = false
-        this.novncUrl = ''
-        await this.loadBackend()
-        await this.load(true)
-      } catch (e) {
-        toast(errText(e), 'err')
-      } finally {
-        this.switching = false
-      }
-    },
-    // 扫码 —— 两种后端完全不同的路径：
-    //   NapCat  : 调 API 拿二维码 URL，用 qrcode.mjs 画成 SVG
-    //   SnowLuma: 没有二维码 API，内嵌 noVNC 远程桌面，用户在桌面里扫
-    async showQr() {
-      this.qrBusy = true
-      this.qr = ''
-      this.qrErr = ''
+    async showLogin() {
+      this.vncBusy = true
+      this.vncErr = ''
       this.msg = ''
       this.novncUrl = ''
-      this.qrOpen = true
+      this.loginOpen = true
       try {
         const d = await callData('qqbot.account.qrcode', {})
         if (d && d.login) {
@@ -747,54 +669,31 @@ const Accounts = {
           await this.load(true)
           return
         }
-        if (d && d.mode === 'novnc') {
-          this.novncUrl = this.buildNovnc(d)
-          this.novncPw = d.novnc_password || ''
-          if (!this.novncUrl) {
-            this.qrErr = '远程桌面地址没拼出来（缺 noVNC 端口或密码）'
-          }
-          this.pollStatus(0)
-        } else if (d && d.qrcode) {
-          this.qr = makeQr(d.qrcode)
-          this.pollStatus(0)
-        } else {
-          this.qrErr = '二维码还没出来，稍后再点一次'
-        }
+        this.novncUrl = this.buildNovnc(d || {})
+        this.novncPw = (d && d.novnc_password) || ''
+        if (!this.novncUrl) this.vncErr = '远程桌面地址没拼出来（缺 noVNC 端口或路径）'
+        this.pollStatus(0)
       } catch (e) {
-        this.qrErr = errText(e)
+        this.vncErr = errText(e)
       } finally {
-        this.qrBusy = false
+        this.vncBusy = false
       }
     },
-    async refreshQr() {
-      try {
-        const d = await callData('qqbot.account.refresh_qrcode', {})
-        if (d && d.qrcode) this.qr = makeQr(d.qrcode)
-      } catch (e) {
-        this.qrErr = errText(e)
-      }
-    },
-    // 轮询登录状态 —— 后端只读 NapCat 的 CheckLoginStatus
     pollStatus(n) {
-      if (n > 100 || !this.qrOpen) return
+      if (n > 100 || !this.loginOpen) return
       setTimeout(async () => {
-        if (!this.qrOpen) return
+        if (!this.loginOpen) return
         try {
           const d = await callData('qqbot.account.status', {})
           if (d && d.done) {
             this.msg = '登录成功：' + (d.nick || d.uin) + '（' + d.uin + '）'
-            this.qr = ''
             toast('已登录 ' + d.uin, 'ok')
             await this.load(true)
-            setTimeout(() => { this.qrOpen = false }, 1200)
+            setTimeout(() => { this.loginOpen = false }, 1200)
             return
           }
-          if (d && d.accepted && !d.logged) {
-            this.msg = '手机已确认，正在登录 QQ…'
-          } else if (d && d.logged && !d.core_ready) {
-            this.msg = 'QQ 已登录，正在初始化 NapCat…'
-          }
           if (d && d.error) this.msg = d.error
+          else if (d && d.phase === 'waiting_qrcode') this.msg = '请在远程桌面里用手机 QQ 扫码…'
         } catch (e) {
           this.msg = errText(e)
         }
@@ -805,14 +704,12 @@ const Accounts = {
       this.busy = action
       try {
         const msg = {
-          start: '已启动', stop: '已停止', restart: '已重启',
-          quick_login: '已发起快登', logout: '已退出登录',
+          start: '已启动', stop: '已停止', restart: '已重启', logout: '已退出登录',
         }[action] || '已执行'
         if (action === 'logout' && !confirm('退出登录会清掉本机的登录态，下次要重新扫码。确定？')) return
         await call('qqbot.account.action', { action })
         toast(msg, 'ok')
-        this.qrOpen = false
-        this.qr = ''
+        this.loginOpen = false
         await this.load(true)
       } catch (e) {
         toast(errText(e), 'err')
@@ -820,11 +717,11 @@ const Accounts = {
         this.busy = ''
       }
     },
-    closeQr() {
-      this.qrOpen = false
-      this.qr = ''
+    closeLogin() {
+      this.loginOpen = false
       this.msg = ''
       this.novncUrl = ''
+      this.vncErr = ''
     },
   },
   template: `
@@ -834,16 +731,10 @@ const Accounts = {
     <div class="rcq-pnl">
       <div class="rcq-ph">
         <b>QQ 账户</b>
-        <span class="rcq-hint">单账户模式</span>
+        <span class="rcq-hint">SnowLuma · 单账户</span>
         <span class="sp"></span>
-        <span class="rcq-hint">框架</span>
-        <select class="input" style="width:auto;font-size:12px" :disabled="switching"
-          :value="beKind" @change="switchBackend($event.target.value)">
-          <option v-for="o in beOpts" :key="o.value" :value="o.value"
-            :disabled="o.installed === false">{{ optLabel(o) }}</option>
-        </select>
-        <button class="btn btn-sm btn-primary" :disabled="qrBusy" @click="showQr()">
-          {{ qrBusy ? '准备中…' : (login ? '重新登录' : '扫码登录') }}
+        <button class="btn btn-sm btn-primary" :disabled="vncBusy" @click="showLogin()">
+          {{ vncBusy ? '准备中…' : (login ? '重新登录' : '扫码登录') }}
         </button>
         <button class="btn btn-sm" :disabled="!!busy" @click="load()">刷新</button>
       </div>
@@ -861,89 +752,49 @@ const Accounts = {
       </div>
 
       <div class="rcq-iacts" style="margin-top:12px">
+        <button class="btn btn-sm" :disabled="!!busy" @click="act('start')">启动</button>
         <button class="btn btn-sm" :disabled="!!busy" @click="act('restart')">重启</button>
-        <button v-if="!isSL" class="btn btn-sm" :disabled="!!busy || !login"
-          @click="act('quick_login')">快速登录</button>
         <button class="btn btn-sm" :disabled="!!busy" @click="act('stop')">停止</button>
         <button class="btn btn-sm" :disabled="!!busy || !login" @click="act('logout')">退出登录</button>
       </div>
 
-      <!-- ============ 扫码区：两种后端完全不同的交互 ============ -->
-      <div v-if="qrOpen" class="rcq-scan">
-        <!-- SnowLuma：没有二维码 API，只能内嵌 noVNC 远程桌面 -->
-        <template v-if="isSL || novncUrl">
-          <div class="rcq-vncbar">
-            <b>远程桌面</b>
-            <span class="rcq-hint">在下面的画面里用手机 QQ 扫码登录</span>
-            <span class="sp"></span>
-            <a v-if="novncUrl" :href="novncUrl" target="_blank" rel="noopener"
-              class="btn btn-sm">新窗口打开</a>
-            <button class="btn btn-sm" @click="closeQr()">关闭</button>
-          </div>
-          <div v-if="novncUrl" class="rcq-vncwrap">
-            <iframe :src="novncUrl" class="rcq-vnc" allow="clipboard-read; clipboard-write"
-              referrerpolicy="no-referrer"></iframe>
-          </div>
-          <div v-else class="rcq-empty2">
-            {{ qrErr || (qrBusy ? '正在启动容器与远程桌面…' : '远程桌面还没准备好') }}
-          </div>
-          <div class="rcq-note" style="display:block;margin-top:8px">
-            画面是 SnowLuma 容器里的 QQ 桌面，可以直接用鼠标操作。
-            <br />
-            <b>如果二维码显示「已过期」，点画面里那个「刷新」按钮</b>；
-            首次启动要等 10~30 秒容器起来。
-            <br />
-            如果这里是空白，说明浏览器不允许内嵌 —— 点右上角「新窗口打开」。
-            <template v-if="novncPw">
-              <br />远程桌面密码：<code>{{ novncPw }}</code>（新窗口打开时可能要输）
-            </template>
-          </div>
-        </template>
-
-        <!-- NapCat：调 API 拿二维码，画成 SVG -->
-        <template v-else>
-          <div style="display:flex;gap:14px;align-items:flex-start">
-            <div>
-              <!-- ★ 必须用 v-html：makeQr 返回的是 SVG 字符串，
-                   塞进 <img src> 是渲染不出来的（img 的 src 要的是 URL）。 -->
-              <div v-if="qr" v-html="qr" class="rcq-qr" style="width:180px;height:180px"></div>
-              <div v-else class="rcq-empty"
-                style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;border-radius:8px">
-                {{ qrBusy ? '正在获取二维码…' : (qrErr || '二维码还没出来') }}
-              </div>
-            </div>
-            <div style="flex:1;min-width:0">
-              <div class="rcq-note" style="display:block">
-                请用手机 QQ 扫描下面的二维码授权登录。<br />
-                登录成功后会自动识别出账号并连接机器人。
-              </div>
-              <div v-if="msg" style="margin-top:10px;font-size:12px">{{ msg }}</div>
-              <div v-if="qrErr" style="margin-top:10px;font-size:12px;color:var(--bad)">{{ qrErr }}</div>
-              <div style="margin-top:12px;display:flex;gap:8px">
-                <button class="btn btn-sm" :disabled="qrBusy" @click="refreshQr()">刷新二维码</button>
-                <button class="btn btn-sm" @click="closeQr()">关闭</button>
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <div v-if="msg && (isSL || novncUrl)" style="margin-top:8px;font-size:12px">{{ msg }}</div>
+      <div v-if="loginOpen" class="rcq-scan">
+        <div class="rcq-vncbar">
+          <b>远程桌面</b>
+          <span class="rcq-hint">在下面的画面里用手机 QQ 扫码登录</span>
+          <span class="sp"></span>
+          <a v-if="novncUrl" :href="novncUrl" target="_blank" rel="noopener"
+            class="btn btn-sm">新窗口打开</a>
+          <button class="btn btn-sm" @click="closeLogin()">关闭</button>
+        </div>
+        <div v-if="novncUrl" class="rcq-vncwrap">
+          <iframe :src="novncUrl" class="rcq-vnc" allow="clipboard-read; clipboard-write"
+            referrerpolicy="no-referrer"></iframe>
+        </div>
+        <div v-else class="rcq-empty2">
+          {{ vncErr || (vncBusy ? '正在启动容器与远程桌面…' : '远程桌面还没准备好') }}
+        </div>
+        <div class="rcq-note" style="display:block;margin-top:8px">
+          画面是 SnowLuma 容器里的 QQ 桌面，可以直接用鼠标操作。
+          <br />
+          <b>如果二维码显示「已过期」，点画面里那个「刷新」按钮</b>；
+          首次启动要等 10~30 秒容器起来。
+          <br />
+          如果这里是空白，说明浏览器不允许内嵌 —— 点右上角「新窗口打开」。
+          <template v-if="novncPw">
+            <br />远程桌面密码：<code>{{ novncPw }}</code>（新窗口打开时可能要输）
+          </template>
+        </div>
+        <div v-if="msg" style="margin-top:8px;font-size:12px">{{ msg }}</div>
       </div>
 
       <div class="rcq-note" style="margin-top:14px">
         本插件是单账户模式：只管理一个 QQ 号。
         <br />
-        <template v-if="isSL">
-          <b>SnowLuma</b> 把 QQ 整包跑在 Docker 里，登录要在内嵌的远程桌面里扫码
-          （QQ 客户端自己画二维码，没有 API 能单独取出来）。
-        </template>
-        <template v-else>
-          登录用 <b>NapCat</b> 自带的二维码接口（和 QQ 客户端官方扫码一致）。
-        </template>
+        <b>SnowLuma</b> 把 QQ 整包跑在 Docker 里，登录要在内嵌的远程桌面里扫码
+        （QQ 客户端自己画二维码，没有 API 能单独取出来）。
         <br />
         换号时点「退出登录」清掉登录态，再重新扫码即可。
-        <template v-if="napcatOk">两套框架的开关在上面的「框架」下拉里，随时可以切回。</template>
-        <template v-else>本机只装了 SnowLuma（NapCat 已卸载），框架下拉里 NapCat 显示为不可选。</template>
       </div>
     </div>
   </div>`,
@@ -2288,7 +2139,7 @@ const Providers = {
   </div>`,
 }
 
-// ------------------------------------------------------------------ 运行日志（仿 NapCat 猫猫日志）
+// ------------------------------------------------------------------ 运行日志（SnowLuma 容器）
 
 const Logs = {
   data() {
@@ -2349,7 +2200,7 @@ const Logs = {
       try {
         await call('qqbot.account.logs.clear')
         this.items = []
-        toast('缓冲已清空', 'ok')
+        toast('已清空当前视图（容器日志由 Docker 管理）', 'ok')
       } catch (e) { toast(errText(e), 'err') }
     },
     download() {
@@ -2357,7 +2208,7 @@ const Logs = {
       const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' })
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
-      a.download = 'napcat-' + Date.now() + '.log'
+      a.download = 'snowluma-' + Date.now() + '.log'
       a.click()
       setTimeout(() => URL.revokeObjectURL(a.href), 3000)
     },
@@ -2372,7 +2223,7 @@ const Logs = {
         <button class="btn btn-sm" :class="mode === 'history' ? 'btn-primary' : ''" @click="switchMode('history')">历史日志</button>
         <span class="sp"></span>
         <span class="rcq-lamp"><b :class="connected ? 'on' : 'off'"></b>
-          {{ mode === 'live' ? (connected ? 'SSE 已连接' : 'SSE 断开') : (source === 'journal' ? 'journalctl' : 'NapCat 缓冲') }}</span>
+          {{ connected ? '容器在线' : '容器离线' }} · docker logs</span>
       </div>
       <div class="rcq-flex">
         <span class="rcq-hint">日志级别</span>
@@ -2410,8 +2261,8 @@ const Logs = {
       </div>
     </div>
     <div class="rcq-note">
-      实时日志订阅 NapCat 的 SSE 通道（不依赖 systemd，非 root 也能看）；历史日志读
-      <code>journalctl -u napcat</code>，读不到时会回落到实时缓冲。
+      日志来自 <code>docker logs snowluma</code>（容器日志本身带历史，每 2 秒刷新一次）。
+      容器没起来时这里会是空的。
     </div>
   </div>`,
 }
@@ -2432,6 +2283,7 @@ const Settings = {
     ws() { return this.feats.web_search || {} },
     vis() { return this.feats.vision || {} },
     rp() { return this.feats.random_pick || {} },
+    sl() { return this.feats.sl_status || {} },
   },
   async mounted() { await this.load() },
   methods: {
@@ -2499,6 +2351,11 @@ const Settings = {
               enabled: this.rp.enabled !== false,
               scope: this.rp.scope || 'enabled_groups',
             },
+            sl_status: {
+              enabled: this.sl.enabled !== false,
+              keyword: String(this.sl.keyword || '#sl').trim() || '#sl',
+              cooldown: Math.max(1, Number(this.sl.cooldown) || 10),
+            },
           },
         })
         toast('能力开关已保存', 'ok')
@@ -2512,11 +2369,6 @@ const Settings = {
           config: {
             api: this.conn.config.api,
             timeout: Number(this.conn.config.timeout) || 90,
-            napcat: {
-              base: this.conn.config.napcat.base,
-              token: this.conn.config.napcat.token,
-              unit: this.conn.config.napcat.unit,
-            },
           },
         })
         toast('连接设置已保存', 'ok')
@@ -2666,6 +2518,26 @@ const Settings = {
           </div>
         </div>
 
+        <div class="rcq-sec">
+          <div class="switch-row">
+            <label>允许 #sl 状态指令
+              <div class="rcq-note">
+                任意群聊 / 私聊里发 <b>#sl</b>，机器人回一条 SnowLuma 状态
+                （容器、QQ 登录、OneBot 连接、消息档案条数）。
+                关掉后 #sl 只是普通消息，走正常的 @ / 唤醒规则。
+              </div>
+            </label>
+            <label class="switch"><input type="checkbox" v-model="sl.enabled" /><span class="slider"></span></label>
+          </div>
+          <div class="rcq-form" style="margin-top:6px">
+            <label class="rcq-fi"><span>触发关键词</span>
+              <input class="input" v-model="sl.keyword" placeholder="#sl" /></label>
+            <label class="rcq-fi"><span>冷却（秒）</span>
+              <input class="input rcq-num" type="number" min="1" max="600" v-model="sl.cooldown" /></label>
+          </div>
+          <div class="rcq-note">同一会话在冷却时间内只回一次，避免群里刷屏。</div>
+        </div>
+
         <div class="rcq-flex" style="margin-top:12px">
           <button class="btn btn-primary btn-sm" :disabled="!!busy" @click="saveFeat">保存</button>
         </div>
@@ -2695,18 +2567,14 @@ const Settings = {
 
       <!-- 连接 -->
       <div v-if="tab === 'conn' && conn">
-        <div class="rcq-ph" style="margin-bottom:10px"><b>NapCat（协议端）</b><span class="sp"></span>
-          <span class="rcq-lamp"><b :class="conn.napcat && conn.napcat.ok ? 'on' : 'off'"></b>
-            {{ conn.napcat && conn.napcat.ok ? '已连通' : '连不上' }}</span></div>
-        <div class="rcq-form">
-          <label class="rcq-fi wide"><span>WebUI 地址</span>
-            <input class="input" v-model="conn.config.napcat.base" placeholder="http://127.0.0.1:6099" /></label>
-          <label class="rcq-fi"><span>WebUI Token</span>
-            <input class="input" type="password" v-model="conn.config.napcat.token" /></label>
-          <label class="rcq-fi"><span>systemd 单元名（读历史日志）</span>
-            <input class="input" v-model="conn.config.napcat.unit" placeholder="napcat" /></label>
+        <div class="rcq-ph" style="margin-bottom:10px"><b>SnowLuma（协议端）</b><span class="sp"></span>
+          <span class="rcq-lamp"><b :class="conn.snowluma && conn.snowluma.ok ? 'on' : 'off'"></b>
+            {{ conn.snowluma && conn.snowluma.ok ? '容器在运行' : '容器未运行' }}</span></div>
+        <div class="rcq-note" v-if="conn.snowluma && conn.snowluma.error">{{ conn.snowluma.error }}</div>
+        <div class="rcq-note">
+          QQ 跑在 Docker 容器 <code>snowluma</code> 里（OneBot WS 3001 / HTTP 3000 / noVNC 6081）。
+          容器没起就去「QQ 账户」点「启动」或「扫码登录」。
         </div>
-        <div class="rcq-note" v-if="conn.napcat && conn.napcat.error">{{ conn.napcat.error }}</div>
 
         <div class="rcq-sec">
           <div class="rcq-ph" style="margin-bottom:10px"><b>rcbot（机器人）</b><span class="sp"></span>
@@ -2759,7 +2627,7 @@ const App = {
   computed: {
     cur() { return (this.TABS.find((t) => t.id === this.tab) || this.TABS[0]).comp },
     isFull() { const t = this.TABS.find((x) => x.id === this.tab); return !!(t && t.fullscreen) },
-    ncOn() { return !!(this.conn && this.conn.napcat && this.conn.napcat.ok) },
+    slOn() { return !!(this.conn && this.conn.snowluma && this.conn.snowluma.ok) },
     rbOn() { return !!(this.conn && this.conn.rcbot && this.conn.rcbot.ok) },
   },
   async mounted() { await this.check() },
@@ -2786,7 +2654,7 @@ const App = {
       <div class="rcq-tab" v-for="t in TABS" :key="t.id" :class="{ on: tab === t.id }"
         @click="go(t.id)">{{ t.label }}</div>
       <div class="rcq-bar-r">
-        <span class="rcq-lamp"><b :class="ncOn ? 'on' : 'off'"></b>NapCat</span>
+        <span class="rcq-lamp"><b :class="slOn ? 'on' : 'off'"></b>SnowLuma</span>
         <span class="rcq-lamp"><b :class="rbOn ? 'on' : 'off'"></b>Bot</span>
         <button class="btn btn-sm" @click="refresh">刷新</button>
       </div>
