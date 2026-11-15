@@ -55,3 +55,4 @@ _deploy/
 # 运行时生成的插件端点文件(机器相关的 UDS/TCP 地址, 每台机器不同)
 plugins/*/.rc.endpoint
 __pycache__/
+tmp/

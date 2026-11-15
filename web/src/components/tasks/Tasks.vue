@@ -26,6 +26,11 @@ const notice = ref('')
 
 const detail = ref(null)
 const detailBusy = ref(false)
+const retryingId = ref('')
+const canRetry = computed(() => {
+  const d = detail.value
+  return !!(d && d.meta && d.meta.external && (d.status === 'failed' || d.status === 'queued'))
+})
 
 let timer = null
 let noticeTimer = null
@@ -134,6 +139,20 @@ async function clearDone() {
   }
 }
 
+async function retryTask(t) {
+  if (!t || retryingId.value) return
+  retryingId.value = t.id
+  try {
+    await api.taskAction('retry', t.id)
+    flash('已请求继续下载')
+    await load(true)
+  } catch (e) {
+    flash('继续失败: ' + ((e && e.message) || e))
+  } finally {
+    retryingId.value = ''
+  }
+}
+
 async function openDetail(t) {
   detailBusy.value = true
   detail.value = t // 先显示列表里的快照, 详情回来再覆盖
@@ -234,6 +253,12 @@ onUnmounted(() => {
         <div class="tk-side">
           <div class="tk-time">{{ fmtTime(t.created) }}</div>
           <div class="tk-id mono">{{ t.id }}</div>
+          <button
+            v-if="t.meta && t.meta.external && (t.status === 'failed' || t.status === 'queued')"
+            class="btn btn-sm tk-retry"
+            :disabled="retryingId === t.id"
+            @click.stop="retryTask(t)"
+          >{{ retryingId === t.id ? '继续中…' : '继续下载' }}</button>
         </div>
       </div>
     </div>
@@ -261,6 +286,9 @@ onUnmounted(() => {
           <div v-if="detailBusy" class="hint" style="margin-top:8px">读取最新详情…</div>
         </div>
         <div class="modal-footer">
+          <button v-if="canRetry" class="btn btn-primary" :disabled="!!retryingId" @click="retryTask(detail)">
+            {{ retryingId ? '继续中…' : '继续下载' }}
+          </button>
           <button class="btn" @click="detail = null">关闭</button>
         </div>
       </div>
@@ -336,6 +364,7 @@ onUnmounted(() => {
 .tk-side { flex-shrink: 0; text-align: right; display: flex; flex-direction: column; gap: 3px; }
 .tk-time { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .tk-id { font-size: 10px; color: var(--text-faint); max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-retry { margin-top: 4px; font-size: 11px; padding: 3px 8px; }
 
 .tk-modal { max-width: 620px; }
 .tk-detail { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }

@@ -42,6 +42,8 @@ _SESSION.mount('https://', _adapter)
 # 表现为"每页都失败"（旧实现就是这样，3 个域名全部 timeout）。
 CONNECT_TIMEOUT = 15
 READ_TIMEOUT = 120
+# 单页总预算：不能因为一页重试把整个任务拖到十几分钟。
+PAGE_DEADLINE = 75
 
 # 并发页数。
 #
@@ -53,6 +55,22 @@ DEFAULT_WORKERS = 10
 
 # 单页最多重试次数（含换域名）
 MAX_RETRY_PER_PAGE = 4
+
+
+def _looks_like_image(data):
+    """按文件头判断图片。
+
+    ★ 不能再用 len > 512 判断：JM 偶尔返回合法的 1x1 GIF 占位图（43 字节），
+      旧逻辑会把这种页当成失败反复重试，导致整本任务卡几分钟后 failed。
+    """
+    if not data or len(data) < 8:
+        return False
+    return (
+        data[:3] == b'\xff\xd8\xff' or          # JPEG
+        data[:8] == b'\x89PNG\r\n\x1a\n' or     # PNG
+        data[:6] in (b'GIF87a', b'GIF89a') or   # GIF
+        (data[:4] == b'RIFF' and data[8:12] == b'WEBP')  # WebP
+    )
 
 UA = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -118,6 +136,7 @@ class Task(object):
         for k in cls.FIELDS:
             if k in d and d[k] is not None:
                 setattr(t, k, d[k])
+        t.failed = list(d.get('failed') or [])
         # 重启后不可能还在跑，统一标为暂停，由用户决定是否继续
         if t.status in ('downloading', 'queued'):
             t.status = 'paused'
@@ -161,7 +180,14 @@ class Downloader(object):
         try:
             os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
             with self._lock:
-                data = {'tasks': [t.to_dict() for t in self._tasks.values()]}
+                tasks = []
+                for t in self._tasks.values():
+                    d = t.to_dict()
+                    # failed_sample 只是给前端看的 20 条；持久化完整失败页，
+                    # 否则插件重启后「只补失败」会变成 nothing_to_retry。
+                    d['failed'] = list(t.failed or [])
+                    tasks.append(d)
+                data = {'tasks': tasks}
             tmp = self.state_file + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False)
@@ -215,7 +241,7 @@ class Downloader(object):
                 return 'busy'
         with self._lock:
             t = self._tasks.get(aid)
-            if t and t.status == 'downloading':
+            if t and t.status == 'downloading' and old is not None and old.is_alive():
                 return 'already'
             if t and t.status == 'completed':
                 # 已完成但可能缺页：允许重跑一次（会跳过已存在的文件）
@@ -305,6 +331,10 @@ class Downloader(object):
             if not t:
                 return 'not_found'
             if not t.failed:
+                # 旧状态文件没有 failed 明细，但记录了 failed_pages：
+                # 整本重扫一遍（已下页会跳过），至少让「只补失败」有动作。
+                if t.failed_pages or t.status == 'failed':
+                    return self.start(aid, t.name, t.author, t.workers)
                 return 'nothing_to_retry'
             t.failed = []
             t.status = 'paused'
@@ -480,7 +510,7 @@ class Downloader(object):
             try:
                 if self._cancelled(aid):
                     return
-                data = self._fetch(cid, fn)
+                data, err = self._fetch(cid, fn, on_retry=lambda n, reason: self._retry_beat(t, fn, n, reason))
                 if data:
                     self._decode(data, scramble, cid, fn, dest)
                     with lock:
@@ -489,7 +519,7 @@ class Downloader(object):
                         self._touch(t)
                 else:
                     with lock:
-                        t.failed.append({'cid': cid, 'file': fn, 'reason': '多次重试仍失败'})
+                        t.failed.append({'cid': cid, 'file': fn, 'reason': err or '多次重试仍失败'})
                         t.failed_pages = len(t.failed)
                         self._touch(t)
             except Exception as e:
@@ -516,31 +546,58 @@ class Downloader(object):
         for th in threads:
             th.join()
 
-    def _fetch(self, cid, filename):
-        """按页下载原始（未解码）字节。域名轮换 + 指数退避。"""
+    def _retry_beat(self, t, filename, attempt, reason):
+        """重试时刷新 current/updated_at，避免界面看着像卡死。"""
+        with self._lock:
+            t.current = '重试 %s (%d/%d)' % (filename, attempt, MAX_RETRY_PER_PAGE)
+            t.updated_at = _now()
+
+    def _fetch(self, cid, filename, on_retry=None):
+        """按页下载原始（未解码）字节。域名轮换 + 指数退避。
+
+        单页最多尝试 PAGE_DEADLINE 秒：之前的实现一页可能串行
+        4 次 × 120 秒读超时，整本任务看起来"长时间无反应"。
+        """
         last = ''
+        deadline = time.time() + PAGE_DEADLINE
         for attempt in range(MAX_RETRY_PER_PAGE):
+            remain = deadline - time.time()
+            if remain <= 1:
+                last = last or '页面总超时'
+                break
             domain = self._domains[attempt % len(self._domains)]
             url = 'https://%s/media/photos/%s/%s' % (domain, cid, filename)
+            if attempt > 0 and on_retry is not None:
+                try:
+                    on_retry(attempt + 1, last)
+                except Exception:
+                    pass
             try:
-                r = _SESSION.get(url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT), stream=True)
+                r = _SESSION.get(url, timeout=(min(CONNECT_TIMEOUT, remain),
+                                               min(READ_TIMEOUT, remain)), stream=True)
                 if r.status_code != 200:
                     last = 'HTTP %s' % r.status_code
                     r.close()
-                    time.sleep(0.4 * (attempt + 1))
+                    if r.status_code in (403, 404, 410):
+                        break
+                    time.sleep(min(0.4 * (attempt + 1), max(0, deadline - time.time())))
                     continue
                 buf = bytearray()
                 for chunk in r.iter_content(65536):
+                    if time.time() > deadline:
+                        last = '页面总超时'
+                        r.close()
+                        return None, last
                     if chunk:
                         buf.extend(chunk)
                 r.close()
-                if len(buf) > 512:      # 太小说明不是图
-                    return bytes(buf)
-                last = '响应过短(%d B)' % len(buf)
+                if _looks_like_image(buf):
+                    return bytes(buf), ''
+                last = '非图片响应(%d B)' % len(buf)
             except Exception as e:
                 last = '%s: %s' % (type(e).__name__, str(e)[:60])
-            time.sleep(0.6 * (attempt + 1))
-        return None
+            time.sleep(min(0.6 * (attempt + 1), max(0, deadline - time.time())))
+        return None, last or '多次重试仍失败'
 
     def _finalize(self, aid, base, t):
         """全部成功后打完成标记 + 更新库元数据。"""

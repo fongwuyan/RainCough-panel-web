@@ -37,6 +37,7 @@ const PAGES = [
   { key: 'fm', label: '文件管理', path: '/fm', desc: '文件系统', icon: 'FM' },
   { key: 'terminal', label: '终端', path: '/terminal', desc: 'Shell', icon: 'TM' },
   { key: 'tasks', label: '任务列表', path: '/tasks', desc: '队列与进度', icon: 'TK' },
+  { key: 'nodes', label: '节点管理', path: '/nodes', desc: '生图/推理节点', icon: 'ND' },
   { key: 'plugins', label: '插件', path: '/plugins', desc: '管理与安装', icon: 'PL' },
   { key: 'settings', label: '设置', path: '/settings', desc: '偏好', icon: 'SG' },
 ]
@@ -75,6 +76,7 @@ function isActive(name) {
   if (name === 'fm') return route.name === 'fm'
   if (name === 'terminal') return route.name === 'terminal'
   if (name === 'tasks') return route.name === 'tasks'
+  if (name === 'nodes') return route.name === 'nodes'
   if (name === 'plugins') return route.name === 'plugins' || route.name === 'plugin'
   if (name === 'settings') return route.name === 'settings'
   return false

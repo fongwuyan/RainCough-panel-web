@@ -6,6 +6,7 @@ import Terminal from './components/terminal/Terminal.vue'
 import PluginHub from './components/plugins/PluginHub.vue'
 import FmMain from './components/filemanager/FmMain.vue'
 import Tasks from './components/tasks/Tasks.vue'
+import Nodes from './components/nodes/Nodes.vue'
 import Login from './views/Login.vue'
 
 // 内置功能共 6 项: 工作台 / 文件管理 / 终端 / 任务列表 / 插件 / 设置
@@ -20,6 +21,7 @@ const router = createRouter({
     { path: '/fm', name: 'fm', component: FmMain },
     { path: '/terminal', name: 'terminal', component: Terminal },
     { path: '/tasks', name: 'tasks', component: Tasks },
+    { path: '/nodes', name: 'nodes', component: Nodes },
     { path: '/plugins', name: 'plugins', component: PluginHub },
     { path: '/settings', name: 'settings', component: Settings },
     // 插件运行位(前端产物由 /api/plugins/<name>/assets/plugin.js 提供)

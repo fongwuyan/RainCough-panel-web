@@ -343,7 +343,7 @@ function mount(container, ctx) {
         this.dlBusy = true; this.err = ''
         try {
           const r = await ctx.invoke('jmcomic.dl.start', {
-            aid, name: (this.album && this.album.name) || '', workers: 6,
+            aid, name: (this.album && this.album.name) || '', workers: 10,
           })
           if (r && r.task) this.dl = r.task
           this.okMsg = '开始下载'
@@ -441,8 +441,23 @@ function mount(container, ctx) {
           this.loadLib()
         } catch (e) { this.err = (e && e.message) || e }
       },
-      async download(aid) { try { const r = await ctx.invoke('jmcomic.download', { aid }); this.okMsg = r.message; setTimeout(() => (this.okMsg = ''), 2000) } catch (e) { this.err = (e && e.message) || e } },
-      async dlStatus(aid) { try { const r = await ctx.invoke('jmcomic.download.status', { aid }); this.okMsg = '完成 ' + (r.downloaded || 0) + '/' + (r.total || '?') + ' (' + r.status + ')'; setTimeout(() => (this.okMsg = ''), 2500) } catch (e) { this.err = (e && e.message) || e } },
+      async download(aid) {
+        const it = [...(this.results || []), ...(this.lib || [])].find(x => String(x.id ?? x.aid) === String(aid)) || {}
+        try {
+          const r = await ctx.invoke('jmcomic.dl.start', { aid, name: it.name || '', author: it.author || '', workers: 10 })
+          const t = (r && r.task) || {}
+          this.okMsg = t.status === 'completed' ? '已下载' : '开始下载'
+          setTimeout(() => (this.okMsg = ''), 2000)
+        } catch (e) { this.err = (e && e.message) || e }
+      },
+      async dlStatus(aid) {
+        try {
+          const r = await ctx.invoke('jmcomic.dl.status', { aid })
+          const t = (r && r.task) || {}
+          this.okMsg = '下载 ' + (t.done_pages || 0) + '/' + (t.total_pages || '?') + ' (' + (t.status || 'none') + ')'
+          setTimeout(() => (this.okMsg = ''), 2500)
+        } catch (e) { this.err = (e && e.message) || e }
+      },
     },
     render() {
       const t = (k, l) => h('button', { class: 'btn btn-sm' + (this.tab === k ? ' btn-primary' : ''), onclick: () => { clearInterval(this.dlTimer); this.coverQueueStop = true; this.stopCoverPrefetch(); this.tab = k; if (k === 'lib') this.loadLib() } }, l)

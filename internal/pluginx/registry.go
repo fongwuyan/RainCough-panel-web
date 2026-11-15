@@ -246,6 +246,12 @@ func (x *PluginX) handleCall(c *conn, raw json.RawMessage) (interface{}, *rpcErr
 	return result, nil
 }
 
+// InvokeAsUI 供主系统后端调用插件接口（等价于前端 ctx.invoke）。
+// visibility=all/main 的接口都可调用；private 仍只允许插件自己。
+func (x *PluginX) InvokeAsUI(ifaceID string, params interface{}, timeout time.Duration) (interface{}, error) {
+	return x.invokeFrom("ui", ifaceID, params, timeout)
+}
+
 // invokeFrom 接口库路由: 调用方 ctx("ui"=主系统界面 或 插件名) → 目标接口。
 func (x *PluginX) invokeFrom(caller, ifaceID string, params interface{}, timeout time.Duration) (interface{}, error) {
 	x.mu.Lock()

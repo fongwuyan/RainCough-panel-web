@@ -91,6 +91,6 @@ func (s *server) handleTasksPurge(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
 		return
 	}
-	n := globalTasks.Cleanup(0)
+	n := s.clearExternalTasks(globalTasks.Cleanup(0))
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "removed": n})
 }
