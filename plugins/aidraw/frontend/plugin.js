@@ -219,7 +219,7 @@
       if (trainForm.dataset) dsSel.value = trainForm.dataset
       else if (trainDatasets.length) { trainForm.dataset = trainDatasets[0].name; dsSel.value = trainForm.dataset }
       dsSel.onchange = () => { trainForm.dataset = dsSel.value }
-      const baseSel = h('select', {}, [h('option', { value: 'realistic', text: '写实 · SD1.5' }), h('option', { value: 'anime', text: '动漫 · waifu-diffusion' })])
+      const baseSel = h('select', {}, [h('option', { value: 'realistic', text: '写实 · SD1.5' }), h('option', { value: 'anime', text: '动漫 · waifu-diffusion' }), h('option', { value: 'anima-int8', text: 'Anima 2.9B int8 · 动漫' })])
       baseSel.value = trainForm.base
       baseSel.onchange = () => { trainForm.base = baseSel.value }
       const field = (label, input) => h('label', {}, [h('span', { text: label }), input])
