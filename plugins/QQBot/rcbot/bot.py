@@ -341,6 +341,7 @@ class Bot:
         self._auto_tasks = {}
         self._auto_hits = {}
         self._auto_last = {}
+        self._reply_bursts = {}
         self.last_error = ''
 
     # ---------------- 引用消息：reply 段只给 id，得再查一次
@@ -505,6 +506,10 @@ class Bot:
         if await self._handle_sl(ev, account_id, acct_cfg):
             return
 
+        # 路径 F：回复机器人消息 / 连续对话 burst —— 必须无延迟，直到模型判定结束
+        if await self._handle_reply_burst(ev, account_id, acct_cfg):
+            return
+
         # 路径 E：群聊主动接话（只观察，延迟到一轮话说完后再让 LLM 决定）
         await self._auto_observe(ev, account_id, acct_cfg)
 
@@ -581,6 +586,80 @@ class Bot:
             logbuf.debug('bot', '同步群头像失败：%s' % str(e)[:120])
 
     # ---------------- 群聊主动接话 ----------------
+    async def _reply_to_self(self, segs, self_id):
+        rid = ''
+        for s in segs or []:
+            if isinstance(s, dict) and s.get('type') == 'reply':
+                rid = str((s.get('data') or {}).get('id') or '')
+                break
+        if not rid or not self_id:
+            return False
+        try:
+            mid = int(rid) if rid.isdigit() else rid
+            r = await self.ob.call('get_msg', {'message_id': mid}, timeout=12)
+            sender = ((r.get('data') or {}).get('sender') or {})
+            return str(sender.get('user_id') or '') == str(self_id)
+        except Exception as e:
+            logbuf.debug('auto', '判断回复对象失败: %s' % str(e)[:120])
+            return False
+
+    async def _handle_reply_burst(self, ev, account_id, acct_cfg):
+        """有人回复机器人、或已在连续对话 burst 中 → 立即回复，不走延迟。"""
+        try:
+            if (ev.get('message_type') or '') != 'group' or ev.get('__self__'):
+                return False
+            ac = self._auto_cfg()
+            if not ac.get('enabled'):
+                return False
+            cfg = config.load()
+            bot = config.resolve_bot_cfg(cfg, acct_cfg)
+            if not bot.get('enabled', True):
+                return False
+            gid = str(ev.get('group_id') or '')
+            uid = str(ev.get('user_id') or '')
+            self_id = str(ev.get('self_id') or getattr(self.ob, 'self_id', '') or '')
+            if not gid or not uid or uid == self_id:
+                return False
+            if gid in [str(x) for x in (bot.get('blocked_groups') or [])]:
+                return False
+            sid = store.session_key('group', gid, 'public', account_id)
+            sess = await store.get_session(sid)
+            if not sess or not sess.get('enabled', 1):
+                return False
+            key = (account_id, gid, uid)
+            now = time.time()
+            state = self._reply_bursts.get(key)
+            active = bool(state and now < float(state.get('until') or 0))
+            reply_to_me = await self._reply_to_self(ev.get('message'), self_id)
+            if not reply_to_me and not active:
+                return False
+            text, ats, imgs = _seg_text(ev.get('message'))
+            if not (text or imgs):
+                return False
+            if reply_to_me:
+                state = {'until': now + float(ac.get('burst_window') or 180),
+                         'turns': 0}
+                self._reply_bursts[key] = state
+            logbuf.info('auto', '群 %s 连续对话立即回复（%s）'
+                        % (gid, '回复机器人' if reply_to_me else 'burst 续聊'))
+            sent = await self._auto_decide(
+                (account_id, gid), account_id, gid, acct_cfg,
+                force=reply_to_me, burst_key=key)
+            if not sent:
+                self._reply_bursts.pop(key, None)
+                return True
+            state = self._reply_bursts.get(key) or state or {}
+            state['turns'] = int(state.get('turns') or 0) + 1
+            state['until'] = time.time() + float(ac.get('burst_window') or 180)
+            if state['turns'] >= int(ac.get('burst_max_turns') or 8):
+                self._reply_bursts.pop(key, None)
+            else:
+                self._reply_bursts[key] = state
+            return True
+        except Exception as e:
+            logbuf.warn('auto', '立即回复失败: %s' % str(e)[:200])
+            return False
+
     def _auto_cfg(self):
         try:
             return ((config.load().get('features') or {}).get('auto_chat') or {})
@@ -658,20 +737,21 @@ class Bot:
         except Exception as e:
             logbuf.warn('auto', '主动接话任务失败: %s' % str(e)[:200])
 
-    async def _auto_decide(self, key, account_id, gid, acct_cfg):
+    async def _auto_decide(self, key, account_id, gid, acct_cfg, force=False,
+                           burst_key=None):
         ac = self._auto_cfg()
         if not ac.get('enabled'):
-            return
+            return False
         cfg = config.load()
         bot = config.resolve_bot_cfg(cfg, acct_cfg)
         if not bot.get('enabled', True):
-            return
+            return False
         if gid in [str(x) for x in (bot.get('blocked_groups') or [])]:
-            return
+            return False
         sid = store.session_key('group', gid, 'public', account_id)
         sess = await store.get_session(sid)
         if not sess or not sess.get('enabled', 1):
-            return
+            return False
 
         now = time.time()
         hits = self._auto_hits.setdefault(key, deque())
@@ -683,14 +763,14 @@ class Bot:
         limit_min = max(1, int(ac.get('max_per_minute') or 60))
         if len(hits) >= limit_min or len(ghits) >= limit_min:
             logbuf.debug('auto', '达到每分钟上限 %d，跳过群 %s' % (limit_min, gid))
-            return
+            return False
 
         nctx = max(10, min(200, int(ac.get('context_messages') or 50)))
         rows = await chats.list_messages(sid, limit=nctx)
         if len(rows) < 2:
-            return
+            return False
         if (rows[-1].get('role') or '') == 'assistant':
-            return
+            return False
         group_name = self._group_names.get(gid, gid)
         lines = []
         valid_ids = set()
@@ -707,13 +787,13 @@ class Bot:
             who = r.get('sender_name') or ('机器人' if r.get('role') == 'assistant' else '群友')
             lines.append('%s (#%s): %s' % (who, mid, text[:500]))
         if len(lines) < 2:
-            return
+            return False
 
         persona = config.get_persona(cfg, (sess or {}).get('persona_id'), acct_cfg)
         chain = config.provider_chain(cfg, (sess or {}).get('provider_id'), acct_cfg)
         if not chain:
             logbuf.warn('auto', '没有可用模型，跳过')
-            return
+            return False
         system = (persona or {}).get('prompt') or ''
         system += (
             '\n\n【群聊主动接话规则】\n'
@@ -728,6 +808,16 @@ class Bot:
             'quote=true 表示引用 target_message_id；有时可以不引用，直接接话。\n'
             '回复要短、口语化，像群友聊天。'
         )
+        if force:
+            system += (
+                '\n这次对方刚刚直接回复了你的消息，你必须回复，不能返回 false；'
+                '把话接住，回复要自然。'
+            )
+        elif burst_key:
+            system += (
+                '\n你正在和同一个人连续聊天。如果对方只是附和、话题已经自然结束，'
+                '就返回 reply=false 结束；否则继续自然接话。'
+            )
         prompt = ('群名：%s\n最近 %d 条消息：\n%s\n\n请判断并输出 JSON。'
                   % (group_name, len(lines), '\n'.join(lines)))
         messages = [{'role': 'user', 'content': prompt}]
@@ -757,34 +847,34 @@ class Bot:
                 temperature=float(ac.get('temperature') or 0.8))
         except Exception as e:
             logbuf.warn('auto', '判断失败: %s' % str(e)[:200])
-            return
+            return False
 
         data = self._auto_json(raw)
         if not data:
             logbuf.info('auto', '群 %s 模型未返回 JSON，跳过' % gid)
-            return
+            return False
         def _bool(v):
             if isinstance(v, str):
                 return v.strip().lower() in ('1', 'true', 'yes', 'y', '是')
             return bool(v)
         if not _bool(data.get('reply')):
             logbuf.info('auto', '群 %s 不接话：%s' % (gid, (data or {}).get('reason', '模型返回不回复')))
-            return
+            return False
         text = strip_meta_leak((data.get('text') or '').strip())
         text = strip_emoji(text).strip()
         if not text:
-            return
+            return False
         text = truncate_chars(text, MAX_REPLY_CHARS)
         target = str(data.get('target_message_id') or '').lstrip('#')
         rid = target if (_bool(data.get('quote')) and target in valid_ids) else None
         if ac.get('dry_run'):
             logbuf.info('auto', 'DRY-RUN 群 %s quote=%s text=%s' % (gid, rid, text[:120]))
-            return
+            return False
         try:
             resp = await self.ob.send_text('group', gid, text, reply_id=rid)
         except Exception as e:
             logbuf.warn('auto', '发送失败: %s' % str(e)[:160])
-            return
+            return False
         hits.append(time.time())
         ghits.append(time.time())
         self._auto_last[key] = time.time()
@@ -795,6 +885,7 @@ class Bot:
         await self._record_own(account_id, acct_cfg, 'group', gid, text, resp)
         logbuf.info('auto', '群 %s 主动接话（quote=%s, %s）：%s'
                     % (gid, bool(rid), (used or {}).get('id', ''), text[:120]))
+        return True
 
     @staticmethod
     def _auto_json(raw):

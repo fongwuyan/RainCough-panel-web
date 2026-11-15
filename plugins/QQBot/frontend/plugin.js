@@ -2359,6 +2359,8 @@ const Settings = {
               max_per_minute: Math.max(1, Math.min(600, Number(this.auto.max_per_minute) || 60)),
               max_tokens: Math.max(128, Math.min(4096, Number(this.auto.max_tokens) || 512)),
               temperature: Math.max(0, Math.min(2, Number(this.auto.temperature) || 0.8)),
+              burst_window: Math.max(30, Math.min(600, Number(this.auto.burst_window) || 180)),
+              burst_max_turns: Math.max(1, Math.min(30, Number(this.auto.burst_max_turns) || 8)),
               dry_run: !!this.auto.dry_run,
             },
             sl_status: {
@@ -2546,6 +2548,10 @@ const Settings = {
               <input class="input rcq-num" type="number" min="1" max="30" v-model="auto.delay" /></label>
             <label class="rcq-fi"><span>全账号每分钟最多主动回复</span>
               <input class="input rcq-num" type="number" min="1" max="600" v-model="auto.max_per_minute" /></label>
+            <label class="rcq-fi"><span>回复机器人后的连续对话窗口（秒）</span>
+              <input class="input rcq-num" type="number" min="30" max="600" v-model="auto.burst_window" /></label>
+            <label class="rcq-fi"><span>连续对话最多回合</span>
+              <input class="input rcq-num" type="number" min="1" max="30" v-model="auto.burst_max_turns" /></label>
             <label class="rcq-fi"><span>最大输出 tokens</span>
               <input class="input rcq-num" type="number" min="128" max="4096" v-model="auto.max_tokens" /></label>
             <label class="rcq-fi"><span>temperature</span>

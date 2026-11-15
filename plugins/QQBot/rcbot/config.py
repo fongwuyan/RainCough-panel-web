@@ -84,6 +84,8 @@ DEFAULT = {
             'max_per_minute': 60,
             'max_tokens': 512,
             'temperature': 0.8,
+            'burst_window': 180,
+            'burst_max_turns': 8,
             'dry_run': False,
         },
     },
