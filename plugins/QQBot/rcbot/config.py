@@ -74,6 +74,18 @@ DEFAULT = {
             'enabled': True,
             'scope': 'enabled_groups',
         },
+        # ★ 群聊主动接话：所有已启用会话的群都会进入判断队列。
+        #   不是每条都回：延迟后让模型读最近 context_messages 条再决定。
+        #   max_per_minute 是全账号每分钟的硬上限（用户要求 60）。
+        'auto_chat': {
+            'enabled': False,
+            'context_messages': 50,
+            'delay': 4,
+            'max_per_minute': 60,
+            'max_tokens': 512,
+            'temperature': 0.8,
+            'dry_run': False,
+        },
     },
     # ★ 聊天记录（全量档案，与喂模型的上下文表分离）
     'chat': {

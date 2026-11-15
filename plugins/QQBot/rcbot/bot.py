@@ -17,9 +17,11 @@
 import asyncio
 import base64
 import io
+import json
 import os
 import re
 import time
+from collections import deque
 
 import aiohttp
 
@@ -335,6 +337,10 @@ class Bot:
         # 群主 QQ 号：群头像的正确 URL 需要它
         # （https://p.qlogo.cn/gh/<群号>/<群主QQ号>/<尺寸>）
         self._group_owners = {}
+        # 群聊主动接话：每个群一个延迟任务 / 最近一分钟命中时间 / 串行状态
+        self._auto_tasks = {}
+        self._auto_hits = {}
+        self._auto_last = {}
         self.last_error = ''
 
     # ---------------- 引用消息：reply 段只给 id，得再查一次
@@ -499,6 +505,9 @@ class Bot:
         if await self._handle_sl(ev, account_id, acct_cfg):
             return
 
+        # 路径 E：群聊主动接话（只观察，延迟到一轮话说完后再让 LLM 决定）
+        await self._auto_observe(ev, account_id, acct_cfg)
+
         # 路径 B：应答（原有逻辑）
         await self._maybe_reply(ev, account_id, acct_cfg)
 
@@ -571,6 +580,237 @@ class Bot:
         except Exception as e:
             logbuf.debug('bot', '同步群头像失败：%s' % str(e)[:120])
 
+    # ---------------- 群聊主动接话 ----------------
+    def _auto_cfg(self):
+        try:
+            return ((config.load().get('features') or {}).get('auto_chat') or {})
+        except Exception:
+            return {}
+
+    async def _auto_observe(self, ev, account_id, acct_cfg):
+        """观察所有已启用群的普通消息，延迟后交给 LLM 决定是否接话。"""
+        try:
+            ac = self._auto_cfg()
+            if not ac.get('enabled'):
+                return
+            if (ev.get('message_type') or '') != 'group' or ev.get('__self__'):
+                return
+            cfg = config.load()
+            bot = config.resolve_bot_cfg(cfg, acct_cfg)
+            if not bot.get('enabled', True):
+                return
+            gid = str(ev.get('group_id') or '')
+            uid = str(ev.get('user_id') or '')
+            self_id = str(ev.get('self_id') or getattr(self.ob, 'self_id', '') or '')
+            if not gid or not uid or uid == self_id:
+                return
+            if gid in [str(x) for x in (bot.get('blocked_groups') or [])]:
+                return
+            text, ats, imgs = _seg_text(ev.get('message'))
+            text = text or ''
+            if self_id in ats:
+                return
+            for p in (bot.get('wake_prefix') or []):
+                if p and text.startswith(p):
+                    return
+            if text.startswith('/') or text.startswith('#'):
+                return
+            if not text and not imgs:
+                return
+            sid = store.session_key('group', gid, 'public', account_id)
+            sess = await store.get_session(sid)
+            if not sess or not sess.get('enabled', 1):
+                return
+            key = (account_id, gid)
+            st = self._auto_tasks.get(key)
+            if st and st.get('running'):
+                st['pending'] = True
+                return
+            if st and st.get('task') and not st['task'].done():
+                # 首条消息已经排了一次判断；不要被连续消息反复推迟，
+                # 标记 pending，等这次判断完再看下一轮。
+                st['pending'] = True
+                return
+            task = asyncio.create_task(
+                self._auto_after_delay(key, account_id, gid, acct_cfg,
+                                       float(ac.get('delay') or 4)))
+            self._auto_tasks[key] = {'task': task, 'running': False, 'pending': False}
+        except Exception as e:
+            logbuf.warn('auto', '主动接话观察失败: %s' % str(e)[:200])
+
+    async def _auto_after_delay(self, key, account_id, gid, acct_cfg, delay):
+        try:
+            await asyncio.sleep(max(1.0, min(30.0, delay)))
+            st = self._auto_tasks.get(key)
+            if not st:
+                return
+            st['running'] = True
+            try:
+                await self._auto_decide(key, account_id, gid, acct_cfg)
+            finally:
+                st['running'] = False
+                if st.get('pending'):
+                    st['pending'] = False
+                    st['task'] = asyncio.create_task(
+                        self._auto_after_delay(key, account_id, gid, acct_cfg, delay))
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logbuf.warn('auto', '主动接话任务失败: %s' % str(e)[:200])
+
+    async def _auto_decide(self, key, account_id, gid, acct_cfg):
+        ac = self._auto_cfg()
+        if not ac.get('enabled'):
+            return
+        cfg = config.load()
+        bot = config.resolve_bot_cfg(cfg, acct_cfg)
+        if not bot.get('enabled', True):
+            return
+        if gid in [str(x) for x in (bot.get('blocked_groups') or [])]:
+            return
+        sid = store.session_key('group', gid, 'public', account_id)
+        sess = await store.get_session(sid)
+        if not sess or not sess.get('enabled', 1):
+            return
+
+        now = time.time()
+        hits = self._auto_hits.setdefault(key, deque())
+        ghits = self._auto_hits.setdefault((account_id, '*'), deque())
+        while hits and now - hits[0] >= 60:
+            hits.popleft()
+        while ghits and now - ghits[0] >= 60:
+            ghits.popleft()
+        limit_min = max(1, int(ac.get('max_per_minute') or 60))
+        if len(hits) >= limit_min or len(ghits) >= limit_min:
+            logbuf.debug('auto', '达到每分钟上限 %d，跳过群 %s' % (limit_min, gid))
+            return
+
+        nctx = max(10, min(200, int(ac.get('context_messages') or 50)))
+        rows = await chats.list_messages(sid, limit=nctx)
+        if len(rows) < 2:
+            return
+        if (rows[-1].get('role') or '') == 'assistant':
+            return
+        group_name = self._group_names.get(gid, gid)
+        lines = []
+        valid_ids = set()
+        for r in rows:
+            text = (r.get('text') or '').strip()
+            if not text:
+                kinds = [str(m.get('kind') or '') for m in (r.get('media') or [])]
+                text = '[图片]' if 'image' in kinds else ('[媒体]' if kinds else '')
+            if not text:
+                continue
+            mid = str(r.get('msg_id') or r.get('id') or '')
+            if mid:
+                valid_ids.add(mid)
+            who = r.get('sender_name') or ('机器人' if r.get('role') == 'assistant' else '群友')
+            lines.append('%s (#%s): %s' % (who, mid, text[:500]))
+        if len(lines) < 2:
+            return
+
+        persona = config.get_persona(cfg, (sess or {}).get('persona_id'), acct_cfg)
+        chain = config.provider_chain(cfg, (sess or {}).get('provider_id'), acct_cfg)
+        if not chain:
+            logbuf.warn('auto', '没有可用模型，跳过')
+            return
+        system = (persona or {}).get('prompt') or ''
+        system += (
+            '\n\n【群聊主动接话规则】\n'
+            '你是这个群里的普通成员，不是客服。下面是群聊最近的真实消息，'
+            '请判断现在是否适合自然地插一句话。\n'
+            '只在确实能接上话题、回答疑问、补充信息或气氛合适时回复；'
+            '如果只是别人互相聊天、话题已经结束、插话会突兀，就回复 false。\n'
+            '不要每轮都回，不要复读，不要提自己是 AI。\n'
+            '只输出一个 JSON，不要 Markdown：\n'
+            '{"reply":true/false,"target_message_id":"要回复的消息#id或空",'
+            '"quote":true/false,"text":"回复内容","reason":"一句话理由"}\n'
+            'quote=true 表示引用 target_message_id；有时可以不引用，直接接话。\n'
+            '回复要短、口语化，像群友聊天。'
+        )
+        prompt = ('群名：%s\n最近 %d 条消息：\n%s\n\n请判断并输出 JSON。'
+                  % (group_name, len(lines), '\n'.join(lines)))
+        messages = [{'role': 'user', 'content': prompt}]
+
+        vis = (cfg.get('features') or {}).get('vision') or {}
+        imgs = []
+        if vis.get('enabled'):
+            for r in rows[-12:]:
+                for m in (r.get('media') or []):
+                    if str(m.get('kind') or '') in ('image', 'sticker', 'face'):
+                        imgs.append({'url': m.get('url') or '', 'file': m.get('file') or ''})
+                        if len(imgs) >= int(vis.get('max_images') or 3):
+                            break
+                if len(imgs) >= int(vis.get('max_images') or 3):
+                    break
+            if imgs:
+                try:
+                    await attach_images(messages, imgs, int(vis.get('max_images') or 3),
+                                        ob=self.ob)
+                except Exception as e:
+                    logbuf.debug('auto', '附图失败，按纯文本判断: %s' % str(e)[:120])
+
+        try:
+            raw, used = await llm.chat_chain(
+                chain, messages, system=system,
+                max_tokens=int(ac.get('max_tokens') or 512),
+                temperature=float(ac.get('temperature') or 0.8))
+        except Exception as e:
+            logbuf.warn('auto', '判断失败: %s' % str(e)[:200])
+            return
+
+        data = self._auto_json(raw)
+        if not data:
+            logbuf.info('auto', '群 %s 模型未返回 JSON，跳过' % gid)
+            return
+        def _bool(v):
+            if isinstance(v, str):
+                return v.strip().lower() in ('1', 'true', 'yes', 'y', '是')
+            return bool(v)
+        if not _bool(data.get('reply')):
+            logbuf.info('auto', '群 %s 不接话：%s' % (gid, (data or {}).get('reason', '模型返回不回复')))
+            return
+        text = strip_meta_leak((data.get('text') or '').strip())
+        text = strip_emoji(text).strip()
+        if not text:
+            return
+        text = truncate_chars(text, MAX_REPLY_CHARS)
+        target = str(data.get('target_message_id') or '').lstrip('#')
+        rid = target if (_bool(data.get('quote')) and target in valid_ids) else None
+        if ac.get('dry_run'):
+            logbuf.info('auto', 'DRY-RUN 群 %s quote=%s text=%s' % (gid, rid, text[:120]))
+            return
+        try:
+            resp = await self.ob.send_text('group', gid, text, reply_id=rid)
+        except Exception as e:
+            logbuf.warn('auto', '发送失败: %s' % str(e)[:160])
+            return
+        hits.append(time.time())
+        ghits.append(time.time())
+        self._auto_last[key] = time.time()
+        try:
+            await store.add_message(sid, 'assistant', text)
+        except Exception:
+            pass
+        await self._record_own(account_id, acct_cfg, 'group', gid, text, resp)
+        logbuf.info('auto', '群 %s 主动接话（quote=%s, %s）：%s'
+                    % (gid, bool(rid), (used or {}).get('id', ''), text[:120]))
+
+    @staticmethod
+    def _auto_json(raw):
+        try:
+            s = (raw or '').strip()
+            if s.startswith('```'):
+                s = re.sub(r'^```(?:json)?\s*', '', s)
+                s = re.sub(r'\s*```$', '', s)
+            a, b = s.find('{'), s.rfind('}')
+            if a < 0 or b <= a:
+                return None
+            d = json.loads(s[a:b + 1])
+            return d if isinstance(d, dict) else None
+        except Exception:
+            return None
+
     async def _maybe_reply(self, ev, account_id, acct_cfg):
         if ev.get('__self__'):
             return        # 自己发的消息永不触发应答
@@ -608,6 +848,11 @@ class Bot:
                 return
             if hit_prefix:
                 text = text[len(hit_prefix):].strip()
+            # 主动接话开启时，普通群消息不再直接触发“每条都回”；
+            # 只有 @ / 唤醒前缀走原有应答，其余交给 auto_chat 延迟判断。
+            auto = (cfg.get('features') or {}).get('auto_chat') or {}
+            if auto.get('enabled') and self_id not in ats and hit_prefix is None:
+                return
             # 只发图 / 只引用不说话也要回，别被空文本拦掉
             if not text and not imgs and not quote_imgs:
                 return

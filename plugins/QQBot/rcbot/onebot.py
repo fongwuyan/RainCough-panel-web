@@ -140,9 +140,11 @@ class OneBot:
         finally:
             self._pending.pop(echo, None)
 
-    async def send_text(self, kind, target, text, mention=None):
+    async def send_text(self, kind, target, text, mention=None, reply_id=None):
         """发文本。返回 OneBot 响应（含 message_id，撤回打标要用）。"""
         segs = []
+        if reply_id:
+            segs.append({'type': 'reply', 'data': {'id': str(reply_id)}})
         if mention:
             segs.append({'type': 'at', 'data': {'qq': str(mention)}})
             segs.append({'type': 'text', 'data': {'text': ' '}})

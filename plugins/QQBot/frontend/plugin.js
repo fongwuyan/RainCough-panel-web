@@ -2283,6 +2283,7 @@ const Settings = {
     ws() { return this.feats.web_search || {} },
     vis() { return this.feats.vision || {} },
     rp() { return this.feats.random_pick || {} },
+    auto() { return this.feats.auto_chat || {} },
     sl() { return this.feats.sl_status || {} },
   },
   async mounted() { await this.load() },
@@ -2350,6 +2351,15 @@ const Settings = {
             random_pick: {
               enabled: this.rp.enabled !== false,
               scope: this.rp.scope || 'enabled_groups',
+            },
+            auto_chat: {
+              enabled: !!this.auto.enabled,
+              context_messages: Math.max(10, Math.min(200, Number(this.auto.context_messages) || 50)),
+              delay: Math.max(1, Math.min(30, Number(this.auto.delay) || 4)),
+              max_per_minute: Math.max(1, Math.min(600, Number(this.auto.max_per_minute) || 60)),
+              max_tokens: Math.max(128, Math.min(4096, Number(this.auto.max_tokens) || 512)),
+              temperature: Math.max(0, Math.min(2, Number(this.auto.temperature) || 0.8)),
+              dry_run: !!this.auto.dry_run,
             },
             sl_status: {
               enabled: this.sl.enabled !== false,
@@ -2515,6 +2525,40 @@ const Settings = {
           </div>
           <div class="rcq-note">
             「已启用的群聊」= 在「会话管理」里打开开关的那些群。还没启用的群不参与挑选。
+          </div>
+        </div>
+
+        <div class="rcq-sec">
+          <div class="switch-row">
+            <label>AI 主动接话
+              <div class="rcq-note">
+                所有「会话管理」里已启用的群都会进入判断队列。延迟几秒后，
+                模型读最近 50 条群聊，自己决定接不接、引用不引用、说什么。
+                普通群消息不再逐条直回，@ / 唤醒前缀仍走原有回复。
+              </div>
+            </label>
+            <label class="switch"><input type="checkbox" v-model="auto.enabled" /><span class="slider"></span></label>
+          </div>
+          <div class="rcq-form" style="margin-top:6px">
+            <label class="rcq-fi"><span>判断上下文条数</span>
+              <input class="input rcq-num" type="number" min="10" max="200" v-model="auto.context_messages" /></label>
+            <label class="rcq-fi"><span>延迟（秒，等一轮话说完）</span>
+              <input class="input rcq-num" type="number" min="1" max="30" v-model="auto.delay" /></label>
+            <label class="rcq-fi"><span>全账号每分钟最多主动回复</span>
+              <input class="input rcq-num" type="number" min="1" max="600" v-model="auto.max_per_minute" /></label>
+            <label class="rcq-fi"><span>最大输出 tokens</span>
+              <input class="input rcq-num" type="number" min="128" max="4096" v-model="auto.max_tokens" /></label>
+            <label class="rcq-fi"><span>temperature</span>
+              <input class="input rcq-num" type="number" min="0" max="2" step="0.1" v-model="auto.temperature" /></label>
+          </div>
+          <div class="switch-row" style="margin-top:8px">
+            <label>只记录判断结果，不真正发送（dry-run）</label>
+            <label class="switch"><input type="checkbox" v-model="auto.dry_run" /><span class="slider"></span></label>
+          </div>
+          <div class="rcq-note">
+            是否引用由模型决定：有时引用具体消息，有时直接接话。
+            图片会沿用上面的「允许识图」开关，最多带 {{ vis.max_images || 3 }} 张。
+            判断和发送日志在「日志」页搜 <code>auto</code>。
           </div>
         </div>
 

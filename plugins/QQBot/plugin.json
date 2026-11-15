@@ -1,8 +1,8 @@
-{
+﻿{
   "name": "QQBot",
-  "label": "雨咯Bot",
-  "version": "1.4.0",
-  "description": "QQ 机器人控制台（SnowLuma 单后端）",
+  "label": "闆ㄥ挴Bot",
+  "version": "1.5.0",
+  "description": "QQ 鏈哄櫒浜烘帶鍒跺彴锛圫nowLuma 鍗曞悗绔級",
   "author": "RainCough",
   "icon": "",
   "requirements": [],
@@ -12,7 +12,7 @@
     "pages": [
       {
         "path": "",
-        "title": "雨咯Bot"
+        "title": "闆ㄥ挴Bot"
       }
     ]
   },
@@ -33,271 +33,271 @@
       "id": "qqbot.health",
       "visibility": "all",
       "version": "1",
-      "description": "探活"
+      "description": "鎺㈡椿"
     },
     {
       "id": "qqbot.conn.get",
       "visibility": "all",
       "version": "1",
-      "description": "读取连接地址与连通性"
+      "description": "璇诲彇杩炴帴鍦板潃涓庤繛閫氭€?
     },
     {
       "id": "qqbot.conn.save",
       "visibility": "main",
       "version": "1",
-      "description": "保存连接地址"
+      "description": "淇濆瓨杩炴帴鍦板潃"
     },
     {
       "id": "qqbot.overview",
       "visibility": "all",
       "version": "1",
-      "description": "概览（账号 / 版本 / 系统 / 计数）"
+      "description": "姒傝锛堣处鍙?/ 鐗堟湰 / 绯荤粺 / 璁℃暟锛?
     },
     {
       "id": "qqbot.chat.query",
       "visibility": "main",
       "version": "1",
-      "description": "按用户/撤回状态/消息类型查询消息（条件可叠加）"
+      "description": "鎸夌敤鎴?鎾ゅ洖鐘舵€?娑堟伅绫诲瀷鏌ヨ娑堟伅锛堟潯浠跺彲鍙犲姞锛?
     },
     {
       "id": "qqbot.chat.senders",
       "visibility": "main",
       "version": "1",
-      "description": "聊天中出现过的发送者列表"
+      "description": "鑱婂ぉ涓嚭鐜拌繃鐨勫彂閫佽€呭垪琛?
     },
     {
       "id": "qqbot.chat.clear_session",
       "visibility": "main",
       "version": "1",
-      "description": "一键清空会话"
+      "description": "涓€閿竻绌轰細璇?
     },
     {
       "id": "qqbot.chat.media_list",
       "visibility": "main",
       "version": "1",
-      "description": "媒体库列表与统计"
+      "description": "濯掍綋搴撳垪琛ㄤ笌缁熻"
     },
     {
       "id": "qqbot.chat.media_delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除媒体文件"
+      "description": "鍒犻櫎濯掍綋鏂囦欢"
     },
     {
       "id": "qqbot.chat.media_transcode",
       "visibility": "main",
       "version": "1",
-      "description": "把视频/语音转成浏览器可播放格式"
+      "description": "鎶婅棰?璇煶杞垚娴忚鍣ㄥ彲鎾斁鏍煎紡"
     },
     {
       "id": "qqbot.chat.media_reindex",
       "visibility": "main",
       "version": "1",
-      "description": "重建媒体索引"
+      "description": "閲嶅缓濯掍綋绱㈠紩"
     },
     {
       "id": "qqbot.chat.media_repair",
       "visibility": "main",
       "version": "1",
-      "description": "修复媒体引用（转码后路径不一致）"
+      "description": "淇濯掍綋寮曠敤锛堣浆鐮佸悗璺緞涓嶄竴鑷达級"
     },
     {
       "id": "rcbot.status",
       "visibility": "all",
       "version": "1",
-      "description": "机器人运行状态"
+      "description": "鏈哄櫒浜鸿繍琛岀姸鎬?
     },
     {
       "id": "rcbot.config.get",
       "visibility": "all",
       "version": "1",
-      "description": "读取上下文/触发/能力配置"
+      "description": "璇诲彇涓婁笅鏂?瑙﹀彂/鑳藉姏閰嶇疆"
     },
     {
       "id": "rcbot.config.save",
       "visibility": "main",
       "version": "1",
-      "description": "保存上下文/触发/能力配置"
+      "description": "淇濆瓨涓婁笅鏂?瑙﹀彂/鑳藉姏閰嶇疆"
     },
     {
       "id": "rcbot.tools.search",
       "visibility": "main",
       "version": "1",
-      "description": "试一下联网搜索"
+      "description": "璇曚竴涓嬭仈缃戞悳绱?
     },
     {
       "id": "rcbot.providers",
       "visibility": "all",
       "version": "1",
-      "description": "模型提供商列表"
+      "description": "妯″瀷鎻愪緵鍟嗗垪琛?
     },
     {
       "id": "rcbot.provider.save",
       "visibility": "main",
       "version": "1",
-      "description": "新增/修改提供商"
+      "description": "鏂板/淇敼鎻愪緵鍟?
     },
     {
       "id": "rcbot.provider.delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除提供商"
+      "description": "鍒犻櫎鎻愪緵鍟?
     },
     {
       "id": "rcbot.provider.test",
       "visibility": "main",
       "version": "1",
-      "description": "测试提供商连通性"
+      "description": "娴嬭瘯鎻愪緵鍟嗚繛閫氭€?
     },
     {
       "id": "rcbot.provider.models",
       "visibility": "main",
       "version": "1",
-      "description": "拉取可用模型列表"
+      "description": "鎷夊彇鍙敤妯″瀷鍒楄〃"
     },
     {
       "id": "rcbot.personas",
       "visibility": "all",
       "version": "1",
-      "description": "人格列表"
+      "description": "浜烘牸鍒楄〃"
     },
     {
       "id": "rcbot.persona.save",
       "visibility": "main",
       "version": "1",
-      "description": "新增/修改人格"
+      "description": "鏂板/淇敼浜烘牸"
     },
     {
       "id": "rcbot.persona.delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除人格"
+      "description": "鍒犻櫎浜烘牸"
     },
     {
       "id": "rcbot.sessions",
       "visibility": "all",
       "version": "1",
-      "description": "会话列表"
+      "description": "浼氳瘽鍒楄〃"
     },
     {
       "id": "rcbot.session.get",
       "visibility": "all",
       "version": "1",
-      "description": "会话详情与消息"
+      "description": "浼氳瘽璇︽儏涓庢秷鎭?
     },
     {
       "id": "rcbot.session.save",
       "visibility": "main",
       "version": "1",
-      "description": "修改会话（人格/模型/启停）"
+      "description": "淇敼浼氳瘽锛堜汉鏍?妯″瀷/鍚仠锛?
     },
     {
       "id": "rcbot.session.clear",
       "visibility": "main",
       "version": "1",
-      "description": "清空会话上下文"
+      "description": "娓呯┖浼氳瘽涓婁笅鏂?
     },
     {
       "id": "rcbot.session.delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除会话"
+      "description": "鍒犻櫎浼氳瘽"
     },
     {
       "id": "rcbot.context",
       "visibility": "all",
       "version": "1",
-      "description": "上下文预览（含压缩摘要）"
+      "description": "涓婁笅鏂囬瑙堬紙鍚帇缂╂憳瑕侊級"
     },
     {
       "id": "rcbot.test_chat",
       "visibility": "main",
       "version": "1",
-      "description": "试聊（不经过 QQ）"
+      "description": "璇曡亰锛堜笉缁忚繃 QQ锛?
     },
     {
       "id": "qqbot.account.info",
       "visibility": "main",
       "version": "1",
-      "description": "当前账户信息（昵称/头像/QQ号/登录状态）"
+      "description": "褰撳墠璐︽埛淇℃伅锛堟樀绉?澶村儚/QQ鍙?鐧诲綍鐘舵€侊級"
     },
     {
       "id": "qqbot.account.qrcode",
       "visibility": "main",
       "version": "1",
-      "description": "取登录入口（SnowLuma 远程桌面）"
+      "description": "鍙栫櫥褰曞叆鍙ｏ紙SnowLuma 杩滅▼妗岄潰锛?
     },
     {
       "id": "qqbot.account.refresh_qrcode",
       "visibility": "main",
       "version": "1",
-      "description": "刷新登录二维码"
+      "description": "鍒锋柊鐧诲綍浜岀淮鐮?
     },
     {
       "id": "qqbot.account.status",
       "visibility": "main",
       "version": "1",
-      "description": "查登录进度"
+      "description": "鏌ョ櫥褰曡繘搴?
     },
     {
       "id": "qqbot.account.action",
       "visibility": "main",
       "version": "1",
-      "description": "账户操作：启动/停止/重启/快登/换号"
+      "description": "璐︽埛鎿嶄綔锛氬惎鍔?鍋滄/閲嶅惎/蹇櫥/鎹㈠彿"
     },
     {
       "id": "qqbot.account.logs",
       "visibility": "main",
       "version": "1",
-      "description": "SnowLuma 容器日志"
+      "description": "SnowLuma 瀹瑰櫒鏃ュ織"
     },
     {
       "id": "qqbot.account.logs.clear",
       "visibility": "main",
       "version": "1",
-      "description": "清空实时日志缓冲（容器日志由 Docker 管理）"
+      "description": "娓呯┖瀹炴椂鏃ュ織缂撳啿锛堝鍣ㄦ棩蹇楃敱 Docker 绠＄悊锛?
     },
     {
       "id": "qqbot.chat.sessions",
       "visibility": "all",
       "version": "1",
-      "description": "聊天记录会话列表"
+      "description": "鑱婂ぉ璁板綍浼氳瘽鍒楄〃"
     },
     {
       "id": "qqbot.chat.messages",
       "visibility": "all",
       "version": "1",
-      "description": "聊天记录消息分页"
+      "description": "鑱婂ぉ璁板綍娑堟伅鍒嗛〉"
     },
     {
       "id": "qqbot.chat.stats",
       "visibility": "all",
       "version": "1",
-      "description": "聊天记录统计与磁盘水位"
+      "description": "鑱婂ぉ璁板綍缁熻涓庣鐩樻按浣?
     },
     {
       "id": "qqbot.chat.export",
       "visibility": "main",
       "version": "1",
-      "description": "导出聊天记录 JSON"
+      "description": "瀵煎嚭鑱婂ぉ璁板綍 JSON"
     },
     {
       "id": "qqbot.chat.purge_media",
       "visibility": "main",
       "version": "1",
-      "description": "清理媒体文件（保留消息文本）"
+      "description": "娓呯悊濯掍綋鏂囦欢锛堜繚鐣欐秷鎭枃鏈級"
     },
     {
       "id": "rcbot.accounts",
       "visibility": "all",
       "version": "1",
-      "description": "机器人侧账号列表与连接状态"
+      "description": "鏈哄櫒浜轰晶璐﹀彿鍒楄〃涓庤繛鎺ョ姸鎬?
     },
     {
       "id": "rcbot.account.save",
       "visibility": "main",
       "version": "1",
-      "description": "新增/修改/删除机器人账号"
+      "description": "鏂板/淇敼/鍒犻櫎鏈哄櫒浜鸿处鍙?
     }
   ],
   "environment": {
@@ -305,37 +305,37 @@
     "check": [
       {
         "id": "snowluma",
-        "label": "SnowLuma 容器在运行",
+        "label": "SnowLuma 瀹瑰櫒鍦ㄨ繍琛?,
         "required": true,
         "run": "docker inspect -f '{{.State.Status}}' snowluma 2>/dev/null || echo absent",
         "expect": "^running$",
-        "hint": "SnowLuma 容器未运行或不存在 —— 去「QQ 账户」点「启动」或「扫码登录」拉起它"
+        "hint": "SnowLuma 瀹瑰櫒鏈繍琛屾垨涓嶅瓨鍦?鈥斺€?鍘汇€孮Q 璐︽埛銆嶇偣銆屽惎鍔ㄣ€嶆垨銆屾壂鐮佺櫥褰曘€嶆媺璧峰畠"
       },
       {
         "id": "onebot",
-        "label": "QQ 已登录（OneBot get_login_info）",
+        "label": "QQ 宸茬櫥褰曪紙OneBot get_login_info锛?,
         "required": true,
-        "run": "curl -s -m 5 -X POST http://127.0.0.1:3000/get_login_info -H 'Authorization: Bearer rcsnow' -H 'Content-Type: application/json' -d '{}' | grep -q '\"user_id\"' || { echo 'QQ 未登录或 OneBot 未就绪'; exit 1; }; echo logged_in",
+        "run": "curl -s -m 5 -X POST http://127.0.0.1:3000/get_login_info -H 'Authorization: Bearer rcsnow' -H 'Content-Type: application/json' -d '{}' | grep -q '\"user_id\"' || { echo 'QQ 鏈櫥褰曟垨 OneBot 鏈氨缁?; exit 1; }; echo logged_in",
         "expect": "^logged_in$",
-        "hint": "容器在跑但 QQ 没登录 —— 打开「QQ 账户」里的远程桌面扫码（登录态失效时重扫即可）"
+        "hint": "瀹瑰櫒鍦ㄨ窇浣?QQ 娌＄櫥褰?鈥斺€?鎵撳紑銆孮Q 璐︽埛銆嶉噷鐨勮繙绋嬫闈㈡壂鐮侊紙鐧诲綍鎬佸け鏁堟椂閲嶆壂鍗冲彲锛?
       },
       {
         "id": "deps",
-        "label": "rcbot Python 依赖",
+        "label": "rcbot Python 渚濊禆",
         "required": true,
         "run": "/opt/rcbot/venv/bin/python -c 'import aiohttp, aiosqlite, PIL'",
-        "hint": "rcbot 的 venv 缺失或缺依赖"
+        "hint": "rcbot 鐨?venv 缂哄け鎴栫己渚濊禆"
       },
       {
         "id": "runtime",
-        "label": "rcbot 运行时与部署一致且服务在跑",
+        "label": "rcbot 杩愯鏃朵笌閮ㄧ讲涓€鑷翠笖鏈嶅姟鍦ㄨ窇",
         "required": true,
-        "run": "for f in rcbot.py rcbot/*.py; do t=\"/opt/rcbot/$f\"; [ -f \"$t\" ] || { echo \"缺少 $t\"; exit 1; }; [ -r \"$t\" ] || { echo \"无法读取 $t(面板权限不足, 无法比对版本)\"; exit 2; }; cmp -s \"$f\" \"$t\" || { echo \"$f 与已部署版本不一致\"; exit 1; }; done; systemctl is-active --quiet rcbot || { echo \"rcbot 服务未运行\"; exit 1; }; echo same",
-        "hint": "机器人本体未部署、版本落后，或服务没在跑"
+        "run": "for f in rcbot.py rcbot/*.py; do t=\"/opt/rcbot/$f\"; [ -f \"$t\" ] || { echo \"缂哄皯 $t\"; exit 1; }; [ -r \"$t\" ] || { echo \"鏃犳硶璇诲彇 $t(闈㈡澘鏉冮檺涓嶈冻, 鏃犳硶姣斿鐗堟湰)\"; exit 2; }; cmp -s \"$f\" \"$t\" || { echo \"$f 涓庡凡閮ㄧ讲鐗堟湰涓嶄竴鑷碶"; exit 1; }; done; systemctl is-active --quiet rcbot || { echo \"rcbot 鏈嶅姟鏈繍琛孿"; exit 1; }; echo same",
+        "hint": "鏈哄櫒浜烘湰浣撴湭閮ㄧ讲銆佺増鏈惤鍚庯紝鎴栨湇鍔℃病鍦ㄨ窇"
       },
       {
         "id": "port6710",
-        "label": "rcbot HTTP 端口",
+        "label": "rcbot HTTP 绔彛",
         "type": "port",
         "port": 6710,
         "bind": "127.0.0.1",
@@ -346,23 +346,23 @@
       },
       {
         "id": "mediadir",
-        "label": "媒体目录可写",
+        "label": "濯掍綋鐩綍鍙啓",
         "required": true,
-        "run": "d=/opt/rcbot/media; mkdir -p \"$d\" 2>/dev/null || { echo '建不了媒体目录'; exit 1; }; [ -w \"$d\" ] || { echo '媒体目录不可写'; exit 1; }; echo writable",
-        "hint": "rcbot 存聊天记录媒体副本的目录，磁盘满或权限不对会记不下媒体"
+        "run": "d=/opt/rcbot/media; mkdir -p \"$d\" 2>/dev/null || { echo '寤轰笉浜嗗獟浣撶洰褰?; exit 1; }; [ -w \"$d\" ] || { echo '濯掍綋鐩綍涓嶅彲鍐?; exit 1; }; echo writable",
+        "hint": "rcbot 瀛樿亰澶╄褰曞獟浣撳壇鏈殑鐩綍锛岀鐩樻弧鎴栨潈闄愪笉瀵逛細璁颁笉涓嬪獟浣?
       },
       {
         "id": "silk",
-        "label": "语音转码器（可选，缺了语音只能下载不能播放）",
+        "label": "璇煶杞爜鍣紙鍙€夛紝缂轰簡璇煶鍙兘涓嬭浇涓嶈兘鎾斁锛?,
         "required": false,
-        "run": "[ -x /opt/rcbot/bin/silk_v3_decoder ] || { echo '没有 silk_v3_decoder，语音无法转码'; exit 1; }; echo ok",
-        "hint": "在「环境准备」里执行「编译 silk_v3_decoder」即可补上"
+        "run": "[ -x /opt/rcbot/bin/silk_v3_decoder ] || { echo '娌℃湁 silk_v3_decoder锛岃闊虫棤娉曡浆鐮?; exit 1; }; echo ok",
+        "hint": "鍦ㄣ€岀幆澧冨噯澶囥€嶉噷鎵ц銆岀紪璇?silk_v3_decoder銆嶅嵆鍙ˉ涓?
       }
     ],
     "apply": [
       {
         "id": "deps",
-        "label": "创建 venv 并安装 rcbot 依赖",
+        "label": "鍒涘缓 venv 骞跺畨瑁?rcbot 渚濊禆",
         "check": "deps",
         "needs": "root",
         "timeout": 900,
@@ -370,20 +370,21 @@
       },
       {
         "id": "runtime",
-        "label": "部署 rcbot 运行时并注册 systemd 服务",
+        "label": "閮ㄧ讲 rcbot 杩愯鏃跺苟娉ㄥ唽 systemd 鏈嶅姟",
         "check": "runtime",
         "needs": "root",
         "timeout": 180,
-        "run": "set -e\ninstall -d -m 0755 /opt/rcbot /opt/rcbot/data /opt/rcbot/logs /opt/rcbot/rcbot\nrm -f /opt/rcbot/rcbot/*.py\ncp -rf rcbot/. /opt/rcbot/rcbot/\ninstall -m 0644 rcbot.py /opt/rcbot/rcbot.py\n# 源码要可读: 非 root 的面板也要能比对版本, 否则检查只会说\"读不到\"\nchmod 0644 /opt/rcbot/rcbot/*.py\ncat > /etc/systemd/system/rcbot.service <<'RCBOT_UNIT'\n[Unit]\nDescription=RainCough Bot (rcbot)\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=/opt/rcbot\nExecStart=/opt/rcbot/venv/bin/python /opt/rcbot/rcbot.py\nRestart=always\nRestartSec=5\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=RCBOT_LOG_LEVEL=INFO\n\n[Install]\nWantedBy=multi-user.target\nRCBOT_UNIT\nsystemctl daemon-reload\nsystemctl enable rcbot\nsystemctl restart rcbot"
+        "run": "set -e\ninstall -d -m 0755 /opt/rcbot /opt/rcbot/data /opt/rcbot/logs /opt/rcbot/rcbot\nrm -f /opt/rcbot/rcbot/*.py\ncp -rf rcbot/. /opt/rcbot/rcbot/\ninstall -m 0644 rcbot.py /opt/rcbot/rcbot.py\n# 婧愮爜瑕佸彲璇? 闈?root 鐨勯潰鏉夸篃瑕佽兘姣斿鐗堟湰, 鍚﹀垯妫€鏌ュ彧浼氳\"璇讳笉鍒癨"\nchmod 0644 /opt/rcbot/rcbot/*.py\ncat > /etc/systemd/system/rcbot.service <<'RCBOT_UNIT'\n[Unit]\nDescription=RainCough Bot (rcbot)\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=/opt/rcbot\nExecStart=/opt/rcbot/venv/bin/python /opt/rcbot/rcbot.py\nRestart=always\nRestartSec=5\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=RCBOT_LOG_LEVEL=INFO\n\n[Install]\nWantedBy=multi-user.target\nRCBOT_UNIT\nsystemctl daemon-reload\nsystemctl enable rcbot\nsystemctl restart rcbot"
       },
       {
         "id": "silk",
-        "label": "编译 silk_v3_decoder（QQ 语音 SILK → mp3，浏览器才能播放）",
+        "label": "缂栬瘧 silk_v3_decoder锛圦Q 璇煶 SILK 鈫?mp3锛屾祻瑙堝櫒鎵嶈兘鎾斁锛?,
         "check": "silk",
         "needs": "root",
         "timeout": 900,
-        "run": "set -e\n# QQ 语音是 SILK，浏览器放不了；ffmpeg 没有 silk 解码器（实测 5.1.9），apt 也没有。\n# 这里编译一份 silk_v3_decoder，rcbot 用它把语音转成 mp3。\nmkdir -p /opt/rcbot/bin\nif [ -x /opt/rcbot/bin/silk_v3_decoder ]; then echo already; exit 0; fi\ncommand -v git >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq git build-essential cmake; }\ncommand -v cmake >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq build-essential cmake; }\ntmp=$(mktemp -d)\ncd \"$tmp\"\ngit clone --depth 1 https://github.com/foyoux/pilk.git 2>/dev/null || {\n  git clone --depth 1 https://github.com/xiangyuecn/Silk.git . 2>/dev/null || {\n    echo '拉不到 silk_v3_decoder 源码'; exit 1; }\n}\nif [ -d silk ]; then cd silk; fi\nif [ -f CMakeLists.txt ]; then\n  cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null\n  cmake --build build -j2 >/dev/null\n  find . -name 'silk_v3_decoder' -type f -perm -u+x | head -1 | xargs -r -I{} cp {} /opt/rcbot/bin/silk_v3_decoder\nelif [ -f Makefile ]; then\n  make -s >/dev/null\n  cp silk_v3_decoder /opt/rcbot/bin/silk_v3_decoder 2>/dev/null || true\nfi\nchmod +x /opt/rcbot/bin/silk_v3_decoder\n[ -x /opt/rcbot/bin/silk_v3_decoder ] || { echo '编译没出可执行文件'; exit 1; }\necho ok"
+        "run": "set -e\n# QQ 璇煶鏄?SILK锛屾祻瑙堝櫒鏀句笉浜嗭紱ffmpeg 娌℃湁 silk 瑙ｇ爜鍣紙瀹炴祴 5.1.9锛夛紝apt 涔熸病鏈夈€俓n# 杩欓噷缂栬瘧涓€浠?silk_v3_decoder锛宺cbot 鐢ㄥ畠鎶婅闊宠浆鎴?mp3銆俓nmkdir -p /opt/rcbot/bin\nif [ -x /opt/rcbot/bin/silk_v3_decoder ]; then echo already; exit 0; fi\ncommand -v git >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq git build-essential cmake; }\ncommand -v cmake >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq build-essential cmake; }\ntmp=$(mktemp -d)\ncd \"$tmp\"\ngit clone --depth 1 https://github.com/foyoux/pilk.git 2>/dev/null || {\n  git clone --depth 1 https://github.com/xiangyuecn/Silk.git . 2>/dev/null || {\n    echo '鎷変笉鍒?silk_v3_decoder 婧愮爜'; exit 1; }\n}\nif [ -d silk ]; then cd silk; fi\nif [ -f CMakeLists.txt ]; then\n  cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null\n  cmake --build build -j2 >/dev/null\n  find . -name 'silk_v3_decoder' -type f -perm -u+x | head -1 | xargs -r -I{} cp {} /opt/rcbot/bin/silk_v3_decoder\nelif [ -f Makefile ]; then\n  make -s >/dev/null\n  cp silk_v3_decoder /opt/rcbot/bin/silk_v3_decoder 2>/dev/null || true\nfi\nchmod +x /opt/rcbot/bin/silk_v3_decoder\n[ -x /opt/rcbot/bin/silk_v3_decoder ] || { echo '缂栬瘧娌″嚭鍙墽琛屾枃浠?; exit 1; }\necho ok"
       }
     ]
   }
 }
+
