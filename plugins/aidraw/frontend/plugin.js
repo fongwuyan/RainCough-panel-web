@@ -89,7 +89,7 @@
     let busy = false, cancelFlag = false, current = null, timer = null, startAt = 0
     let trainState = null, trainDatasets = [], trainMsg = '', trainTimer = null, trainLoaded = false
     let trainFiles = []
-    const trainForm = { name: 'p_lora', base: 'realistic', dataset: '', trigger: 'p_character', steps: 800, rank: 16, alpha: 16, lr: 0.0001, resolution: 512, batch: 1, seed: 42 }
+    const trainForm = { name: 'p_lora', base: 'realistic', dataset: '', trigger: 'p_character', steps: 800, rank: 16, alpha: 16, lr: 0.0001, width: 512, height: 512, batch: 1, seed: 42 }
     const dsForm = { name: '', caption: '' }
 
     const hd = h('div', {}, [h('h2', { text: 'AI 绘图' }), h('p', { class: 'sub', text: '节点生图 · 任意尺寸 · 图生图 · JSON 批量 · 服务端历史画廊' })])
@@ -262,7 +262,7 @@
       ]))
       box.appendChild(h('div', { class: 'row' }, [
         field('步数', num('steps')), field('rank', num('rank')), field('alpha', num('alpha')),
-        field('lr', num('lr', '0.00001')), field('分辨率', num('resolution')),
+        field('lr', num('lr', '0.00001')), field('宽', num('width')), field('高', num('height')),
         field('batch', num('batch')), field('seed', num('seed')),
       ]))
       box.appendChild(h('div', { class: 'row' }, [startBtn, stopBtn, refreshBtn]))
@@ -309,7 +309,8 @@
           dataset: trainForm.dataset, name: trainForm.name, trigger: trainForm.trigger,
           base: trainForm.base, steps: Number(trainForm.steps) || 800,
           rank: Number(trainForm.rank) || 16, alpha: Number(trainForm.alpha) || 16,
-          lr: Number(trainForm.lr) || 0.0001, resolution: Number(trainForm.resolution) || 512,
+          lr: Number(trainForm.lr) || 0.0001, width: Number(trainForm.width) || 512,
+          height: Number(trainForm.height) || 512,
           batch: Number(trainForm.batch) || 1, seed: Number(trainForm.seed) || 42,
         } })
         trainMsg = '训练已启动'
