@@ -1,9 +1,9 @@
-﻿{
+{
   "name": "QQBot",
   "label": "闆ㄥ挴Bot",
   "version": "1.5.0",
   "description": "QQ 鏈哄櫒浜烘帶鍒跺彴锛圫nowLuma 鍗曞悗绔級",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "requirements": [],
   "frontend": {

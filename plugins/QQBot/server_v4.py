@@ -29,7 +29,7 @@ from rcbot import backend, snowluma  # noqa: E402  SnowLuma 后端适配
 from rcbot import logbuf as _logbuf  # noqa: E402
 
 NAME = "QQBot"          # ★ 必须与插件目录名一致（目录名即插件身份，不改）
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 LABEL = "雨咯Bot"
 
 DIR = os.path.dirname(os.path.abspath(__file__))
