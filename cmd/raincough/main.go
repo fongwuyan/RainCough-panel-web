@@ -415,6 +415,28 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tasks/", s.handleTaskDetail)
 	mux.HandleFunc("/api/tasks/purge", s.handleTasksPurge)
 
+	// 节点管理（生图/推理/训练节点）
+	mux.HandleFunc("/api/nodes", s.handleNodes)
+	mux.HandleFunc("/api/nodes/delete", s.handleNodeDelete)
+	mux.HandleFunc("/api/nodes/test", s.handleNodeTest)
+	mux.HandleFunc("/api/nodes/status", s.handleNodeStatus)
+	mux.HandleFunc("/api/nodes/ssh-test", s.handleNodeSSHTest)
+	mux.HandleFunc("/api/nodes/install", s.handleNodeInstall)
+	mux.HandleFunc("/api/nodes/preflight", s.handleNodePreflight)
+	mux.HandleFunc("/api/node-jobs", s.handleNodeJobs)
+	mux.HandleFunc("/api/node-jobs/status", s.handleNodeJobStatus)
+	mux.HandleFunc("/api/node-jobs/models", s.handleNodeModels)
+	mux.HandleFunc("/api/node-jobs/cancel", s.handleNodeJobCancel)
+	mux.HandleFunc("/api/node-jobs/image", s.handleNodeJobImage)
+	mux.HandleFunc("/api/node-train", s.handleNodeTrainState)
+	mux.HandleFunc("/api/node-train/start", s.handleNodeTrainStart)
+	mux.HandleFunc("/api/node-train/stop", s.handleNodeTrainStop)
+	mux.HandleFunc("/api/node-datasets", s.handleNodeDatasets)
+	mux.HandleFunc("/api/node-datasets/create", s.handleNodeDatasetCreate)
+	mux.HandleFunc("/api/node-datasets/upload", s.handleNodeDatasetUpload)
+	mux.HandleFunc("/api/node-datasets/caption", s.handleNodeDatasetCaption)
+	mux.HandleFunc("/api/node-datasets/delete", s.handleNodeDatasetDelete)
+
 	// ---- 终端 ----
 	mux.HandleFunc("/api/terminal/open", s.handleTermOpen)
 	mux.HandleFunc("/api/terminal/stream", s.handleTermStream)
@@ -451,7 +473,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/panel/update/rollback", s.handlePanelUpdateRollback)
 
 	// ---- 插件 ----
-	mux.HandleFunc("/api/plugins", s.handlePlugins) // 列表
+	mux.HandleFunc("/api/plugins", s.handlePlugins)        // 列表
 	mux.HandleFunc("/api/plugins/rescan", s.handlePlugins) // 重新扫描插件目录
 	// 运行时能力(支持哪些语言 / 各解释器是否就绪)。前端据此判断"语言是否受支持",
 	// 不再自己硬编码白名单 —— 两处各写一份必然脱节(曾导致 JMComic 被误标"不兼容 v6")。
