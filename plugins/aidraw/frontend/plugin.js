@@ -87,10 +87,14 @@
     let nodes = [], models = [], baseModels = [], loraModels = [], history = []
     let baseImage = '', batchBaseImage = '', batchItems = [], batchDefaults = {}
     let busy = false, cancelFlag = false, current = null, timer = null, startAt = 0
+    let trainState = null, trainDatasets = [], trainMsg = '', trainTimer = null, trainLoaded = false
+    let trainFiles = []
+    const trainForm = { name: 'p_lora', base: 'realistic', dataset: '', trigger: 'p_character', steps: 800, rank: 16, alpha: 16, lr: 0.0001, resolution: 512, batch: 1, seed: 42 }
+    const dsForm = { name: '', caption: '' }
 
     const hd = h('div', {}, [h('h2', { text: 'AI 绘图' }), h('p', { class: 'sub', text: '节点生图 · 任意尺寸 · 图生图 · JSON 批量 · 服务端历史画廊' })])
     const tabs = h('div', { class: 'tabs' })
-    const tabDefs = [['t2i', '文生图'], ['i2i', '图生图'], ['batch', 'JSON 批量'], ['history', '历史画廊']]
+    const tabDefs = [['t2i', '文生图'], ['i2i', '图生图'], ['batch', 'JSON 批量'], ['history', '历史画廊'], ['train', 'LoRA 训练']]
     for (const [id, label] of tabDefs) {
       tabs.appendChild(h('div', { class: 'tab' + (tab === id ? ' on' : ''), text: label, 'data-tab': id, onclick: () => { tab = id; renderTabs(); render() } }))
     }
@@ -143,7 +147,7 @@
     }
     function stopTimer() { clearInterval(timer); timer = null }
 
-    nodeSel.onchange = () => loadModels()
+    nodeSel.onchange = () => { trainLoaded = false; loadModels(); if (tab === 'train') loadTraining(true) }
     modelSel.onchange = () => populateLoras()
     imageInput.onchange = async () => {
       const f = imageInput.files && imageInput.files[0]
@@ -204,7 +208,161 @@
       body.innerHTML = ''
       if (tab === 'history') { renderHistory(); return }
       if (tab === 'batch') { body.appendChild(renderBatch()); return }
+      if (tab === 'train') { body.appendChild(renderTrain()); if (!trainLoaded) loadTraining(true); return }
       body.appendChild(formRow(tab === 'i2i', tab === 'i2i'))
+    }
+
+    function renderTrain() {
+      const box = h('div', {}, [])
+      const dsSel = h('select', {}, [h('option', { value: '', text: '加载数据集中…' })])
+      for (const d of trainDatasets) dsSel.appendChild(h('option', { value: d.name, text: d.name + ' · ' + d.images + ' 图 / ' + d.captions + ' caption' }))
+      if (trainForm.dataset) dsSel.value = trainForm.dataset
+      else if (trainDatasets.length) { trainForm.dataset = trainDatasets[0].name; dsSel.value = trainForm.dataset }
+      dsSel.onchange = () => { trainForm.dataset = dsSel.value }
+      const baseSel = h('select', {}, [h('option', { value: 'realistic', text: '写实 · SD1.5' }), h('option', { value: 'anime', text: '动漫 · waifu-diffusion' })])
+      baseSel.value = trainForm.base
+      baseSel.onchange = () => { trainForm.base = baseSel.value }
+      const field = (label, input) => h('label', {}, [h('span', { text: label }), input])
+      const num = (key, step) => {
+        const x = h('input', { type: 'number', value: String(trainForm[key]) })
+        if (step) x.step = step
+        x.oninput = () => { trainForm[key] = Number(x.value) }
+        return x
+      }
+      const nameIn = h('input', { value: trainForm.name, placeholder: '输出 LoRA 名' })
+      nameIn.oninput = () => { trainForm.name = nameIn.value }
+      const trigIn = h('input', { value: trainForm.trigger, placeholder: '触发词，如 p_character' })
+      trigIn.oninput = () => { trainForm.trigger = trigIn.value }
+      const startBtn = h('button', { class: 'btn primary', text: '开始训练', onclick: startTraining })
+      const stopBtn = h('button', { class: 'btn', text: '停止', onclick: stopTraining })
+      const refreshBtn = h('button', { class: 'btn', text: '刷新', onclick: () => loadTraining(true) })
+      const state = trainState || {}
+      const pct = state.total ? Math.round((state.step || 0) * 100 / state.total) : 0
+      const bar = h('div', { class: 'progress' }, [h('i', { style: 'width:' + pct + '%' })])
+      const status = h('div', { class: 'status', text: (trainMsg || '') + (state.status ? ' · ' + state.status + ' · step ' + (state.step || 0) + '/' + (state.total || 0) + ' · loss ' + (state.avg_loss || state.loss || '-') : '') })
+      const log = h('pre', { class: 'hint', text: (state.log || []).slice(-18).join('\n') })
+      const loras = (models || []).filter((m) => m.kind === 'lora')
+      const loraBox = h('div', { class: 'row' }, loras.map((m) => h('button', { class: 'btn btn-sm', text: '用 ' + (m.name || m.id) + ' 出图', onclick: () => useTrainedLora(m) })))
+      if (!loras.length) loraBox.appendChild(h('span', { class: 'hint', text: '训练完成后刷新模型列表' }))
+
+      const dsInput = h('input', { type: 'file', multiple: 'multiple', accept: 'image/png,image/jpeg,image/webp' })
+      dsInput.onchange = () => { trainFiles = Array.from(dsInput.files || []) }
+      const dsName = h('input', { value: dsForm.name, placeholder: '新数据集名' })
+      dsName.oninput = () => { dsForm.name = dsName.value }
+      const dsCap = h('input', { value: dsForm.caption, placeholder: '这批图片的 caption（可空）' })
+      dsCap.oninput = () => { dsForm.caption = dsCap.value }
+      const dsInfo = h('div', { class: 'hint', text: trainDatasets.map((d) => d.name + '(' + d.images + '/' + d.captions + ')').join(' · ') || '暂无数据集' })
+
+      box.appendChild(h('div', { class: 'row' }, [
+        field('节点', nodeSel),
+        field('数据集', dsSel),
+        field('底模', baseSel),
+        field('LoRA 名称', nameIn),
+        field('触发词', trigIn),
+      ]))
+      box.appendChild(h('div', { class: 'row' }, [
+        field('步数', num('steps')), field('rank', num('rank')), field('alpha', num('alpha')),
+        field('lr', num('lr', '0.00001')), field('分辨率', num('resolution')),
+        field('batch', num('batch')), field('seed', num('seed')),
+      ]))
+      box.appendChild(h('div', { class: 'row' }, [startBtn, stopBtn, refreshBtn]))
+      box.appendChild(bar); box.appendChild(status); box.appendChild(log)
+      box.appendChild(h('div', { class: 'section-title', text: '数据集管理' }))
+      box.appendChild(h('div', { class: 'row' }, [
+        field('新建', dsName), h('button', { class: 'btn', text: '创建', onclick: createDataset }),
+        field('图片（多选）', dsInput), field('统一 caption', dsCap),
+        h('button', { class: 'btn primary', text: '上传', onclick: uploadDataset }),
+        h('button', { class: 'btn', text: '删除当前数据集', onclick: deleteDataset }),
+      ]))
+      box.appendChild(dsInfo)
+      box.appendChild(h('div', { class: 'section-title', text: '训练产物 / 直接出图' }))
+      box.appendChild(loraBox)
+      return box
+    }
+
+    async function loadTraining(rerender) {
+      const nid = nodeSel.value
+      if (!nid) return
+      try {
+        const d = await jget('/api/node-train?node_id=' + encodeURIComponent(nid))
+        trainState = (d && d.state) || null
+        trainDatasets = (d && d.datasets) || []
+        trainMsg = ''
+        trainLoaded = true
+        const st = (trainState && trainState.status) || ''
+        if (st === 'running' || st === 'stopping') {
+          if (!trainTimer) trainTimer = setInterval(() => loadTraining(true), 2000)
+        } else {
+          clearInterval(trainTimer); trainTimer = null
+        }
+        if (!trainForm.dataset && trainDatasets.length) trainForm.dataset = trainDatasets[0].name
+        if (rerender && tab === 'train') render()
+      } catch (e) { trainMsg = '训练服务不可用：' + e.message }
+    }
+
+    async function startTraining() {
+      if (!nodeSel.value) { trainMsg = '请选择节点'; return }
+      if (!trainForm.dataset) { trainMsg = '请选择数据集'; return }
+      trainMsg = '提交训练…'
+      try {
+        await jpost('/api/node-train/start', { node_id: nodeSel.value, req: {
+          dataset: trainForm.dataset, name: trainForm.name, trigger: trainForm.trigger,
+          base: trainForm.base, steps: Number(trainForm.steps) || 800,
+          rank: Number(trainForm.rank) || 16, alpha: Number(trainForm.alpha) || 16,
+          lr: Number(trainForm.lr) || 0.0001, resolution: Number(trainForm.resolution) || 512,
+          batch: Number(trainForm.batch) || 1, seed: Number(trainForm.seed) || 42,
+        } })
+        trainMsg = '训练已启动'
+        if (tab === 'train') render()
+        clearInterval(trainTimer)
+        trainTimer = setInterval(() => loadTraining(true), 2000)
+      } catch (e) { trainMsg = '启动失败：' + e.message; if (tab === 'train') render() }
+    }
+
+    async function stopTraining() {
+      try { await jpost('/api/node-train/stop', { node_id: nodeSel.value }); trainMsg = '已请求停止' } catch (e) { trainMsg = '停止失败：' + e.message }
+      clearInterval(trainTimer)
+      if (tab === 'train') render()
+    }
+
+    async function createDataset() {
+      if (!dsForm.name.trim()) { trainMsg = '请输入数据集名'; if (tab === 'train') render(); return }
+      try { await jpost('/api/node-datasets/create', { node_id: nodeSel.value, name: dsForm.name.trim() }); trainForm.dataset = dsForm.name.trim(); await loadTraining(true) }
+      catch (e) { trainMsg = '创建失败：' + e.message; if (tab === 'train') render() }
+    }
+
+    async function uploadDataset() {
+      if (!trainForm.dataset) { trainMsg = '请先选择数据集'; if (tab === 'train') render(); return }
+      if (!trainFiles.length) { trainMsg = '请选择图片'; if (tab === 'train') render(); return }
+      let ok = 0
+      for (const f of trainFiles) {
+        try {
+          const b64 = (await readFile(f)).split(',')[1]
+          await jpost('/api/node-datasets/upload', { node_id: nodeSel.value, name: trainForm.dataset, filename: f.name, image_b64: b64, caption: dsForm.caption })
+          ok++
+          trainMsg = '上传 ' + ok + '/' + trainFiles.length
+          if (tab === 'train') render()
+        } catch (e) { trainMsg = '上传失败：' + f.name + ' ' + e.message; if (tab === 'train') render(); break }
+      }
+      await loadTraining(true)
+    }
+
+    async function deleteDataset() {
+      if (!trainForm.dataset || !confirm('删除数据集「' + trainForm.dataset + '」？')) return
+      try { await jpost('/api/node-datasets/delete', { node_id: nodeSel.value, name: trainForm.dataset }); trainForm.dataset = ''; await loadTraining(true) }
+      catch (e) { trainMsg = '删除失败：' + e.message; if (tab === 'train') render() }
+    }
+
+    async function useTrainedLora(m) {
+      await loadModels()
+      const family = m.lora_for || 'sd15'
+      const base = baseModels.find((x) => x.kind === family || (x.kind === 'sd15' && family === 'sd15')) || baseModels[0]
+      if (base) modelSel.value = base.id
+      populateLoras()
+      loraSel.value = m.id
+      prompt.value = trainForm.trigger || m.trigger || ''
+      tab = 't2i'; renderTabs(); render()
+      setStatus('已载入 LoRA：' + (m.name || m.id))
     }
 
     function renderBatch() {
@@ -493,6 +651,7 @@
     return {
       unmount() {
         stopTimer()
+        clearInterval(trainTimer)
         try { if (pollTimer) clearInterval(pollTimer) } catch (e) {}
       },
     }
