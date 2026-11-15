@@ -3,7 +3,7 @@
   "label": "下载工具",
   "version": "2.0.0",
   "description": "下载/分片/重命名与文档转换(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

@@ -3,7 +3,7 @@
   "label": "Uptime 监控",
   "version": "3.0.0",
   "description": "站点探活监控: 定时检测 HTTP 目标在线状态、响应时间与可用率(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

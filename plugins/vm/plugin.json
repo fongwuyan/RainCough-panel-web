@@ -3,7 +3,7 @@
   "label": "虚拟机",
   "version": "1.0.0",
   "description": "KVM/QEMU 虚拟机管理：列表、启停、实时监控、创建、快照、VNC 控制台",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

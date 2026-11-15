@@ -3,7 +3,7 @@
   "label": "采集解析",
   "version": "2.0.0",
   "description": "搜索/链接检测/RSS/正文提取(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

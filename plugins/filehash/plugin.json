@@ -3,7 +3,7 @@
   "label": "文件校验",
   "version": "2.0.0",
   "description": "哈希计算/生成/校验与目录统计查重(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

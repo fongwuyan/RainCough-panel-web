@@ -3,7 +3,7 @@
   "label": "图片转皮肤",
   "version": "2.0.0",
   "description": "图片转 MC Java 皮肤: 立绘映射、AI 上色(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

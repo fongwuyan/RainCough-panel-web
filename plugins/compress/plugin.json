@@ -3,7 +3,7 @@
   "label": "解压压缩",
   "version": "2.0.0",
   "description": "解压/压缩/格式转换/对比(7z)(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

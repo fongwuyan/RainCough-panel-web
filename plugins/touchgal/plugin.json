@@ -3,7 +3,7 @@
   "label": "TouchGal 游戏查找",
   "version": "2.0.0",
   "description": "搜索 Galgame 游戏资源、获取下载链接、图片识别(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

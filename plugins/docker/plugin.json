@@ -3,7 +3,7 @@
   "label": "Docker 管理",
   "version": "2.0.0",
   "description": "容器/镜像/卷/网络/Compose 管理(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

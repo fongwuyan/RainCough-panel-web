@@ -3,7 +3,7 @@
   "label": "VPN 网络",
   "version": "2.0.0",
   "description": "v2ray/wireguard/openvpn 订阅管理: 订阅拉取、节点测试、连接控制(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

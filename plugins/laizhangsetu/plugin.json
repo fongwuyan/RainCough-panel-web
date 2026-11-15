@@ -3,7 +3,7 @@
   "label": "来张涩图",
   "version": "2.0.0",
   "description": "调用 Lolicon API 获取随机 Pixiv 图片, 支持标签搜索、R18、图片缓存(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

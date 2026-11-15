@@ -3,7 +3,7 @@
   "label": "网络攻防工具库",
   "version": "1.1.0",
   "description": "安全作业编排台: 侦察、检测、验证、解码、取证（纯标准库实现，无第三方依赖；APK 支持到 1GB）",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

@@ -3,7 +3,7 @@
   "label": "识别二维码",
   "version": "2.0.0",
   "description": "OCR 识别(rapidocr)与二维码生成/解码(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

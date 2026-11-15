@@ -3,7 +3,7 @@
   "label": "MC 服务器",
   "version": "2.0.0",
   "description": "多实例 Minecraft 服务器: 实时控制台、监控、启停、实例 CRUD、核心切换(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",

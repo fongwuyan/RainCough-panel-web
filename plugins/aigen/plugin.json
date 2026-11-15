@@ -3,7 +3,7 @@
   "label": "AI 生图",
   "version": "2.0.0",
   "description": "本地 SD1.5 文生图/图生图, 支持 EasyNegative、VAE、Real-ESRGAN(接口库 v4 迁移)",
-  "author": "RainCough",
+  "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",
