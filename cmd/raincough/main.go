@@ -422,6 +422,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/nodes/status", s.handleNodeStatus)
 	mux.HandleFunc("/api/nodes/ssh-test", s.handleNodeSSHTest)
 	mux.HandleFunc("/api/nodes/install", s.handleNodeInstall)
+	mux.HandleFunc("/api/nodes/power", s.handleNodePower)
 	mux.HandleFunc("/api/nodes/preflight", s.handleNodePreflight)
 	mux.HandleFunc("/api/node-jobs", s.handleNodeJobs)
 	mux.HandleFunc("/api/node-jobs/status", s.handleNodeJobStatus)

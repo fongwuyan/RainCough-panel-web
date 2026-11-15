@@ -209,7 +209,26 @@ export const api = {
   taskQueue: (includeDone, limit) => req('GET', `/api/tasks?done=${includeDone ? '1' : '0'}&limit=${limit || 0}`),
   // 单条任务详情(含 meta): 任务列表页打开展开时用, 列表接口不返回大字段
   taskDetail: (id) => req('GET', `/api/tasks/${encodeURIComponent(id)}`),
+  taskAction: (action, id) => req('POST', '/api/tasks', { action, id }),
   taskQueuePurge: () => req('POST', '/api/tasks/purge'),
+
+  // ---- 节点管理 ----
+  nodes: () => req('GET', '/api/nodes'),
+  nodeSave: (node) => req('POST', '/api/nodes', node),
+  nodeDelete: (id) => req('POST', '/api/nodes/delete', { id }),
+  nodeTest: (id) => req('POST', '/api/nodes/test', { id }),
+  nodeStatus: (id) => req('GET', `/api/nodes/status?id=${encodeURIComponent(id)}`),
+  nodeSSHTest: (b) => req('POST', '/api/nodes/ssh-test', b),
+  nodeInstall: (id) => req('POST', '/api/nodes/install', { id }),
+  nodePreflight: (id) => req('POST', '/api/nodes/preflight', { id }),
+  nodePower: (id, action) => req('POST', '/api/nodes/power', { id, action }),
+  nodeTrainState: (id) => req('GET', `/api/node-train?node_id=${encodeURIComponent(id)}`),
+  nodeTrainStart: (id, reqData) => req('POST', '/api/node-train/start', { node_id: id, req: reqData }),
+  nodeTrainStop: (id) => req('POST', '/api/node-train/stop', { node_id: id }),
+  nodeDatasets: (id) => req('GET', `/api/node-datasets?node_id=${encodeURIComponent(id)}`),
+  nodeDatasetCreate: (id, name) => req('POST', '/api/node-datasets/create', { node_id: id, name }),
+  nodeDatasetUpload: (id, name, filename, image_b64, caption) => req('POST', '/api/node-datasets/upload', { node_id: id, name, filename, image_b64, caption }),
+  nodeDatasetDelete: (id, name) => req('POST', '/api/node-datasets/delete', { node_id: id, name }),
 
   // ---- 插件市场 ----
   storeSettings: () => req('GET', '/api/store/settings'),
