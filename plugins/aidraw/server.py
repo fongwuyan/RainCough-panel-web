@@ -97,7 +97,7 @@ if __name__ == "__main__":
     rc.serve(
         endpoint=os.environ.get("RC_ENDPOINT", ""),
         name="aidraw",
-        version="1.1.0",
+        version="1.2.0",
         manifest={"label": "AI 绘图", "description": "节点生图"},
         frontend={"pages": [{"path": "", "title": "AI 绘图"}]},
         iface_ids=None,

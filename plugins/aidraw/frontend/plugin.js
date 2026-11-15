@@ -84,7 +84,7 @@
     el.appendChild(root)
 
     let tab = 't2i'
-    let nodes = [], models = [], history = []
+    let nodes = [], models = [], baseModels = [], loraModels = [], history = []
     let baseImage = '', batchBaseImage = '', batchItems = [], batchDefaults = {}
     let busy = false, cancelFlag = false, current = null, timer = null, startAt = 0
 
@@ -99,6 +99,8 @@
 
     const nodeSel = h('select', {}, [h('option', { value: '', text: '加载节点中…' })])
     const modelSel = h('select', {}, [h('option', { value: '', text: '加载模型中…' })])
+    const loraSel = h('select', {}, [h('option', { value: '', text: '无 LoRA' })])
+    const loraScale = h('input', { type: 'number', min: '0', max: '2', step: '0.05', value: '1' })
     const prompt = h('textarea', { placeholder: '提示词，支持中文；例如：1girl, white dress, garden, soft light' })
     const negative = h('input', { placeholder: '负面提示词（可空）' })
     const width = h('input', { type: 'number', min: '1', value: '512', placeholder: '宽' })
@@ -142,6 +144,7 @@
     function stopTimer() { clearInterval(timer); timer = null }
 
     nodeSel.onchange = () => loadModels()
+    modelSel.onchange = () => populateLoras()
     imageInput.onchange = async () => {
       const f = imageInput.files && imageInput.files[0]
       if (!f) return
@@ -173,6 +176,8 @@
         h('div', { class: 'row' }, [
           h('label', {}, [h('span', { text: '节点' }), nodeSel]),
           h('label', {}, [h('span', { text: '模型' }), modelSel]),
+          h('label', {}, [h('span', { text: 'LoRA' }), loraSel]),
+          h('label', {}, [h('span', { text: 'LoRA 权重' }), loraScale]),
           h('label', {}, [h('span', { text: '宽' }), width]),
           h('label', {}, [h('span', { text: '高' }), height]),
           h('label', {}, [h('span', { text: '步数' }), steps]),
@@ -205,6 +210,12 @@
     function renderBatch() {
       const box = h('div', {}, [
         h('p', { class: 'hint', text: 'JSON 支持 { defaults:{...}, items:[{prompt,...}] } 或直接数组。每条可用同一张底图走图生图；不选底图则走文生图批量。' }),
+        h('div', { class: 'row' }, [
+          h('label', {}, [h('span', { text: '节点' }), nodeSel]),
+          h('label', {}, [h('span', { text: '底模' }), modelSel]),
+          h('label', {}, [h('span', { text: 'LoRA' }), loraSel]),
+          h('label', {}, [h('span', { text: 'LoRA 权重' }), loraScale]),
+        ]),
         h('div', { class: 'row' }, [
           h('label', {}, [h('span', { text: '批量底图（可选）' }), batchImageInput, batchImagePreview]),
           h('label', { class: 'grow' }, [h('span', { text: '导入 JSON' }), jsonInput]),
@@ -263,11 +274,25 @@
       try {
         const d = await jget('/api/node-jobs/models?node_id=' + encodeURIComponent(nid))
         models = ((d && d.models) || []).filter((m) => m.installed && m.capability !== 'insufficient_vram')
+        baseModels = models.filter((m) => m.kind !== 'lora')
+        loraModels = models.filter((m) => m.kind === 'lora')
         modelSel.innerHTML = ''
-        for (const m of models) modelSel.appendChild(h('option', { value: m.id, text: m.name || m.id }))
-        if (!models.length) modelSel.appendChild(h('option', { value: '', text: '没有可用模型' }))
-        setStatus('已连接节点，可选模型 ' + models.length + ' 个')
+        for (const m of baseModels) modelSel.appendChild(h('option', { value: m.id, text: m.name || m.id }))
+        if (!baseModels.length) modelSel.appendChild(h('option', { value: '', text: '没有可用底模' }))
+        populateLoras()
+        setStatus('已连接节点，底模 ' + baseModels.length + ' 个，LoRA ' + loraModels.length + ' 个')
       } catch (e) { setErr('加载模型失败：' + e.message) }
+    }
+
+    function populateLoras() {
+      const base = models.find((m) => m.id === modelSel.value)
+      const kind = base ? base.kind : ''
+      const keep = loraSel.value
+      loraSel.innerHTML = ''
+      loraSel.appendChild(h('option', { value: '', text: '无 LoRA' }))
+      const usable = loraModels.filter((m) => !m.lora_for || !kind || m.lora_for === kind)
+      for (const m of usable) loraSel.appendChild(h('option', { value: m.id, text: (m.name || m.id) + (m.lora_for ? ' [' + m.lora_for + ']' : '') }))
+      if (usable.some((m) => m.id === keep)) loraSel.value = keep
     }
 
     function payloadFor(item, useImage, sharedImage) {
@@ -281,6 +306,11 @@
         seed: item.seed != null ? Number(item.seed) : (Number(seed.value) >= 0 ? Number(seed.value) : -1),
         n: Number(item.n || batchN.value) || 1,
         model: item.model || modelSel.value,
+      }
+      const lora = item.lora !== undefined ? item.lora : loraSel.value
+      if (lora) {
+        p.lora = Array.isArray(lora) ? lora.join(',') : String(lora)
+        p.lora_scale = Number(item.lora_scale || loraScale.value) || 1
       }
       if (useImage) {
         p.mode = 'img2img'
@@ -344,6 +374,7 @@
         id: jid + ':' + idx, node_id: nid, job_id: jid, idx,
         prompt: payload.prompt, negative_prompt: payload.negative_prompt,
         mode: payload.mode || 'txt2img', strength: payload.strength,
+        lora: payload.lora || '', lora_scale: payload.lora_scale,
         width: payload.width, height: payload.height, steps: payload.steps,
         seed: payload.seed, model: payload.model, n: payload.n,
         full_url: url, thumb: await thumbOf(url), ts: Date.now(),
@@ -448,6 +479,9 @@
       steps.value = it.steps || 20
       seed.value = it.seed != null ? it.seed : -1
       if (it.model) modelSel.value = it.model
+      populateLoras()
+      if (it.lora) loraSel.value = it.lora
+      if (it.lora_scale != null) loraScale.value = it.lora_scale
       if (it.strength != null) strength.value = it.strength
       renderTabs(); render()
     }

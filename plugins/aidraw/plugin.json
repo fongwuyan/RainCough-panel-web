@@ -1,7 +1,7 @@
 {
   "name": "aidraw",
   "label": "AI 绘图",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "通过节点管理提交生图任务，支持文生图、图生图、JSON 批量、历史画廊",
   "author": "RainCough",
   "icon": "",
