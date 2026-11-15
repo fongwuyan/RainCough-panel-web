@@ -782,7 +782,9 @@ class Bot:
             if not text:
                 continue
             mid = str(r.get('msg_id') or r.get('id') or '')
-            if mid:
+            # 只允许把「用户消息」作为引用目标；机器人自己的消息只作为上下文，
+            # 绝不让模型挑自己的发言来回复。
+            if mid and (r.get('role') or '') != 'assistant':
                 valid_ids.add(mid)
             who = r.get('sender_name') or ('机器人' if r.get('role') == 'assistant' else '群友')
             lines.append('%s (#%s): %s' % (who, mid, text[:500]))
