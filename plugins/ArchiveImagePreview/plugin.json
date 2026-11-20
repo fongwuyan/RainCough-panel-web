@@ -1,0 +1,56 @@
+{
+  "name": "ArchiveImagePreview",
+  "label": "压缩包图片预览",
+  "version": "1.0.0",
+  "description": "上传压缩包，自动扫描其中的图片并以卡片墙预览；支持 ZIP/TAR/TAR.GZ/7Z/RAR，兼容常见图片格式。",
+  "author": "fongwuyan",
+  "icon": "",
+  "requirements": ["pillow>=9"],
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      { "path": "", "title": "压缩包图片预览" }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": ["python3", "server_v4.py"],
+    "capabilities": ["invoke", "heartbeat", "log.tail"],
+    "rest": [
+      {
+        "method": "GET",
+        "path": "/thumb/{aid}/{idx}",
+        "iface": "zipimg.thumb",
+        "args": { "aid": "{aid}", "idx": "{idx}" },
+        "file": "file"
+      },
+      {
+        "method": "GET",
+        "path": "/preview/{aid}/{idx}",
+        "iface": "zipimg.preview",
+        "args": { "aid": "{aid}", "idx": "{idx}" },
+        "file": "file"
+      },
+      {
+        "method": "GET",
+        "path": "/original/{aid}/{idx}",
+        "iface": "zipimg.original",
+        "args": { "aid": "{aid}", "idx": "{idx}" },
+        "file": "file"
+      }
+    ]
+  },
+  "interfaces": [
+    { "id": "zipimg.upload.start", "visibility": "all", "version": "1", "description": "开始分块上传压缩包" },
+    { "id": "zipimg.upload.chunk", "visibility": "all", "version": "1", "description": "上传一个分块" },
+    { "id": "zipimg.upload.finish", "visibility": "all", "version": "1", "description": "完成上传并扫描图片" },
+    { "id": "zipimg.list", "visibility": "all", "version": "1", "description": "压缩包列表" },
+    { "id": "zipimg.entries", "visibility": "all", "version": "1", "description": "图片条目列表" },
+    { "id": "zipimg.thumb", "visibility": "all", "version": "1", "description": "缩略图" },
+    { "id": "zipimg.preview", "visibility": "all", "version": "1", "description": "大图预览" },
+    { "id": "zipimg.original", "visibility": "all", "version": "1", "description": "原始图片" },
+    { "id": "zipimg.delete", "visibility": "all", "version": "1", "description": "删除压缩包" },
+    { "id": "zipimg.info", "visibility": "all", "version": "1", "description": "插件信息" }
+  ]
+}
