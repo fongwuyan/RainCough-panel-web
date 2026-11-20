@@ -1,7 +1,7 @@
 {
   "name": "GithubDownloader",
   "label": "GitHub 下载器",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "扫描 GitHub 仓库并下载整仓、Git 克隆、Release 资产和仓库内任意文件，支持直连与 gh-proxy 加速。",
   "author": "fongwuyan",
   "icon": "",
@@ -35,6 +35,7 @@
     { "id": "ghdl.start", "visibility": "all", "version": "1", "description": "创建下载任务" },
     { "id": "ghdl.tasks", "visibility": "all", "version": "1", "description": "任务列表/进度" },
     { "id": "ghdl.cancel", "visibility": "all", "version": "1", "description": "取消任务" },
+    { "id": "ghdl.delete", "visibility": "all", "version": "1", "description": "删除任务与文件" },
     { "id": "ghdl.file", "visibility": "all", "version": "1", "description": "获取任务文件下载地址" }
   ]
 }

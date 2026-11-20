@@ -9,7 +9,7 @@ function mount(container, ctx) {
       return {
         url: '', token: '', proxy: false,
         tab: 'archives', loading: false, err: '', scan: null,
-        selected: {}, fileQ: '', tasks: [], taskTimer: null,
+        selected: {}, fileQ: '', fileLimit: 1000, tasks: [], taskTimer: null,
         archiveBusy: {}, cloning: false,
       }
     },
@@ -18,7 +18,7 @@ function mount(container, ctx) {
       files() {
         const q = this.fileQ.trim().toLowerCase()
         const list = (this.scan && this.scan.files) || []
-        return (q ? list.filter(x => (x.path || '').toLowerCase().includes(q)) : list).slice(0, 2000)
+        return (q ? list.filter(x => (x.path || '').toLowerCase().includes(q)) : list).slice(0, this.fileLimit)
       },
       selectedFiles() {
         return ((this.scan && this.scan.files) || []).filter(x => this.selected[x.path])
@@ -76,6 +76,11 @@ function mount(container, ctx) {
         this.cloning = false
       },
       toggle(path) { this.selected[path] = !this.selected[path] },
+      selectAllFiles() {
+        const n = {}
+        ;((this.scan && this.scan.files) || []).forEach(x => { n[x.path] = true })
+        this.selected = n
+      },
       selectAll(on) {
         const n = {}
         if (on) this.files.forEach(x => { n[x.path] = true })
@@ -93,6 +98,14 @@ function mount(container, ctx) {
       },
       async cancel(tid) {
         try { await ctx.invoke('ghdl.cancel', { tid }); this.loadTasks() } catch (e) { this.err = e.message || String(e) }
+      },
+      async delTask(tid) {
+        if (!confirm('删除任务和已下载文件？')) return
+        try { await ctx.invoke('ghdl.delete', { tid }); this.loadTasks() } catch (e) { this.err = e.message || String(e) }
+      },
+      async copyLink(t) {
+        try { await navigator.clipboard.writeText(location.origin + this.fileUrl(t)); this.err = '链接已复制' }
+        catch (e) { this.err = '复制失败: ' + (e.message || e) }
       },
       fileUrl(t) { return '/api/plugins/GithubDownloader/download/' + encodeURIComponent(t.id) },
       taskState(t) {
@@ -116,7 +129,9 @@ function mount(container, ctx) {
         small(this.fmt(t.done) + (t.total ? ' / ' + this.fmt(t.total) : '') + (t.speed ? ' · ' + this.fmt(t.speed) + '/s' : '') + (t.error ? ' · ' + t.error : '')),
         h('div', { class: 'flex', style: 'gap:6px;margin-top:6px;' }, [
           t.status === 'done' ? h('a', { class: 'btn btn-sm btn-primary', href: this.fileUrl(t) }, '下载到本机') : null,
+          t.status === 'done' ? btn('复制链接', () => this.copyLink(t), 'btn btn-sm') : null,
           (t.status === 'running' || t.status === 'queued') ? btn('取消', () => this.cancel(t.id), 'btn btn-sm btn-danger') : null,
+          (t.status !== 'running' && t.status !== 'queued') ? btn('删除', () => this.delTask(t.id), 'btn btn-sm btn-danger') : null,
           t.path ? h('span', { class: 'faint', style: 'font-size:10px;word-break:break-all;' }, t.path) : null,
         ]),
       ], 't' + i)) : [h('div', { class: 'faint' }, '暂无任务')]
@@ -167,8 +182,10 @@ function mount(container, ctx) {
             h('div', { class: 'flex', style: 'gap:6px;margin-bottom:8px;flex-wrap:wrap;' }, [
               h('input', { class: 'input', style: 'flex:1;', placeholder: '过滤文件路径', value: this.fileQ, oninput: e => this.fileQ = e.target.value }),
               btn('全选当前', () => this.selectAll(true)),
+              btn('全选全部', () => this.selectAllFiles()),
               btn('清空', () => this.selectAll(false)),
               btn('下载选中 (' + this.selectedFiles.length + ')', () => this.dlFiles(), 'btn btn-primary btn-sm'),
+              this.scan.files.length > this.fileLimit ? btn('加载更多', () => this.fileLimit += 1000) : null,
             ]),
             this.scan.truncated ? h('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px;' }, '文件树过大，已截断；可用搜索过滤。') : null,
             this.files.map((f, i) => h('div', { key: f.path, class: 'flex', style: 'align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border);' }, [

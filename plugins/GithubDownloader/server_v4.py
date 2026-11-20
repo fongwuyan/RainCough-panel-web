@@ -26,12 +26,14 @@ import rcplugin as rc
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DL_ROOT = os.path.join(APP_DIR, "cache", "github")
 os.makedirs(DL_ROOT, exist_ok=True)
+STATE_FILE = os.path.join(DL_ROOT, "state.json")
 PROXY = "https://gh-proxy.org/"
 UA = "RainCough-GithubDownloader/1.0"
 GITHUB_API = "https://api.github.com"
 _tasks = {}
 _scan_tasks = {}
 _lock = threading.RLock()
+_worker_sem = threading.BoundedSemaphore(3)
 
 
 def _p(params):
@@ -123,8 +125,61 @@ def _raw_url(owner, repo, ref, path):
 
 @rc.interface("ghdl.info")
 def ghdl_info(params):
-    return {"ok": True, "name": "GithubDownloader", "version": "1.0.0",
+    return {"ok": True, "name": "GithubDownloader", "version": "1.1.0",
             "root": DL_ROOT, "proxy": PROXY}
+
+
+def _tree_all(owner, repo, ref, token, max_files=20000):
+    """递归取全部 blob；GitHub recursive tree 被截断时继续按子树补齐。"""
+    files = []
+    truncated = False
+    tree = _api("/repos/%s/%s/git/trees/%s?recursive=1" % (
+        owner, repo, urllib.parse.quote(ref, safe="")), token)
+    seen = set()
+    queue = []
+    for e in tree.get("tree") or []:
+        if e.get("type") == "blob":
+            p = e.get("path") or ""
+            if p and p not in seen:
+                seen.add(p)
+                files.append({"kind": "file", "path": p, "name": p,
+                              "size": int(e.get("size") or 0),
+                              "url": _raw_url(owner, repo, ref, p)})
+        elif e.get("type") == "tree" and e.get("sha"):
+            queue.append(e)
+    if tree.get("truncated"):
+        # recursive=1 对超大仓库会 truncated；用非递归树逐个子树补全。
+        root = _api("/repos/%s/%s/git/trees/%s" % (
+            owner, repo, urllib.parse.quote(ref, safe="")), token)
+        stack = [e for e in (root.get("tree") or []) if e.get("type") == "tree" and e.get("sha")]
+        visited = set()
+        while stack and len(files) < max_files:
+            node = stack.pop()
+            sha = node.get("sha")
+            if not sha or sha in visited:
+                continue
+            visited.add(sha)
+            try:
+                sub = _api("/repos/%s/%s/git/trees/%s" % (owner, repo, urllib.parse.quote(sha, safe="")), token)
+            except Exception:
+                continue
+            prefix = node.get("path") or ""
+            for e in sub.get("tree") or []:
+                p = e.get("path") or ""
+                if prefix and p and not p.startswith(prefix + "/"):
+                    # GitHub 子树的 path 是相对路径
+                    p = prefix + "/" + p
+                if e.get("type") == "blob" and p and p not in seen:
+                    seen.add(p)
+                    files.append({"kind": "file", "path": p, "name": p,
+                                  "size": int(e.get("size") or 0),
+                                  "url": _raw_url(owner, repo, ref, p)})
+                elif e.get("type") == "tree" and e.get("sha"):
+                    stack.append({"sha": e["sha"], "path": p})
+        if len(files) >= max_files:
+            truncated = True
+    files.sort(key=lambda x: x["path"].lower())
+    return files, truncated
 
 
 def _scan_sync(params):
@@ -197,24 +252,7 @@ def _scan_sync(params):
 
     files, truncated = [], False
     try:
-        tree = _api("/repos/%s/%s/git/trees/%s?recursive=1" % (
-            owner, repo, urllib.parse.quote(ref, safe="")), token)
-        truncated = bool(tree.get("truncated"))
-        for e in tree.get("tree") or []:
-            if e.get("type") != "blob":
-                continue
-            p = e.get("path") or ""
-            if not p:
-                continue
-            files.append({
-                "kind": "file", "path": p, "name": p,
-                "size": int(e.get("size") or 0),
-                "url": _raw_url(owner, repo, ref, p),
-            })
-        files.sort(key=lambda x: x["path"].lower())
-        if len(files) > 5000:
-            files = files[:5000]
-            truncated = True
+        files, truncated = _tree_all(owner, repo, ref, token)
     except Exception:
         pass
 
@@ -284,6 +322,55 @@ def _task_public(t):
     return {k: v for k, v in t.items() if k not in ("thread", "cancel", "token", "proc")}
 
 
+def _save_state():
+    try:
+        with _lock:
+            rows = [_task_public(t) for t in _tasks.values()]
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"tasks": rows[-500:]}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, STATE_FILE)
+    except Exception:
+        pass
+
+
+def _load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            rows = json.load(f).get("tasks") or []
+        for r in rows:
+            if not isinstance(r, dict) or not r.get("id"):
+                continue
+            if r.get("status") in ("running", "queued"):
+                r["status"] = "error"
+                r["error"] = "插件/面板重启，任务中断；请重新下载"
+            r["cancel"] = threading.Event()
+            r["thread"] = None
+            _tasks[r["id"]] = r
+    except Exception:
+        pass
+
+
+def _acquire_worker(t):
+    t["status"] = "queued"
+    _worker_sem.acquire()
+    if t["cancel"].is_set():
+        t["status"] = "canceled"
+        t["finished"] = _now()
+        _worker_sem.release()
+        _save_state()
+        return False
+    t["status"] = "running"
+    t["started"] = _now()
+    return True
+
+
+def _release_worker(t):
+    _worker_sem.release()
+    _save_state()
+
+
 def _new_task(name, kind):
     tid = "gh_" + uuid.uuid4().hex[:12]
     t = {"id": tid, "name": name or "download", "kind": kind,
@@ -291,89 +378,101 @@ def _new_task(name, kind):
          "speed": 0, "path": "", "error": "", "created": _now(),
          "started": 0, "finished": 0, "url": ""}
     _tasks[tid] = t
+    _save_state()
     return t
 
 
 def _download_worker(t, url, dest, token, proxy):
-    t["status"] = "running"; t["started"] = _now()
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    part = dest + ".part"
-    resume = os.path.getsize(part) if os.path.isfile(part) else 0
-    headers = _headers(token, proxy)
-    if resume:
-        headers["Range"] = "bytes=%d-" % resume
-    real = _with_proxy(url, proxy)
+    if not _acquire_worker(t):
+        return
     try:
-        req = urllib.request.Request(real, headers=headers)
-        with urllib.request.urlopen(req, timeout=60) as r:
-            total = int(r.headers.get("Content-Length") or 0)
-            if r.status == 206:
-                total += resume
-            elif resume and r.status == 200:
-                resume = 0
-            t["total"] = total
-            t["done"] = resume
-            mode = "ab" if resume else "wb"
-            start = time.time()
-            base_done = resume
-            with open(part, mode) as f:
-                while True:
-                    if t["cancel"].is_set():
-                        t["status"] = "canceled"; t["finished"] = _now()
-                        return
-                    chunk = r.read(1024 * 128)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    t["done"] += len(chunk)
-                    t["progress"] = int(t["done"] * 100 / total) if total else 0
-                    el = max(time.time() - start, 0.001)
-                    t["speed"] = int((t["done"] - base_done) / el)
-        os.replace(part, dest)
-        t["path"] = dest
-        t["progress"] = 100
-        t["status"] = "done"; t["finished"] = _now()
-    except Exception as e:
-        if t["cancel"].is_set():
-            t["status"] = "canceled"
-        else:
-            t["status"] = "error"; t["error"] = str(e)[:300]
-        t["finished"] = _now()
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        part = dest + ".part"
+        resume = os.path.getsize(part) if os.path.isfile(part) else 0
+        headers = _headers(token, proxy)
+        if resume:
+            headers["Range"] = "bytes=%d-" % resume
+        real = _with_proxy(url, proxy)
+        try:
+            req = urllib.request.Request(real, headers=headers)
+            with urllib.request.urlopen(req, timeout=60) as r:
+                total = int(r.headers.get("Content-Length") or 0)
+                if r.status == 206:
+                    total += resume
+                elif resume and r.status == 200:
+                    resume = 0
+                t["total"] = total
+                t["done"] = resume
+                mode = "ab" if resume else "wb"
+                start = time.time()
+                base_done = resume
+                with open(part, mode) as f:
+                    while True:
+                        if t["cancel"].is_set():
+                            t["status"] = "canceled"; t["finished"] = _now()
+                            break
+                        chunk = r.read(1024 * 128)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        t["done"] += len(chunk)
+                        t["progress"] = int(t["done"] * 100 / total) if total else 0
+                        el = max(time.time() - start, 0.001)
+                        t["speed"] = int((t["done"] - base_done) / el)
+            if t["cancel"].is_set():
+                t["status"] = "canceled"; t["finished"] = _now()
+            else:
+                os.replace(part, dest)
+                t["path"] = dest
+                t["progress"] = 100
+                t["status"] = "done"; t["finished"] = _now()
+        except Exception as e:
+            if t["cancel"].is_set():
+                t["status"] = "canceled"
+            else:
+                t["status"] = "error"; t["error"] = str(e)[:300]
+            t["finished"] = _now()
+    finally:
+        _release_worker(t)
 
 
 def _git_worker(t, url, ref, dest, token, proxy):
-    t["status"] = "running"; t["started"] = _now()
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    real = _with_proxy(url, proxy)
-    # Token 通过 URL 注入只用于直连；代理线路不携带凭据。
-    if token and not proxy:
-        real = real.replace("https://", "https://x-access-token:%s@" % urllib.parse.quote(token, safe=""), 1)
-    cmd = ["git", "clone", "--depth", "1"]
-    if ref:
-        cmd += ["--branch", ref, "--single-branch"]
-    cmd += [real, dest]
-    t["total"] = 100
+    if not _acquire_worker(t):
+        return
     try:
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, bufsize=1)
-        t["proc"] = p
-        lines = []
-        for line in p.stdout:
-            lines.append(line.rstrip())
-            t["progress"] = min(90, t["progress"] + 1)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        real = _with_proxy(url, proxy)
+        # Token 通过 URL 注入只用于直连；代理线路不携带凭据。
+        if token and not proxy:
+            real = real.replace("https://", "https://x-access-token:%s@" % urllib.parse.quote(token, safe=""), 1)
+        cmd = ["git", "clone", "--depth", "1"]
+        if ref:
+            cmd += ["--branch", ref, "--single-branch"]
+        cmd += [real, dest]
+        t["total"] = 100
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True, bufsize=1)
+            t["proc"] = p
+            lines = []
+            for line in p.stdout:
+                lines.append(line.rstrip())
+                t["progress"] = min(90, t["progress"] + 1)
+                if t["cancel"].is_set():
+                    p.terminate()
+                    break
+            code = p.wait()
             if t["cancel"].is_set():
-                p.terminate()
-                break
-        code = p.wait()
-        if t["cancel"].is_set():
-            t["status"] = "canceled"
-        elif code != 0:
-            t["status"] = "error"; t["error"] = "\n".join(lines[-8:])[:500]
-        else:
-            t["path"] = dest; t["progress"] = 100; t["status"] = "done"
-    except Exception as e:
-        t["status"] = "error"; t["error"] = str(e)[:300]
-    t["finished"] = _now()
+                t["status"] = "canceled"
+            elif code != 0:
+                t["status"] = "error"; t["error"] = "\n".join(lines[-8:])[:500]
+            else:
+                t["path"] = dest; t["progress"] = 100; t["status"] = "done"
+        except Exception as e:
+            t["status"] = "error"; t["error"] = str(e)[:300]
+        t["finished"] = _now()
+    finally:
+        _release_worker(t)
 
 
 @rc.interface("ghdl.start")
@@ -387,7 +486,7 @@ def ghdl_start(params):
     owner, repo, _ = _parse_repo(p.get("repo_url") or p.get("url") or "https://github.com/x/x")
     base = os.path.join(DL_ROOT, _safe(owner), _safe(repo))
     out = []
-    for item in items[:200]:
+    for item in items[:10000]:
         if not isinstance(item, dict):
             continue
         kind = item.get("kind") or "file"
@@ -437,6 +536,26 @@ def ghdl_cancel(params):
         t["cancel"].set()
     except Exception:
         pass
+    _save_state()
+    return {"ok": True}
+
+
+@rc.interface("ghdl.delete")
+def ghdl_delete(params):
+    tid = str(_p(params).get("tid") or "")
+    t = _tasks.get(tid)
+    if not t:
+        _err("任务不存在")
+    if t.get("status") in ("running", "queued"):
+        _err("任务仍在运行，请先取消")
+    path = t.get("path") or ""
+    if path and os.path.isfile(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+    _tasks.pop(tid, None)
+    _save_state()
     return {"ok": True}
 
 
@@ -460,10 +579,11 @@ def ghdl_file(params):
 
 
 if __name__ == "__main__":
+    _load_state()
     rc.serve(
         endpoint=os.environ.get("RC_ENDPOINT", ""),
         name="GithubDownloader",
-        version="1.0.0",
+        version="1.1.0",
         manifest={"label": "GitHub 下载器",
                   "description": "扫描并下载 GitHub 整仓、Git 克隆、Release 资产和仓库文件"},
         frontend={"pages": [{"path": "", "title": "GitHub 下载器"}]},
