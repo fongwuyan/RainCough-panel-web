@@ -29,7 +29,9 @@
   },
   "interfaces": [
     { "id": "ghdl.info", "visibility": "all", "version": "1", "description": "插件信息" },
-    { "id": "ghdl.scan", "visibility": "all", "version": "1", "description": "扫描仓库可下载内容" },
+    { "id": "ghdl.scan", "visibility": "all", "version": "1", "description": "扫描仓库可下载内容（同步兼容接口）" },
+    { "id": "ghdl.scan.start", "visibility": "all", "version": "1", "description": "开始异步扫描" },
+    { "id": "ghdl.scan.status", "visibility": "all", "version": "1", "description": "查询异步扫描" },
     { "id": "ghdl.start", "visibility": "all", "version": "1", "description": "创建下载任务" },
     { "id": "ghdl.tasks", "visibility": "all", "version": "1", "description": "任务列表/进度" },
     { "id": "ghdl.cancel", "visibility": "all", "version": "1", "description": "取消任务" },

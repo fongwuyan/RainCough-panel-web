@@ -30,6 +30,7 @@ PROXY = "https://gh-proxy.org/"
 UA = "RainCough-GithubDownloader/1.0"
 GITHUB_API = "https://api.github.com"
 _tasks = {}
+_scan_tasks = {}
 _lock = threading.RLock()
 
 
@@ -126,8 +127,7 @@ def ghdl_info(params):
             "root": DL_ROOT, "proxy": PROXY}
 
 
-@rc.interface("ghdl.scan")
-def ghdl_scan(params):
+def _scan_sync(params):
     url = str(_p(params).get("url") or "").strip()
     token = str(_p(params).get("token") or "").strip()
     owner, repo, initial_ref = _parse_repo(url)
@@ -240,6 +240,44 @@ def ghdl_scan(params):
         "truncated": truncated,
         "warnings": ["文件树超过 5000 条，已截断"] if truncated else [],
     }
+
+
+def _scan_worker(sid, params):
+    try:
+        res = _scan_sync(params)
+        with _lock:
+            _scan_tasks[sid].update({"status": "done", "result": res})
+    except Exception as e:
+        with _lock:
+            _scan_tasks[sid].update({"status": "error", "error": str(e)[:500]})
+
+
+@rc.interface("ghdl.scan.start")
+def ghdl_scan_start(params):
+    """异步扫描：GitHub 大仓库可能超过面板 invoke 15 秒超时。"""
+    if not str(_p(params).get("url") or "").strip():
+        _err("请输入 GitHub 仓库链接")
+    sid = "scan_" + uuid.uuid4().hex[:12]
+    _scan_tasks[sid] = {"id": sid, "status": "running", "created": _now(),
+                        "result": None, "error": ""}
+    threading.Thread(target=_scan_worker, args=(sid, dict(_p(params))), daemon=True).start()
+    return {"ok": True, "scan_id": sid, "status": "running"}
+
+
+@rc.interface("ghdl.scan.status")
+def ghdl_scan_status(params):
+    sid = str(_p(params).get("scan_id") or "")
+    st = _scan_tasks.get(sid)
+    if not st:
+        _err("扫描任务不存在")
+    return {"ok": True, "scan_id": sid, "status": st["status"],
+            "result": st.get("result"), "error": st.get("error") or ""}
+
+
+@rc.interface("ghdl.scan")
+def ghdl_scan(params):
+    # 兼容直接 API 调用；Web 前端使用 start/status 避免 15 秒超时。
+    return _scan_sync(params)
 
 
 def _task_public(t):

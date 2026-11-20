@@ -34,9 +34,17 @@ function mount(container, ctx) {
       },
       async scanRepo() {
         if (!this.url.trim()) { this.err = '请输入 GitHub 仓库链接'; return }
-        this.loading = true; this.err = ''; this.selected = {}
+        this.loading = true; this.err = ''; this.selected = {}; this.scan = null
         try {
-          this.scan = await ctx.invoke('ghdl.scan', { url: this.url.trim(), token: this.token.trim() })
+          const st = await ctx.invoke('ghdl.scan.start', { url: this.url.trim(), token: this.token.trim() })
+          const sid = st.scan_id
+          for (let i = 0; i < 300; i++) {
+            await new Promise(r => setTimeout(r, 1200))
+            const d = await ctx.invoke('ghdl.scan.status', { scan_id: sid })
+            if (d.status === 'done') { this.scan = d.result; break }
+            if (d.status === 'error') throw new Error(d.error || '扫描失败')
+          }
+          if (!this.scan) throw new Error('扫描超时')
         } catch (e) { this.err = (e && e.message) || String(e) }
         finally { this.loading = false }
       },
