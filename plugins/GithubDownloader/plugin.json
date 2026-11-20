@@ -1,7 +1,7 @@
 {
   "name": "GithubDownloader",
   "label": "GitHub 下载器",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "扫描 GitHub 仓库并下载整仓、Git 克隆、Release 资产和仓库内任意文件，支持直连与 gh-proxy 加速。",
   "author": "fongwuyan",
   "icon": "",

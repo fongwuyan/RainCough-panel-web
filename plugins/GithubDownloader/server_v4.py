@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
 import threading
 import time
 import urllib.error
@@ -77,6 +78,31 @@ def _headers(token="", proxy=False):
     return h
 
 
+def _head_size(url, token, proxy):
+    """尽量取远端文件总大小；代理不支持 HEAD 时返回 0。"""
+    try:
+        req = urllib.request.Request(_with_proxy(url, proxy),
+                                     headers=_headers(token, proxy), method="HEAD")
+        with urllib.request.urlopen(req, timeout=20) as r:
+            n = int(r.headers.get("Content-Length") or 0)
+            return n if n > 0 else 0
+    except Exception:
+        return 0
+
+
+def _validate_download(path, name):
+    """下载完整性校验：优先 ZIP 中央目录，tar.gz 交给长度/解包检查。"""
+    low = (name or "").lower()
+    if low.endswith(".zip"):
+        with zipfile.ZipFile(path) as z:
+            z.namelist()
+    elif low.endswith((".tar.gz", ".tgz")):
+        with tarfile.open(path, "r:gz") as tf:
+            # 读到第一个成员即可暴露明显截断；完整长度由 expected 再兜底
+            next(iter(tf), None)
+
+
+
 def _api(path, token="", timeout=30):
     url = GITHUB_API + path
     req = urllib.request.Request(url, headers=_headers(token))
@@ -125,7 +151,7 @@ def _raw_url(owner, repo, ref, path):
 
 @rc.interface("ghdl.info")
 def ghdl_info(params):
-    return {"ok": True, "name": "GithubDownloader", "version": "1.1.0",
+    return {"ok": True, "name": "GithubDownloader", "version": "1.1.1",
             "root": DL_ROOT, "proxy": PROXY}
 
 
@@ -375,7 +401,7 @@ def _new_task(name, kind):
     tid = "gh_" + uuid.uuid4().hex[:12]
     t = {"id": tid, "name": name or "download", "kind": kind,
          "status": "queued", "progress": 0, "total": 0, "done": 0,
-         "speed": 0, "path": "", "error": "", "created": _now(),
+         "expected": 0, "speed": 0, "path": "", "error": "", "created": _now(),
          "started": 0, "finished": 0, "url": ""}
     _tasks[tid] = t
     _save_state()
@@ -393,6 +419,11 @@ def _download_worker(t, url, dest, token, proxy):
         if resume:
             headers["Range"] = "bytes=%d-" % resume
         real = _with_proxy(url, proxy)
+        expected = int(t.get("expected") or 0)
+        if not expected:
+            expected = _head_size(url, token, proxy)
+            if expected:
+                t["expected"] = expected
         try:
             req = urllib.request.Request(real, headers=headers)
             with urllib.request.urlopen(req, timeout=60) as r:
@@ -401,6 +432,8 @@ def _download_worker(t, url, dest, token, proxy):
                     total += resume
                 elif resume and r.status == 200:
                     resume = 0
+                if not total and expected:
+                    total = expected
                 t["total"] = total
                 t["done"] = resume
                 mode = "ab" if resume else "wb"
@@ -422,10 +455,17 @@ def _download_worker(t, url, dest, token, proxy):
             if t["cancel"].is_set():
                 t["status"] = "canceled"; t["finished"] = _now()
             else:
-                os.replace(part, dest)
-                t["path"] = dest
-                t["progress"] = 100
-                t["status"] = "done"; t["finished"] = _now()
+                final_size = os.path.getsize(part)
+                if expected and final_size < expected:
+                    t["status"] = "error"
+                    t["error"] = "下载不完整：已下载 %d / %d 字节，请重试续传" % (final_size, expected)
+                    t["finished"] = _now()
+                else:
+                    _validate_download(part, t.get("name") or dest)
+                    os.replace(part, dest)
+                    t["path"] = dest
+                    t["progress"] = 100
+                    t["status"] = "done"; t["finished"] = _now()
         except Exception as e:
             if t["cancel"].is_set():
                 t["status"] = "canceled"
@@ -504,10 +544,12 @@ def ghdl_start(params):
                 continue
             dest = os.path.join(base, _safe(name))
             n = 2
-            while os.path.exists(dest) or os.path.exists(dest + ".part"):
+            # 已完成的同名文件避开；.part 保留给新任务续传。
+            while os.path.exists(dest):
                 root, ext = os.path.splitext(_safe(name))
                 dest = os.path.join(base, "%s_%d%s" % (root, n, ext)); n += 1
             t = _new_task(name, kind)
+            t["expected"] = int(item.get("size") or 0)
             t["url"] = _with_proxy(url, proxy)
             t["thread"] = threading.Thread(
                 target=_download_worker, args=(t, url, dest, token, proxy), daemon=True)
@@ -549,9 +591,14 @@ def ghdl_delete(params):
     if t.get("status") in ("running", "queued"):
         _err("任务仍在运行，请先取消")
     path = t.get("path") or ""
-    if path and os.path.isfile(path):
+    if path:
         try:
-            os.remove(path)
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            elif os.path.isfile(path):
+                os.remove(path)
+            if os.path.isfile(path + ".part"):
+                os.remove(path + ".part")
         except Exception:
             pass
     _tasks.pop(tid, None)
@@ -583,7 +630,7 @@ if __name__ == "__main__":
     rc.serve(
         endpoint=os.environ.get("RC_ENDPOINT", ""),
         name="GithubDownloader",
-        version="1.1.0",
+        version="1.1.1",
         manifest={"label": "GitHub 下载器",
                   "description": "扫描并下载 GitHub 整仓、Git 克隆、Release 资产和仓库文件"},
         frontend={"pages": [{"path": "", "title": "GitHub 下载器"}]},

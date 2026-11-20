@@ -66,7 +66,7 @@ function mount(container, ctx) {
         this.start([{ kind: 'archive', name: a.name, url: a.url, ref: a.ref }], a.title)
       },
       dlAsset(rel, a) {
-        this.start([{ kind: 'asset', name: a.name, url: a.url, rel: rel.tag }], a.name)
+        this.start([{ kind: 'asset', name: a.name, url: a.url, size: a.size || 0, rel: rel.tag }], a.name)
       },
       cloneRepo() {
         if (!this.scan) return
@@ -87,7 +87,7 @@ function mount(container, ctx) {
         this.selected = n
       },
       dlFiles() {
-        const items = this.selectedFiles.map(x => ({ kind: 'file', name: x.path, url: x.url, path: x.path }))
+        const items = this.selectedFiles.map(x => ({ kind: 'file', name: x.path, url: x.url, path: x.path, size: x.size || 0 }))
         this.start(items, '仓库文件')
       },
       async loadTasks() {
