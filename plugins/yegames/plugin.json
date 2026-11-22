@@ -1,0 +1,309 @@
+{
+  "name": "yegames",
+  "label": "叶酱游戏",
+  "version": "1.3.2",
+  "description": "叶酱汉化作品（7 源）+ TouchGal 商业 galgame 双源卡片库：多源真实挖掘、实时进度悬浮窗、多线程分段下载器（断点续传）、解压密码、直链猎手",
+  "author": "fongwuyan",
+  "icon": "",
+  "frontend": {
+    "entry": "assets/plugin.js",
+    "vue": "3.5",
+    "pages": [
+      {
+        "path": "",
+        "title": "叶酱游戏"
+      }
+    ]
+  },
+  "backend": {
+    "lang": "python",
+    "exec": [
+      "python3",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ],
+    "rest": [
+      {
+        "method": "GET",
+        "path": "/library",
+        "iface": "yegames.library.list",
+        "args": {
+          "state": "?state"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/links",
+        "iface": "yegames.item.links",
+        "args": {
+          "uid": "?uid"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/progress",
+        "iface": "yegames.mine.status",
+        "args": {}
+      }
+    ],
+    "rest_public": true
+  },
+  "interfaces": [
+    {
+      "id": "yegames.info",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "插件信息、源清单与下载目录"
+    },
+    {
+      "id": "yegames.config.get",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "读取配置"
+    },
+    {
+      "id": "yegames.config.save",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "保存配置（含源开关、关键词、下载目录）"
+    },
+    {
+      "id": "yegames.library.list",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "卡片库（持久化），带新增/更新/过期统计"
+    },
+    {
+      "id": "yegames.mine.start",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "后台开始挖掘（多源 + 索引 + 匹配 + 合并卡片库）"
+    },
+    {
+      "id": "yegames.mine.status",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "挖掘实时进度：阶段/已做/总数/百分比/明细日志"
+    },
+    {
+      "id": "yegames.mine.cancel",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "取消当前挖掘"
+    },
+    {
+      "id": "yegames.item.links",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "取某张卡片的镜像直链、目录入口与解压密码"
+    },
+    {
+      "id": "yegames.item.bind",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "手动绑定镜像目录"
+    },
+    {
+      "id": "yegames.folder.list",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "列任意镜像目录的文件与直链"
+    },
+    {
+      "id": "yegames.index.stats",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "镜像索引条目数与新鲜度"
+    },
+    {
+      "id": "yegames.dl.start",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "内置下载器：起一个后台下载（支持断点续传）"
+    },
+    {
+      "id": "yegames.dl.status",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "下载任务进度：字节/速度/ETA/状态"
+    },
+    {
+      "id": "yegames.dl.list",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "全部下载任务"
+    },
+    {
+      "id": "yegames.dl.cancel",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "取消下载"
+    },
+    {
+      "id": "yegames.dl.remove",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "把任务从下载列表移除（不动已落盘文件）"
+    },
+    {
+      "id": "yegames.hunt.url",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "从资源页挖网盘直链"
+    },
+    {
+      "id": "yegames.hunt.item",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "对卡片的所有源页挖网盘直链"
+    },
+    {
+      "id": "yegames.tg.list",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "浏览 TouchGal 资源（分页/关键词）"
+    },
+    {
+      "id": "yegames.tg.mine",
+      "visibility": "main",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "把 TouchGal 资源导入卡片库（kind=touchgal）"
+    },
+    {
+      "id": "yegames.tg.links",
+      "visibility": "all",
+      "version": "1",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      },
+      "description": "取某个 TouchGal 资源的网盘链接与提取码"
+    }
+  ]
+}

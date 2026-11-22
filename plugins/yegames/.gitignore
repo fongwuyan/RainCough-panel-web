@@ -1,0 +1,12 @@
+__pycache__/
+.runtime.log
+.rc.endpoint
+config.json
+catalog.json
+library.json
+alist_index.json
+bindings.json
+downloads.json
+downloads/
+_*.py
+_*.txt
