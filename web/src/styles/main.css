@@ -756,6 +756,11 @@ h3 { font-size: 14px; font-weight: 700; }
    不覆盖的话数字会飘到全屏 IM 的左上角(所有主题都会)。只放宽定位, 颜色仍归插件。 */
 .plugin-mount .im-row .badge { position: static; margin-left: auto; }
 
+/* 插件页在窄屏/长文本下统一收缩，避免旧插件把面板撑出横向滚动 */
+.plugin-mount { min-width: 0; box-sizing: border-box; }
+.plugin-mount > * { max-width: 100%; box-sizing: border-box; }
+.plugin-view-bar { flex-wrap: wrap; }
+
 /* ---------- 轻量 toast(面板 + 插件共用) ---------- */
 .rc-toasts {
   position: fixed; right: 18px; bottom: 18px; z-index: 300;

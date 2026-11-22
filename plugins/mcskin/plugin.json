@@ -32,85 +32,169 @@
       "id": "mcskin.detect",
       "visibility": "main",
       "version": "1",
-      "description": "图片识别(自动参数)"
+      "description": "图片识别(自动参数)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.convert",
       "visibility": "main",
       "version": "1",
-      "description": "转 MC 皮肤"
+      "description": "转 MC 皮肤",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.paint.models",
       "visibility": "all",
       "version": "1",
-      "description": "上色模型列表"
+      "description": "上色模型列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.paint",
       "visibility": "main",
       "version": "1",
-      "description": "AI 上色(异步)"
+      "description": "AI 上色(异步)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.paint.status",
       "visibility": "all",
       "version": "1",
-      "description": "上色任务状态"
+      "description": "上色任务状态",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.paint.cancel",
       "visibility": "main",
       "version": "1",
-      "description": "取消上色"
+      "description": "取消上色",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.text2skin.models",
       "visibility": "all",
       "version": "1",
-      "description": "文生肤模型"
+      "description": "文生肤模型",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.text2skin.styles",
       "visibility": "all",
       "version": "1",
-      "description": "风格/色调"
+      "description": "风格/色调",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.text2skin",
       "visibility": "main",
       "version": "1",
-      "description": "文字生成皮肤(异步)"
+      "description": "文字生成皮肤(异步)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.text2skin.status",
       "visibility": "all",
       "version": "1",
-      "description": "文生肤状态"
+      "description": "文生肤状态",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.text2skin.history",
       "visibility": "all",
       "version": "1",
-      "description": "文生肤历史"
+      "description": "文生肤历史",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.text2skin.regenerate",
       "visibility": "main",
       "version": "1",
-      "description": "重新生成"
+      "description": "重新生成",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.text2skin.feedback",
       "visibility": "main",
       "version": "1",
-      "description": "喜好反馈"
+      "description": "喜好反馈",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "mcskin.info",
       "visibility": "all",
       "version": "1",
-      "description": "插件信息"
+      "description": "插件信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     }
   ]
 }

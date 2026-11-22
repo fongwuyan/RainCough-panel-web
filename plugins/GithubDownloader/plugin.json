@@ -10,32 +10,143 @@
     "entry": "assets/plugin.js",
     "vue": "3.5",
     "pages": [
-      { "path": "", "title": "GitHub 下载器" }
+      {
+        "path": "",
+        "title": "GitHub 下载器"
+      }
     ]
   },
   "backend": {
     "lang": "python",
-    "exec": ["python3", "server_v4.py"],
-    "capabilities": ["invoke", "heartbeat", "log.tail"],
+    "exec": [
+      "python3",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ],
     "rest": [
       {
         "method": "GET",
         "path": "/download/{tid}",
         "iface": "ghdl.file",
-        "args": { "tid": "{tid}" },
+        "args": {
+          "tid": "{tid}"
+        },
         "file": "file"
       }
     ]
   },
   "interfaces": [
-    { "id": "ghdl.info", "visibility": "all", "version": "1", "description": "插件信息" },
-    { "id": "ghdl.scan", "visibility": "all", "version": "1", "description": "扫描仓库可下载内容（同步兼容接口）" },
-    { "id": "ghdl.scan.start", "visibility": "all", "version": "1", "description": "开始异步扫描" },
-    { "id": "ghdl.scan.status", "visibility": "all", "version": "1", "description": "查询异步扫描" },
-    { "id": "ghdl.start", "visibility": "all", "version": "1", "description": "创建下载任务" },
-    { "id": "ghdl.tasks", "visibility": "all", "version": "1", "description": "任务列表/进度" },
-    { "id": "ghdl.cancel", "visibility": "all", "version": "1", "description": "取消任务" },
-    { "id": "ghdl.delete", "visibility": "all", "version": "1", "description": "删除任务与文件" },
-    { "id": "ghdl.file", "visibility": "all", "version": "1", "description": "获取任务文件下载地址" }
+    {
+      "id": "ghdl.info",
+      "visibility": "all",
+      "version": "1",
+      "description": "插件信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "ghdl.scan",
+      "visibility": "all",
+      "version": "1",
+      "description": "扫描仓库可下载内容（同步兼容接口）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "ghdl.scan.start",
+      "visibility": "all",
+      "version": "1",
+      "description": "开始异步扫描",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "ghdl.scan.status",
+      "visibility": "all",
+      "version": "1",
+      "description": "查询异步扫描",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "ghdl.start",
+      "visibility": "all",
+      "version": "1",
+      "description": "创建下载任务",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "ghdl.tasks",
+      "visibility": "all",
+      "version": "1",
+      "description": "任务列表/进度",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "ghdl.cancel",
+      "visibility": "all",
+      "version": "1",
+      "description": "取消任务",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "ghdl.delete",
+      "visibility": "all",
+      "version": "1",
+      "description": "删除任务与文件",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "ghdl.file",
+      "visibility": "all",
+      "version": "1",
+      "description": "获取任务文件下载地址",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    }
   ]
 }

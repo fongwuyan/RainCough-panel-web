@@ -9,17 +9,60 @@
     "entry": "assets/plugin.js",
     "vue": "3.5",
     "pages": [
-      { "path": "", "title": "图像工具" }
+      {
+        "path": "",
+        "title": "图像工具"
+      }
     ]
   },
   "backend": {
     "lang": "python",
-    "exec": ["python", "server_v4.py"],
-    "capabilities": ["invoke", "heartbeat", "log.tail"]
+    "exec": [
+      "python",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
   },
   "interfaces": [
-    { "id": "imagetool.similar", "visibility": "main", "version": "1", "description": "两图 dhash 相似度" },
-    { "id": "imagetool.process", "visibility": "main", "version": "1", "description": "ImageMagick 处理(resize/quality/rotate/format)" },
-    { "id": "imagetool.info", "visibility": "all", "version": "1", "description": "插件信息" }
+    {
+      "id": "imagetool.similar",
+      "visibility": "main",
+      "version": "1",
+      "description": "两图 dhash 相似度",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "imagetool.process",
+      "visibility": "main",
+      "version": "1",
+      "description": "ImageMagick 处理(resize/quality/rotate/format)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "imagetool.info",
+      "visibility": "all",
+      "version": "1",
+      "description": "插件信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    }
   ]
 }

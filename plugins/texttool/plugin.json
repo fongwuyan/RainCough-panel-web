@@ -9,19 +9,84 @@
     "entry": "assets/plugin.js",
     "vue": "3.5",
     "pages": [
-      { "path": "", "title": "文本工具" }
+      {
+        "path": "",
+        "title": "文本工具"
+      }
     ]
   },
   "backend": {
     "lang": "python",
-    "exec": ["python", "server_v4.py"],
-    "capabilities": ["invoke", "heartbeat", "log.tail"]
+    "exec": [
+      "python",
+      "server_v4.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
   },
   "interfaces": [
-    { "id": "texttool.regex", "visibility": "main", "version": "1", "description": "正则查找" },
-    { "id": "texttool.replace", "visibility": "main", "version": "1", "description": "文本替换(支持正则)" },
-    { "id": "texttool.convert", "visibility": "main", "version": "1", "description": "JSON/YAML 互转与格式化" },
-    { "id": "texttool.stats", "visibility": "main", "version": "1", "description": "文本统计" },
-    { "id": "texttool.info", "visibility": "all", "version": "1", "description": "插件信息" }
+    {
+      "id": "texttool.regex",
+      "visibility": "main",
+      "version": "1",
+      "description": "正则查找",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "texttool.replace",
+      "visibility": "main",
+      "version": "1",
+      "description": "文本替换(支持正则)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "texttool.convert",
+      "visibility": "main",
+      "version": "1",
+      "description": "JSON/YAML 互转与格式化",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "texttool.stats",
+      "visibility": "main",
+      "version": "1",
+      "description": "文本统计",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "texttool.info",
+      "visibility": "all",
+      "version": "1",
+      "description": "插件信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    }
   ]
 }

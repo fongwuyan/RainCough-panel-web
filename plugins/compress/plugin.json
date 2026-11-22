@@ -32,43 +32,85 @@
       "id": "compress.dc.check",
       "visibility": "all",
       "version": "1",
-      "description": "7z 环境检查"
+      "description": "7z 环境检查",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "compress.dc.list",
       "visibility": "main",
       "version": "1",
-      "description": "压缩包内容列表"
+      "description": "压缩包内容列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "compress.dc.extract",
       "visibility": "main",
       "version": "1",
-      "description": "解压(支持整理)"
+      "description": "解压(支持整理)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "compress.dc.compress",
       "visibility": "main",
       "version": "1",
-      "description": "压缩(7z/zip/tar.gz等)"
+      "description": "压缩(7z/zip/tar.gz等)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "compress.dc.convert",
       "visibility": "main",
       "version": "1",
-      "description": "格式转换"
+      "description": "格式转换",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "compress.dc.compare",
       "visibility": "main",
       "version": "1",
-      "description": "两压缩包对比"
+      "description": "两压缩包对比",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "compress.info",
       "visibility": "all",
       "version": "1",
-      "description": "插件信息"
+      "description": "插件信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     }
   ]
 }

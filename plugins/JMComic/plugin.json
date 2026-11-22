@@ -218,187 +218,373 @@
       "id": "jmcomic.search",
       "visibility": "all",
       "version": "1",
-      "description": "搜索"
+      "description": "搜索",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.meta",
       "visibility": "all",
       "version": "1",
-      "description": "漫画元信息"
+      "description": "漫画元信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.album",
       "visibility": "all",
       "version": "1",
-      "description": "漫画详情+章节"
+      "description": "漫画详情+章节",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.chapter",
       "visibility": "all",
       "version": "1",
-      "description": "章节图片列表"
+      "description": "章节图片列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.download",
       "visibility": "main",
       "version": "1",
-      "description": "加入下载队列"
+      "description": "加入下载队列",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.download.status",
       "visibility": "all",
       "version": "1",
-      "description": "下载进度"
+      "description": "下载进度",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.library.list",
       "visibility": "all",
       "version": "1",
-      "description": "本地库"
+      "description": "本地库",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.library.delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除本子"
+      "description": "删除本子",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.config.get",
       "visibility": "all",
       "version": "1",
-      "description": "读取配置"
+      "description": "读取配置",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.config.save",
       "visibility": "main",
       "version": "1",
-      "description": "保存配置"
+      "description": "保存配置",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.info",
       "visibility": "all",
       "version": "1",
-      "description": "插件信息"
+      "description": "插件信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.image",
       "visibility": "all",
       "version": "1",
-      "description": "按需取单张漫画图(base64)"
+      "description": "按需取单张漫画图(base64)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.cover",
       "visibility": "all",
       "version": "1",
-      "description": "本子封面(缓存 cache/ 直出)"
+      "description": "本子封面(缓存 cache/ 直出)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.download.cancel",
       "visibility": "main",
       "version": "1",
-      "description": "取消下载(排队立即/下载中标记后清残留)"
+      "description": "取消下载(排队立即/下载中标记后清残留)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.covers",
       "visibility": "all",
       "version": "1",
-      "description": "批量封面(一次取N个)"
+      "description": "批量封面(一次取N个)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.prefetch",
       "visibility": "all",
       "version": "1",
-      "description": "章节图片批量预取(URL化)"
+      "description": "章节图片批量预取(URL化)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.perf.stats",
       "visibility": "all",
       "version": "1",
-      "description": "性能统计(命中/解码/耗时采样)"
+      "description": "性能统计(命中/解码/耗时采样)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.batch.start",
       "visibility": "all",
       "version": "1",
-      "description": "批量下载: 开始(按关键词/分类)"
+      "description": "批量下载: 开始(按关键词/分类)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.batch.status",
       "visibility": "all",
       "version": "1",
-      "description": "批量下载: 进度"
+      "description": "批量下载: 进度",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.batch.stop",
       "visibility": "all",
       "version": "1",
-      "description": "批量下载: 停止"
+      "description": "批量下载: 停止",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.dl.start",
       "visibility": "all",
       "version": "1",
-      "description": "内置下载器：开始下载（按页并发/断点续传）"
+      "description": "内置下载器：开始下载（按页并发/断点续传）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.dl.status",
       "visibility": "all",
       "version": "1",
-      "description": "内置下载器：单个任务进度"
+      "description": "内置下载器：单个任务进度",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.dl.list",
       "visibility": "all",
       "version": "1",
-      "description": "内置下载器：全部任务"
+      "description": "内置下载器：全部任务",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.tasks.list",
       "visibility": "all",
       "version": "1",
-      "description": "面板任务列表：下载任务"
+      "description": "面板任务列表：下载任务",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.tasks.clear",
       "visibility": "main",
       "version": "1",
-      "description": "面板任务列表：清理已完成/失败下载记录"
+      "description": "面板任务列表：清理已完成/失败下载记录",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.tasks.retry",
       "visibility": "main",
       "version": "1",
-      "description": "面板任务列表：继续/重试下载"
+      "description": "面板任务列表：继续/重试下载",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.dl.pause",
       "visibility": "all",
       "version": "1",
-      "description": "内置下载器：暂停"
+      "description": "内置下载器：暂停",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.dl.resume",
       "visibility": "all",
       "version": "1",
-      "description": "内置下载器：继续"
+      "description": "内置下载器：继续",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.dl.cancel",
       "visibility": "all",
       "version": "1",
-      "description": "内置下载器：取消"
+      "description": "内置下载器：取消",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.dl.remove",
       "visibility": "all",
       "version": "1",
-      "description": "内置下载器：移除任务（可选删文件）"
+      "description": "内置下载器：移除任务（可选删文件）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.dl.retry_failed",
       "visibility": "all",
       "version": "1",
-      "description": "内置下载器：只补下失败的页"
+      "description": "内置下载器：只补下失败的页",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "jmcomic.zip",

@@ -32,37 +32,73 @@
       "id": "filehash.da.stats",
       "visibility": "main",
       "version": "1",
-      "description": "目录/压缩包统计"
+      "description": "目录/压缩包统计",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "filehash.da.duplicate",
       "visibility": "main",
       "version": "1",
-      "description": "查重(按哈希)"
+      "description": "查重(按哈希)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "filehash.h.calc",
       "visibility": "main",
       "version": "1",
-      "description": "计算 md5/sha1/sha256"
+      "description": "计算 md5/sha1/sha256",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "filehash.h.generate",
       "visibility": "main",
       "version": "1",
-      "description": "生成校验清单"
+      "description": "生成校验清单",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "filehash.h.verify",
       "visibility": "main",
       "version": "1",
-      "description": "校验清单验证"
+      "description": "校验清单验证",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "filehash.info",
       "visibility": "all",
       "version": "1",
-      "description": "插件信息"
+      "description": "插件信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     }
   ]
 }

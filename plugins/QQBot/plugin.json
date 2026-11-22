@@ -33,415 +33,829 @@
       "id": "qqbot.health",
       "visibility": "all",
       "version": "1",
-      "description": "探活"
+      "description": "探活",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.conn.get",
       "visibility": "all",
       "version": "1",
-      "description": "读取连接地址与连通性"
+      "description": "读取连接地址与连通性",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.conn.save",
       "visibility": "main",
       "version": "1",
-      "description": "保存连接地址"
+      "description": "保存连接地址",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.overview",
       "visibility": "all",
       "version": "1",
-      "description": "概览（账号 / 版本 / 系统 / 计数）"
+      "description": "概览（账号 / 版本 / 系统 / 计数）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.query",
       "visibility": "main",
       "version": "1",
-      "description": "按用户/撤回状态/消息类型查询消息（条件可叠加）"
+      "description": "按用户/撤回状态/消息类型查询消息（条件可叠加）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.senders",
       "visibility": "main",
       "version": "1",
-      "description": "聊天中出现过的发送者列表"
+      "description": "聊天中出现过的发送者列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.thumb",
       "visibility": "main",
       "version": "1",
-      "description": "按需生成图片缩略图（长边 320，磁盘缓存）"
+      "description": "按需生成图片缩略图（长边 320，磁盘缓存）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.panel.get",
       "visibility": "main",
       "version": "1",
-      "description": "用户面板配置、本地图片与内置工具列表"
+      "description": "用户面板配置、本地图片与内置工具列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.panel.save",
       "visibility": "main",
       "version": "1",
-      "description": "保存用户面板（菜单/文本库/图片库）"
+      "description": "保存用户面板（菜单/文本库/图片库）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.panel.preview",
       "visibility": "main",
       "version": "1",
-      "description": "预览菜单或功能项输出"
+      "description": "预览菜单或功能项输出",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.panel.generate",
       "visibility": "main",
       "version": "1",
-      "description": "立即让 AI 生成每日文案"
+      "description": "立即让 AI 生成每日文案",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.panel.image_upload",
       "visibility": "main",
       "version": "1",
-      "description": "上传本地图片到图片组"
+      "description": "上传本地图片到图片组",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.tools.get",
       "visibility": "main",
       "version": "1",
-      "description": "工具链：内置工具列表与工作区占用"
+      "description": "工具链：内置工具列表与工作区占用",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.tools.save",
       "visibility": "main",
       "version": "1",
-      "description": "保存工具开关与工作区配额"
+      "description": "保存工具开关与工作区配额",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.tools.test",
       "visibility": "main",
       "version": "1",
-      "description": "手动测试内置工具"
+      "description": "手动测试内置工具",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.tools.fs",
       "visibility": "main",
       "version": "1",
-      "description": "工作区文件操作（列出/读/写/建目录/删除）"
+      "description": "工作区文件操作（列出/读/写/建目录/删除）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.tools.stats",
       "visibility": "main",
       "version": "1",
-      "description": "工具调用统计（次数/成功率/耗时）"
+      "description": "工具调用统计（次数/成功率/耗时）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.clear_session",
       "visibility": "main",
       "version": "1",
-      "description": "一键清空会话"
+      "description": "一键清空会话",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.media_list",
       "visibility": "main",
       "version": "1",
-      "description": "媒体库列表与统计"
+      "description": "媒体库列表与统计",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.media_delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除媒体文件"
+      "description": "删除媒体文件",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.media_transcode",
       "visibility": "main",
       "version": "1",
-      "description": "把视频/语音转成浏览器可播放格式（支持异步任务）"
+      "description": "把视频/语音转成浏览器可播放格式（支持异步任务）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.media_task",
       "visibility": "main",
       "version": "1",
-      "description": "转码任务进度与取消"
+      "description": "转码任务进度与取消",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.media_reindex",
       "visibility": "main",
       "version": "1",
-      "description": "重建媒体索引"
+      "description": "重建媒体索引",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.media_repair",
       "visibility": "main",
       "version": "1",
-      "description": "修复媒体引用（转码后路径不一致）"
+      "description": "修复媒体引用（转码后路径不一致）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.status",
       "visibility": "all",
       "version": "1",
-      "description": "机器人运行状态"
+      "description": "机器人运行状态",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.config.get",
       "visibility": "all",
       "version": "1",
-      "description": "读取上下文/触发/能力配置"
+      "description": "读取上下文/触发/能力配置",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.config.save",
       "visibility": "main",
       "version": "1",
-      "description": "保存上下文/触发/能力配置"
+      "description": "保存上下文/触发/能力配置",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.tools.search",
       "visibility": "main",
       "version": "1",
-      "description": "试一下联网搜索"
+      "description": "试一下联网搜索",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.providers",
       "visibility": "all",
       "version": "1",
-      "description": "模型提供商列表"
+      "description": "模型提供商列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.provider.save",
       "visibility": "main",
       "version": "1",
-      "description": "新增/修改提供商"
+      "description": "新增/修改提供商",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.provider.delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除提供商"
+      "description": "删除提供商",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.provider.test",
       "visibility": "main",
       "version": "1",
-      "description": "测试提供商连通性"
+      "description": "测试提供商连通性",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.provider.models",
       "visibility": "main",
       "version": "1",
-      "description": "拉取可用模型列表"
+      "description": "拉取可用模型列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.personas",
       "visibility": "all",
       "version": "1",
-      "description": "人格列表"
+      "description": "人格列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.persona.save",
       "visibility": "main",
       "version": "1",
-      "description": "新增/修改人格"
+      "description": "新增/修改人格",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.persona.delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除人格"
+      "description": "删除人格",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.sessions",
       "visibility": "all",
       "version": "1",
-      "description": "会话列表"
+      "description": "会话列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.session.get",
       "visibility": "all",
       "version": "1",
-      "description": "会话详情与消息"
+      "description": "会话详情与消息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.session.save",
       "visibility": "main",
       "version": "1",
-      "description": "修改会话（人格/模型/启停）"
+      "description": "修改会话（人格/模型/启停）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.session.clear",
       "visibility": "main",
       "version": "1",
-      "description": "清空会话上下文"
+      "description": "清空会话上下文",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.session.delete",
       "visibility": "main",
       "version": "1",
-      "description": "删除会话"
+      "description": "删除会话",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.context",
       "visibility": "all",
       "version": "1",
-      "description": "上下文预览（含压缩摘要）"
+      "description": "上下文预览（含压缩摘要）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.test_chat",
       "visibility": "main",
       "version": "1",
-      "description": "试聊（不经过 QQ）"
+      "description": "试聊（不经过 QQ）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.account.info",
       "visibility": "main",
       "version": "1",
-      "description": "当前账户信息（昵称/头像/QQ号/登录状态）"
+      "description": "当前账户信息（昵称/头像/QQ号/登录状态）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.account.qrcode",
       "visibility": "main",
       "version": "1",
-      "description": "取登录入口（SnowLuma 远程桌面）"
+      "description": "取登录入口（SnowLuma 远程桌面）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.account.refresh_qrcode",
       "visibility": "main",
       "version": "1",
-      "description": "刷新登录二维码"
+      "description": "刷新登录二维码",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.account.status",
       "visibility": "main",
       "version": "1",
-      "description": "查登录进度"
+      "description": "查登录进度",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.account.action",
       "visibility": "main",
       "version": "1",
-      "description": "账户操作：启动/停止/重启/快登/换号"
+      "description": "账户操作：启动/停止/重启/快登/换号",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.account.logs",
       "visibility": "main",
       "version": "1",
-      "description": "SnowLuma 容器日志"
+      "description": "SnowLuma 容器日志",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.account.logs.clear",
       "visibility": "main",
       "version": "1",
-      "description": "清空实时日志缓冲（容器日志由 Docker 管理）"
+      "description": "清空实时日志缓冲（容器日志由 Docker 管理）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.sessions",
       "visibility": "all",
       "version": "1",
-      "description": "聊天记录会话列表"
+      "description": "聊天记录会话列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.messages",
       "visibility": "all",
       "version": "1",
-      "description": "聊天记录消息分页"
+      "description": "聊天记录消息分页",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.stats",
       "visibility": "all",
       "version": "1",
-      "description": "聊天记录统计与磁盘水位"
+      "description": "聊天记录统计与磁盘水位",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.export",
       "visibility": "main",
       "version": "1",
-      "description": "导出聊天记录 JSON"
+      "description": "导出聊天记录 JSON",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "qqbot.chat.purge_media",
       "visibility": "main",
       "version": "1",
-      "description": "清理媒体文件（保留消息文本）"
+      "description": "清理媒体文件（保留消息文本）",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.accounts",
       "visibility": "all",
       "version": "1",
-      "description": "机器人侧账号列表与连接状态"
+      "description": "机器人侧账号列表与连接状态",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.account.save",
       "visibility": "main",
       "version": "1",
-      "description": "新增/修改/删除机器人账号"
+      "description": "新增/修改/删除机器人账号",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.map",
       "visibility": "all",
       "version": "1",
-      "description": "记忆星空"
+      "description": "记忆星空",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.item",
       "visibility": "all",
       "version": "1",
-      "description": "记忆详情"
+      "description": "记忆详情",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.save",
       "visibility": "all",
       "version": "1",
-      "description": "保存记忆"
+      "description": "保存记忆",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.delete",
       "visibility": "all",
       "version": "1",
-      "description": "删除记忆"
+      "description": "删除记忆",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.pin",
       "visibility": "all",
       "version": "1",
-      "description": "置顶记忆"
+      "description": "置顶记忆",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.seed",
       "visibility": "all",
       "version": "1",
-      "description": "迁移记忆"
+      "description": "迁移记忆",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.stats",
       "visibility": "all",
       "version": "1",
-      "description": "记忆统计"
+      "description": "记忆统计",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.search",
       "visibility": "all",
       "version": "1",
-      "description": "搜索记忆"
+      "description": "搜索记忆",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.tile",
       "visibility": "all",
       "version": "1",
-      "description": "星图分块"
+      "description": "星图分块",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.consolidate",
       "visibility": "all",
       "version": "1",
-      "description": "巩固记忆"
+      "description": "巩固记忆",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.bulk",
       "visibility": "all",
       "version": "1",
-      "description": "批量记忆"
+      "description": "批量记忆",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "rcbot.memory.triggers",
       "visibility": "all",
       "version": "1",
-      "description": "关键词列表"
+      "description": "关键词列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     }
   ],
   "environment": {

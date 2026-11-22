@@ -2,26 +2,91 @@
   "name": "aidraw",
   "label": "AI 绘图",
   "version": "1.4.0",
-  "description": "通过节点管理提交生图任务，支持文生图、图生图、JSON 批量、历史画廊",
+  "description": "AI 绘图与 LoRA 训练：文生图、图生图、JSON 批量、历史画廊、数据集与训练。",
   "author": "fongwuyan",
   "icon": "",
   "frontend": {
     "entry": "assets/plugin.js",
     "vue": "3.5",
     "pages": [
-      { "path": "", "title": "AI 绘图" }
+      {
+        "path": "",
+        "title": "AI 绘图"
+      }
     ]
   },
   "backend": {
     "lang": "python",
-    "exec": ["python", "server.py"],
-    "capabilities": ["invoke", "heartbeat", "log.tail"]
+    "exec": [
+      "python",
+      "server.py"
+    ],
+    "capabilities": [
+      "invoke",
+      "heartbeat",
+      "log.tail"
+    ]
   },
   "interfaces": [
-    { "id": "aidraw.ping", "visibility": "all", "version": "1", "description": "节点生图插件存活探测" },
-    { "id": "aidraw.history.list", "visibility": "main", "version": "1", "description": "服务端历史画廊列表" },
-    { "id": "aidraw.history.add", "visibility": "main", "version": "1", "description": "添加历史记录" },
-    { "id": "aidraw.history.delete", "visibility": "main", "version": "1", "description": "删除历史记录" },
-    { "id": "aidraw.history.clear", "visibility": "main", "version": "1", "description": "清空历史记录" }
+    {
+      "id": "aidraw.ping",
+      "visibility": "all",
+      "version": "1",
+      "description": "节点生图插件存活探测",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "aidraw.history.list",
+      "visibility": "main",
+      "version": "1",
+      "description": "服务端历史画廊列表",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "aidraw.history.add",
+      "visibility": "main",
+      "version": "1",
+      "description": "添加历史记录",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "aidraw.history.delete",
+      "visibility": "main",
+      "version": "1",
+      "description": "删除历史记录",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "aidraw.history.clear",
+      "visibility": "main",
+      "version": "1",
+      "description": "清空历史记录",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
+    }
   ]
 }

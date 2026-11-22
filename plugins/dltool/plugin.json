@@ -32,49 +32,97 @@
       "id": "dltool.doc.check",
       "visibility": "all",
       "version": "1",
-      "description": "pandoc 环境检查"
+      "description": "pandoc 环境检查",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "dltool.doc.convert",
       "visibility": "main",
       "version": "1",
-      "description": "文档转换"
+      "description": "文档转换",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "dltool.nt.download",
       "visibility": "main",
       "version": "1",
-      "description": "URL 批量下载(任务队列)"
+      "description": "URL 批量下载(任务队列)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "dltool.nt.split",
       "visibility": "main",
       "version": "1",
-      "description": "文件分片"
+      "description": "文件分片",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "dltool.nt.join",
       "visibility": "main",
       "version": "1",
-      "description": "分片合并"
+      "description": "分片合并",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "dltool.nt.rename",
       "visibility": "main",
       "version": "1",
-      "description": "批量重命名"
+      "description": "批量重命名",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "dltool.nt.delete",
       "visibility": "main",
       "version": "1",
-      "description": "安全删除(覆写)"
+      "description": "安全删除(覆写)",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     },
     {
       "id": "dltool.info",
       "visibility": "all",
       "version": "1",
-      "description": "插件信息"
+      "description": "插件信息",
+      "input": {
+        "type": "object"
+      },
+      "output": {
+        "type": "object"
+      }
     }
   ]
 }
