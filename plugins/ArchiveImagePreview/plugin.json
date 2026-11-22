@@ -69,10 +69,30 @@
       "version": "1",
       "description": "开始分块上传压缩包",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "size"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "upload_id": {
+            "type": "string"
+          },
+          "chunk_size": {
+            "type": "integer"
+          }
+        }
       }
     },
     {
@@ -81,10 +101,31 @@
       "version": "1",
       "description": "上传一个分块",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "upload_id": {
+            "type": "string"
+          },
+          "index": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id",
+          "index",
+          "data"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "received": {
+            "type": "integer"
+          }
+        }
       }
     },
     {
@@ -93,7 +134,15 @@
       "version": "1",
       "description": "完成上传并扫描图片",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "upload_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id"
+        ]
       },
       "output": {
         "type": "object"
@@ -108,7 +157,12 @@
         "type": "object"
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "archives": {
+            "type": "array"
+          }
+        }
       }
     },
     {
@@ -117,10 +171,26 @@
       "version": "1",
       "description": "图片条目列表",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "archive": {
+            "type": "object"
+          },
+          "entries": {
+            "type": "array"
+          }
+        }
       }
     },
     {
@@ -129,10 +199,30 @@
       "version": "1",
       "description": "缩略图",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          },
+          "idx": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "aid",
+          "idx"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          }
+        }
       }
     },
     {
@@ -141,10 +231,30 @@
       "version": "1",
       "description": "大图预览",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          },
+          "idx": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "aid",
+          "idx"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          }
+        }
       }
     },
     {
@@ -153,10 +263,33 @@
       "version": "1",
       "description": "原始图片",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          },
+          "idx": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "aid",
+          "idx"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          }
+        }
       }
     },
     {
@@ -165,7 +298,15 @@
       "version": "1",
       "description": "删除压缩包",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
@@ -180,7 +321,18 @@
         "type": "object"
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "formats": {
+            "type": "array"
+          }
+        }
       }
     }
   ]

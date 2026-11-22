@@ -37,7 +37,12 @@
         "type": "object"
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
       }
     },
     {
@@ -46,10 +51,20 @@
       "version": "1",
       "description": "服务端历史画廊列表",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        }
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "history": {
+            "type": "array"
+          }
+        }
       }
     },
     {
@@ -58,10 +73,23 @@
       "version": "1",
       "description": "添加历史记录",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "item"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
       }
     },
     {
@@ -70,10 +98,23 @@
       "version": "1",
       "description": "删除历史记录",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
       }
     },
     {
@@ -85,7 +126,12 @@
         "type": "object"
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
       }
     }
   ]

@@ -58,7 +58,18 @@
       "version": "1",
       "description": "扫描仓库可下载内容（同步兼容接口）",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "proxy": {
+            "type": "string"
+          }
+        }
       },
       "output": {
         "type": "object"
@@ -70,10 +81,26 @@
       "version": "1",
       "description": "开始异步扫描",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "scan_id": {
+            "type": "string"
+          }
+        }
       }
     },
     {
@@ -82,7 +109,15 @@
       "version": "1",
       "description": "查询异步扫描",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "scan_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scan_id"
+        ]
       },
       "output": {
         "type": "object"
@@ -94,10 +129,33 @@
       "version": "1",
       "description": "创建下载任务",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "repo_url": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "proxy": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "repo_url",
+          "items"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array"
+          }
+        }
       }
     },
     {
@@ -109,7 +167,12 @@
         "type": "object"
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array"
+          }
+        }
       }
     },
     {
@@ -118,7 +181,15 @@
       "version": "1",
       "description": "取消任务",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "tid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tid"
+        ]
       },
       "output": {
         "type": "object"
@@ -130,7 +201,15 @@
       "version": "1",
       "description": "删除任务与文件",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "tid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tid"
+        ]
       },
       "output": {
         "type": "object"
@@ -142,10 +221,23 @@
       "version": "1",
       "description": "获取任务文件下载地址",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "tid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tid"
+        ]
       },
       "output": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          }
+        }
       }
     }
   ]
