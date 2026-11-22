@@ -1,138 +1,88 @@
 <template>
-  <div class="nodes">
-    <div class="hd">
-      <div>
-        <h1>节点管理</h1>
-        <p class="sub">生图 / 推理 / 训练节点，仅限内网。f 已标记为不参与发布。</p>
+  <div class="nodes-page">
+    <div class="np-toolbar">
+      <div class="np-summary">
+        <span class="np-count">{{ nodes.length }}</span><span class="np-muted">节点</span>
+        <span class="np-divider"></span>
+        <span class="np-online">{{ nodes.filter((n) => n.status === 'online').length }}</span><span class="np-muted">在线</span>
       </div>
-      <div class="actions">
-        <button class="btn" @click="load">刷新</button>
-        <button class="btn primary" @click="showForm = !showForm">
-          {{ showForm ? '收起' : '添加节点' }}
-        </button>
+      <div class="np-toolbar-actions">
+        <button class="btn btn-sm" :disabled="busy" @click="load">刷新</button>
+        <button class="btn btn-sm btn-primary" @click="showForm = !showForm">{{ showForm ? '收起' : '添加节点' }}</button>
       </div>
     </div>
 
-    <div v-if="err" class="err">{{ err }}</div>
+    <div v-if="err" class="np-error">{{ err }}</div>
 
-    <div v-if="showForm" class="form">
-      <div class="form-row">
-        <label>名称<input v-model="form.name" placeholder="f" /></label>
-        <label>地址<input v-model="form.host" placeholder="192.168.2.143" /></label>
-        <label>端口<input v-model.number="form.port" type="number" placeholder="8000" /></label>
-        <label>分组<input v-model="form.group" placeholder="internal" /></label>
+    <section v-if="showForm" class="node-form">
+      <div class="node-form-head">
+        <b>添加节点</b>
+        <button class="btn btn-sm btn-ghost" @click="showForm = false">×</button>
       </div>
-      <div class="form-row">
-        <label class="grow">节点 Token<input v-model="form.token" type="password" placeholder="data/node_token" /></label>
-        <label>SSH 用户<input v-model="form.ssh_user" placeholder="f" /></label>
-        <label>SSH 密码<input v-model="form.ssh_password" type="password" placeholder="可留空" /></label>
+      <div class="node-form-grid">
+        <label class="np-field"><span>名称</span><input v-model="form.name" placeholder="节点名称" /></label>
+        <label class="np-field"><span>地址</span><input v-model="form.host" placeholder="192.168.2.143" /></label>
+        <label class="np-field"><span>端口</span><input v-model.number="form.port" type="number" placeholder="8000" /></label>
+        <label class="np-field"><span>分组</span><input v-model="form.group" placeholder="internal" /></label>
+        <label class="np-field span2"><span>节点 Token</span><input v-model="form.token" type="password" placeholder="data/node_token" /></label>
+        <label class="np-field"><span>SSH 用户</span><input v-model="form.ssh_user" placeholder="root" /></label>
+        <label class="np-field"><span>SSH 密码</span><input v-model="form.ssh_password" type="password" placeholder="可留空" /></label>
+        <label class="np-field span2"><span>MAC 地址（开机用）</span><input v-model="form.mac" placeholder="AA:BB:CC:DD:EE:FF" /></label>
       </div>
-      <div class="form-row">
-        <label>MAC 地址<input v-model="form.mac" placeholder="AA:BB:CC:DD:EE:FF（开机用）" /></label>
+      <div class="node-form-foot">
+        <label class="np-check"><input v-model="form.publish" type="checkbox" /> 参与发布</label>
+        <label class="np-check"><input v-model="form.enabled" type="checkbox" /> 启用</label>
+        <span class="np-hint">f 节点请保持不参与发布</span>
+        <span class="np-grow"></span>
+        <button class="btn btn-sm" :disabled="busy" @click="sshTest">测试 SSH</button>
+        <button class="btn btn-sm btn-primary" :disabled="busy" @click="save">保存节点</button>
       </div>
-      <div class="form-row">
-        <label class="check"><input type="checkbox" v-model="form.publish" /> 参与发布</label>
-        <label class="check"><input type="checkbox" v-model="form.enabled" /> 启用</label>
-        <span class="hint">f 请保持「不参与发布」</span>
-        <button class="btn" :disabled="busy" @click="sshTest">测试 SSH</button>
-        <button class="btn primary" style="margin-left:auto" :disabled="busy" @click="save">保存节点</button>
-      </div>
-      <pre v-if="sshOut" class="ssh">{{ sshOut }}</pre>
+      <pre v-if="sshOut" class="np-pre">{{ sshOut }}</pre>
+    </section>
+
+    <div class="node-grid">
+      <article v-for="n in nodes" :key="n.id" class="node-card" :class="n.status">
+        <div class="node-head">
+          <span class="node-dot" :class="n.status"></span>
+          <div class="node-ident">
+            <b>{{ n.name }}</b>
+            <span class="node-host">{{ n.host }}:{{ n.port }}</span>
+          </div>
+          <span class="node-badge" :class="n.status">{{ statusText(n.status) }}</span>
+        </div>
+        <div class="node-badges">
+          <span v-if="!n.publish" class="node-badge warn">不参与发布</span>
+          <span v-if="!n.enabled" class="node-badge">已停用</span>
+          <span v-if="n.group" class="node-badge">{{ n.group }}</span>
+        </div>
+        <div class="node-facts">
+          <div><span>版本</span><b>{{ n.version || '-' }}</b></div>
+          <div><span>GPU</span><b>{{ n.gpu || '-' }}</b></div>
+          <div><span>最近</span><b>{{ n.last_seen ? timeText(n.last_seen) : '-' }}</b></div>
+        </div>
+        <div v-if="n.message" class="node-msg">{{ n.message }}</div>
+        <div class="node-actions">
+          <button class="btn btn-sm" :disabled="busy" @click="test(n)">测试</button>
+          <button class="btn btn-sm" :disabled="busy" @click="install(n)">部署/升级</button>
+          <button class="btn btn-sm" :disabled="busy" @click="preflight(n)">预检</button>
+          <button class="btn btn-sm" :disabled="busy" @click="power(n, 'reboot')">重启</button>
+          <button class="btn btn-sm" :disabled="busy" @click="power(n, 'shutdown')">关机</button>
+          <button class="btn btn-sm" :disabled="busy" @click="power(n, 'poweron')">开机</button>
+          <button class="btn btn-sm" :disabled="busy" @click="detailNode(n)">详情</button>
+          <button class="btn btn-sm btn-danger" :disabled="busy" @click="remove(n)">删除</button>
+        </div>
+      </article>
+      <div v-if="!nodes.length" class="node-empty">还没有节点，点「添加节点」接入。</div>
     </div>
 
-    <div class="grid">
-      <div v-for="n in nodes" :key="n.id" class="card">
-        <div class="card-hd">
-          <span class="dot" :class="n.status"></span>
-          <b>{{ n.name }}</b>
-          <span class="host">{{ n.host }}:{{ n.port }}</span>
-          <span v-if="!n.publish" class="badge warn">不参与发布</span>
-          <span v-if="!n.enabled" class="badge">已停用</span>
-          <span class="badge" :class="n.status">{{ statusText(n.status) }}</span>
+    <div v-if="detail" class="np-mask" @click.self="detail = null">
+      <aside class="np-drawer">
+        <div class="np-drawer-head">
+          <b>{{ detailName }} · 状态</b>
+          <button class="btn btn-sm btn-ghost" @click="detail = null">×</button>
         </div>
-        <div class="meta">
-          <span>版本 {{ n.version || '-' }}</span>
-          <span>GPU {{ n.gpu || '-' }}</span>
-          <span>最近 {{ n.last_seen ? timeText(n.last_seen) : '-' }}</span>
-        </div>
-        <div v-if="n.message" class="msg">{{ n.message }}</div>
-        <div class="card-actions">
-          <button class="btn sm" :disabled="busy" @click="test(n)">测试连接</button>
-          <button class="btn sm" :disabled="busy" @click="install(n)">部署/升级</button>
-          <button class="btn sm" :disabled="busy" @click="preflight(n)">预检</button>
-          <button class="btn sm" :disabled="busy" @click="power(n, 'reboot')">重启</button>
-          <button class="btn sm danger" :disabled="busy" @click="power(n, 'shutdown')">关机</button>
-          <button class="btn sm" :disabled="busy" @click="power(n, 'poweron')">开机</button>
-          <button class="btn sm" :disabled="busy" @click="detailNode(n)">状态详情</button>
-          <button class="btn sm danger" :disabled="busy" @click="remove(n)">删除</button>
-        </div>
-      </div>
-      <div v-if="!nodes.length" class="empty">还没有节点，点「添加节点」接入 f。</div>
-    </div>
-
-    <div v-if="detail" class="detail">
-      <div class="detail-hd">
-        <b>{{ detailName }} · 状态</b>
-        <button class="btn sm" @click="detail = null">关闭</button>
-      </div>
-      <pre>{{ detail }}</pre>
-    </div>
-
-    <div class="train">
-      <h3>LoRA 训练</h3>
-      <div class="form-row">
-        <label>节点
-          <select v-model="trainNode" @change="loadTrain">
-            <option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.name }}</option>
-          </select>
-        </label>
-        <label>数据集
-          <input v-model="trainDataset" list="aidraw-datasets" placeholder="数据集名" />
-          <datalist id="aidraw-datasets">
-            <option v-for="d in trainDatasets" :key="d.name || d" :value="d.name || d" />
-          </datalist>
-        </label>
-        <label>底模
-          <select v-model="trainBase">
-            <option value="realistic">写实 · SD1.5</option>
-            <option value="anime">动漫 · waifu-diffusion</option>
-          </select>
-        </label>
-        <label>步数<input v-model.number="trainSteps" type="number" /></label>
-        <label>rank<input v-model.number="trainRank" type="number" /></label>
-        <label>alpha<input v-model.number="trainAlpha" type="number" /></label>
-        <label>lr<input v-model.number="trainLr" type="number" step="0.00001" /></label>
-      </div>
-      <div class="form-row">
-        <button class="btn primary" @click="startTrain">开始训练</button>
-        <button class="btn" @click="stopTrain">停止</button>
-        <button class="btn" @click="loadTrain">刷新状态</button>
-        <span class="hint">
-          {{ trainMsg }} · 状态 {{ trainStatusText(trainState) }}
-          · step {{ (trainState && trainState.step) || 0 }}/{{ (trainState && trainState.total) || 0 }}
-          · loss {{ (trainState && (trainState.avg_loss || trainState.loss)) || '-' }}
-        </span>
-      </div>
-      <pre v-if="trainState && (trainState.log || []).length" class="ssh">{{ (trainState.log || []).slice(-16).join('\n') }}</pre>
-
-      <div class="ds">
-        <h4>数据集</h4>
-        <div class="form-row">
-          <label>新数据集<input v-model="dsName" placeholder="例如 my-style" /></label>
-          <button class="btn" @click="createDataset">新建</button>
-          <label>图片<input ref="dsFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple @change="dsFiles = $event.target" /></label>
-          <label class="grow">这批 caption<input v-model="dsCaption" placeholder="可空；训练时缺 caption 会补触发词" /></label>
-          <button class="btn primary" @click="uploadDataset">上传</button>
-          <button class="btn danger" @click="deleteDataset">删除当前数据集</button>
-        </div>
-        <div class="hint">
-          {{ dsMsg }} · 现有：
-          <span v-for="d in trainDatasets" :key="d.name" style="margin-right:10px">
-            {{ d.name }}（{{ d.images }} 图 / {{ d.captions }} 标注）
-          </span>
-          <span v-if="!trainDatasets.length">无</span>
-        </div>
-      </div>
+        <pre>{{ detail }}</pre>
+      </aside>
     </div>
   </div>
 </template>
@@ -370,49 +320,55 @@ function trainStatusText(s) {
 }
 
 onMounted(load)
-onMounted(loadTrain)
 </script>
 
 <style scoped>
-.nodes { padding: 20px 24px; color: var(--text); }
-.hd { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-h1 { font-size: 18px; margin: 0 0 4px; }
-.sub { color: var(--text-muted); font-size: 12px; margin: 0; }
-.actions { display: flex; gap: 8px; }
-.err { background: rgba(245, 83, 79, .12); border: 1px solid rgba(245, 83, 79, .35); color: #f5534f; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 12px; }
-.form { border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px; background: var(--surface); }
-.form-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-.form-row label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
-.form-row label.grow { flex: 1; min-width: 260px; }
-.form-row input:not([type=checkbox]) { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: 6px 8px; border-radius: 5px; min-width: 140px; }
-.form-row label.check { flex-direction: row; align-items: center; gap: 6px; }
-.hint { font-size: 12px; color: var(--text-faint); align-self: center; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--surface); }
-.card-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.host { color: var(--text-muted); font-size: 12px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
-.dot.online { background: #0ca678; }
-.dot.offline { background: #f5534f; }
-.badge { font-size: 11px; border: 1px solid var(--border); padding: 1px 6px; border-radius: 999px; color: var(--text-muted); }
-.badge.warn { color: #e6b85c; border-color: rgba(230,184,92,.4); }
-.badge.online { color: #0ca678; border-color: rgba(12,166,120,.4); }
-.badge.offline { color: #f5534f; border-color: rgba(245,83,79,.4); }
-.meta { display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-muted); font-size: 12px; margin: 10px 0; }
-.msg { color: #f5534f; font-size: 12px; margin-bottom: 8px; }
-.card-actions { display: flex; gap: 6px; }
-.btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.sm { padding: 3px 8px; }
-.btn.danger { color: #f5534f; }
-.btn:disabled { opacity: .5; cursor: default; }
-.empty { color: var(--text-muted); padding: 30px; border: 1px dashed var(--border); border-radius: 8px; text-align: center; }
-.detail { margin-top: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
-.detail-hd { display: flex; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-.detail pre { margin: 0; padding: 12px; max-height: 420px; overflow: auto; font-size: 11px; line-height: 1.5; }
-.ssh { margin: 10px 0 0; padding: 10px; max-height: 240px; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; line-height: 1.5; white-space: pre-wrap; }
-.train { margin-top: 22px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 14px; }
-.train h3 { margin: 0 0 10px; font-size: 14px; }
-.ds { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
-.ds h4 { margin: 0 0 8px; font-size: 13px; }
+.nodes-page { padding: 14px 18px 24px; color: var(--text); }
+.np-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.np-summary { display: flex; align-items: baseline; gap: 5px; font-size: 12px; color: var(--text-muted); }
+.np-count, .np-online { font-size: 16px; font-weight: 700; color: var(--text); }
+.np-online { color: var(--success, #2f9e44); }
+.np-divider { width: 1px; height: 12px; background: var(--border); margin: 0 6px; }
+.np-muted { color: var(--text-muted); font-size: 11px; }
+.np-toolbar-actions { display: flex; align-items: center; gap: 6px; }
+.np-error { color: var(--danger); border: 1px solid var(--danger); background: var(--danger-soft, rgba(245,83,79,.12)); padding: 7px 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px; }
+.node-form { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); padding: 12px; margin-bottom: 12px; }
+.node-form-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }
+.node-form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 10px; }
+.np-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-muted); }
+.np-field.span2 { grid-column: span 2; }
+.np-field input, .np-field select { height: 30px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 5px 8px; font-size: 12px; min-width: 0; }
+.np-field input:focus, .np-field select:focus { outline: none; border-color: var(--accent); }
+.node-form-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 11px; }
+.np-check { display: flex; align-items: center; gap: 5px; color: var(--text-muted); }
+.np-hint { color: var(--text-muted); }
+.np-grow { flex: 1; }
+.np-pre { margin: 10px 0 0; max-height: 200px; overflow: auto; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 11px; }
+.node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
+.node-card { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); padding: 12px; min-width: 0; }
+.node-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.node-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--text-faint); }
+.node-dot.online { background: var(--success, #2f9e44); box-shadow: 0 0 0 3px rgba(47,158,68,.15); }
+.node-dot.offline { background: var(--danger); }
+.node-ident { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.node-ident b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-host { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-badges { display: flex; gap: 4px; flex-wrap: wrap; margin: 7px 0; }
+.node-badge { font-size: 10px; border: 1px solid var(--border); border-radius: 10px; padding: 1px 6px; color: var(--text-muted); }
+.node-badge.online { color: var(--success, #2f9e44); border-color: var(--success, #2f9e44); }
+.node-badge.offline { color: var(--danger); border-color: var(--danger); }
+.node-badge.warn { color: var(--warning, #d9480f); border-color: var(--warning, #d9480f); }
+.node-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 7px 0; margin: 4px 0 8px; }
+.node-facts div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.node-facts span { font-size: 10px; color: var(--text-muted); }
+.node-facts b { font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-msg { color: var(--danger); font-size: 11px; margin-bottom: 7px; line-height: 1.5; }
+.node-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.node-empty { grid-column: 1 / -1; text-align: center; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 8px; padding: 28px; font-size: 12px; }
+.np-mask { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.35); display: flex; justify-content: flex-end; }
+.np-drawer { width: min(640px, 94vw); height: 100%; background: var(--bg, #11151c); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+.np-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.np-drawer pre { flex: 1; margin: 0; padding: 12px; overflow: auto; font-size: 11px; line-height: 1.55; }
+@media (max-width: 900px) { .node-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .nodes-page { padding: 10px 12px 20px; } .node-form-grid { grid-template-columns: 1fr; } .np-field.span2 { grid-column: span 1; } .node-grid { grid-template-columns: 1fr; } }
 </style>

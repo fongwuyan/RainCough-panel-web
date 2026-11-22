@@ -40,6 +40,7 @@ func (x *PluginX) HandleIfacesCatalog(w http.ResponseWriter, r *http.Request) {
 	qsource := q.Get("source")
 	qvis := q.Get("visibility")
 	qstatus := q.Get("status")
+	qplugin := q.Get("plugin")
 	qq := strings.ToLower(q.Get("q"))
 
 	x.mu.Lock()
@@ -63,12 +64,18 @@ func (x *PluginX) HandleIfacesCatalog(w http.ResponseWriter, r *http.Request) {
 		if qsource != "" && kind != qsource {
 			continue
 		}
+		if qplugin != "" && it.Plugin != qplugin {
+			continue
+		}
 		if qvis != "" && it.Visibility != qvis {
 			continue
 		}
 		status := "offline"
 		if it.Online {
 			status = "online"
+		}
+		if it.Disabled {
+			status = "disabled"
 		}
 		if qstatus != "" && status != qstatus {
 			continue
@@ -86,6 +93,8 @@ func (x *PluginX) HandleIfacesCatalog(w http.ResponseWriter, r *http.Request) {
 			"input":       it.Input,
 			"output":      it.Output,
 			"online":      it.Online,
+			"disabled":    it.Disabled,
+			"timeout_ms":  it.TimeoutMs,
 			"status":      status,
 			"calls":       it.Calls,
 			"avg_ms":      it.AvgMs,
@@ -165,6 +174,8 @@ func (x *PluginX) HandleIfacesRoutes(w http.ResponseWriter, r *http.Request) {
 		x.HandleIfacesSummary(w, r)
 	case strings.HasSuffix(rest, "/invoke"):
 		x.HandleIfaceInvoke(w, r)
+	case strings.HasSuffix(rest, "/policy"):
+		x.HandleIfacePolicy(w, r)
 	default:
 		x.HandleIfaceDetail(w, r)
 	}
@@ -199,11 +210,55 @@ func (x *PluginX) HandleIfaceDetail(w http.ResponseWriter, r *http.Request) {
 		"input":       it.Input,
 		"output":      it.Output,
 		"online":      it.Online,
+		"disabled":    it.Disabled,
+		"timeout_ms":  it.TimeoutMs,
 		"calls":       it.Calls,
 		"avg_ms":      it.AvgMs,
 		"p95_ms":      it.P95Ms,
 		"last_error":  it.LastError,
 		"provider":    x.pluginView(pl),
+	})
+}
+
+// HandleIfacePolicy POST /api/interfaces/<id>/policy
+// 面板层策略：禁用接口、覆盖超时；不修改插件业务代码。
+func (x *PluginX) HandleIfacePolicy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/interfaces/"), "/policy")
+	id = strings.Trim(id, "/")
+	var b struct {
+		Disabled  *bool  `json:"disabled"`
+		TimeoutMs *int64 `json:"timeout_ms"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if b.TimeoutMs != nil {
+		if *b.TimeoutMs < 100 || *b.TimeoutMs > 300000 {
+			writeErr(w, http.StatusBadRequest, "timeout_ms 必须在 100-300000 之间")
+			return
+		}
+	}
+	x.mu.Lock()
+	it := x.ifaces[id]
+	if it == nil {
+		x.mu.Unlock()
+		writeErr(w, http.StatusNotFound, "接口不存在: "+id)
+		return
+	}
+	if b.Disabled != nil {
+		it.Disabled = *b.Disabled
+	}
+	if b.TimeoutMs != nil {
+		it.TimeoutMs = *b.TimeoutMs
+	}
+	x.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": true, "id": id, "disabled": it.Disabled, "timeout_ms": it.TimeoutMs,
 	})
 }
 

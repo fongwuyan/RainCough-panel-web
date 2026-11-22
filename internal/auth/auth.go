@@ -99,6 +99,8 @@ type Manager struct {
 
 	// allowSSH 是否允许用系统(SSH)密码登录。运行期可改(设置页开关), 用 mu 保护。
 	allowSSH bool
+	// tokenCheck 面板 API Token 校验(可选)。命中则跳过 session。
+	tokenCheck func(*http.Request) bool
 }
 
 // Options 构造参数
@@ -106,6 +108,7 @@ type Options struct {
 	DataDir       string        // 数据目录(默认 <base>/data), sessions/ + secret/ 都在它下面
 	SessionTTL    time.Duration // 0 = 用 DefaultSessionTTL
 	AdminPassword string        // 明文密码覆盖; 空 = 自动生成(写到 <data>/secret/admin.pw)
+	TokenCheck    func(*http.Request) bool
 }
 
 // New 创建 Manager 并:
@@ -121,9 +124,10 @@ func New(opts Options) (*Manager, error) {
 		opts.SessionTTL = DefaultSessionTTL
 	}
 	m := &Manager{
-		dataDir:  opts.DataDir,
-		sessions: make(map[string]Session),
-		ttl:      opts.SessionTTL,
+		dataDir:    opts.DataDir,
+		sessions:   make(map[string]Session),
+		ttl:        opts.SessionTTL,
+		tokenCheck: opts.TokenCheck,
 	}
 
 	// sessions/ 目录
@@ -748,8 +752,12 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// API: 必须 session
+		// API: 必须 session 或有效面板 Token
 		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if m.tokenCheck != nil && m.tokenCheck(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			c, err := r.Cookie(CookieName)
 			if err != nil {
 				writeAuthErr(w, 401, "未登录")

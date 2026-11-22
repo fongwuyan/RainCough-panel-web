@@ -3,6 +3,15 @@ import { ref, onMounted } from 'vue'
 import { useSettings, fmtUptime } from './useSettings'
 import { useUi } from '../../stores/ui'
 import { api } from '../../api'
+import HealthPanel from '../health/Health.vue'
+import AuditPanel from '../audit/Audit.vue'
+import PluginConfigPanel from './PluginConfig.vue'
+import SecretsPanel from './Secrets.vue'
+import BackupPanel from './Backup.vue'
+import SchedulesPanel from './Schedules.vue'
+import PluginRollbackPanel from './PluginRollback.vue'
+import DepsPanel from './Deps.vue'
+import TokensPanel from './Tokens.vue'
 
 const st = useSettings()
 const ui = useUi()
@@ -221,6 +230,15 @@ const NAV = [
   { key: 'login', label: '登录', desc: '密码与登录方式' },
   { key: 'panel', label: '面板信息', desc: '版本与运行状态' },
   { key: 'maint', label: '维护', desc: '数据清理' },
+  { key: 'health', label: '健康', desc: '服务与接口状态' },
+  { key: 'audit', label: '审计', desc: '接口调用记录' },
+  { key: 'plugin-config', label: '插件配置', desc: 'config.json' },
+  { key: 'secrets', label: '密钥', desc: '密钥索引' },
+  { key: 'backup', label: '备份', desc: '备份与恢复' },
+  { key: 'schedules', label: '定时', desc: '定时备份/清理' },
+  { key: 'rollback', label: '回滚', desc: '插件历史版本' },
+  { key: 'deps', label: '依赖', desc: '插件依赖检查' },
+  { key: 'tokens', label: 'Token', desc: 'API 访问令牌' },
 ]
 </script>
 
@@ -559,7 +577,7 @@ const NAV = [
         </div>
 
         <!-- 维护 -->
-        <div v-else class="st-group">
+        <div v-else-if="active === 'maint'" class="st-group">
           <div class="st-group-title">任务记录</div>
           <p class="st-hint">插件安装、文件批量操作会在任务队列里留下记录。清理只删除记录，不影响任何文件。</p>
           <div class="st-actions">
@@ -573,6 +591,16 @@ const NAV = [
             备份时整目录拷走即可。
           </p>
         </div>
+
+        <div v-else-if="active === 'health'" class="st-embed"><HealthPanel /></div>
+        <div v-else-if="active === 'audit'" class="st-embed"><AuditPanel /></div>
+        <div v-else-if="active === 'plugin-config'" class="st-embed"><PluginConfigPanel /></div>
+        <div v-else-if="active === 'secrets'" class="st-embed"><SecretsPanel /></div>
+        <div v-else-if="active === 'backup'" class="st-embed"><BackupPanel /></div>
+        <div v-else-if="active === 'schedules'" class="st-embed"><SchedulesPanel /></div>
+        <div v-else-if="active === 'rollback'" class="st-embed"><PluginRollbackPanel /></div>
+        <div v-else-if="active === 'deps'" class="st-embed"><DepsPanel /></div>
+        <div v-else-if="active === 'tokens'" class="st-embed"><TokensPanel /></div>
       </section>
     </div>
   </div>
@@ -581,6 +609,8 @@ const NAV = [
 <style scoped>
 .st-page { height: calc(100vh - 66px); padding: 0; }
 .st-layout { display: grid; grid-template-columns: 200px 1fr; gap: 0 24px; height: 100%; min-height: 0; }
+.st-embed { min-width: 0; overflow: auto; }
+.st-embed :deep(.page) { padding: 0 !important; height: auto !important; }
 
 .st-nav { border-right: 1px solid var(--border); padding-right: 14px; overflow: auto; }
 .st-nav-item {

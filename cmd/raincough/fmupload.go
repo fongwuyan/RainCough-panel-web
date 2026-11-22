@@ -19,9 +19,9 @@ import (
 // 响应: {ok:true, ...}(前端判 xhr.status 2xx && data.ok)
 
 const (
-	fmChunkMemLimit = 4 << 20 // 单块内存缓冲 4MB(块 8MB, 其余落盘)
-	fmChunkMaxTotal = 100000  // 单文件最大块数
-	fmUploadStale    = 24 * time.Hour // 未完成上传的临时目录保留时长
+	fmChunkMemLimit = 4 << 20        // 单块内存缓冲 4MB(块 8MB, 其余落盘)
+	fmChunkMaxTotal = 100000         // 单文件最大块数
+	fmUploadStale   = 24 * time.Hour // 未完成上传的临时目录保留时长
 )
 
 var fmUploadIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -59,6 +59,29 @@ func fmUniquePath(dir, name string) string {
 		}
 	}
 	return filepath.Join(dir, fmt.Sprintf("%s-%d%s", base, time.Now().Unix(), ext))
+}
+
+// handleFmUploadStatus GET /api/fm/upload/status?file_id=&total_chunks=
+// 返回已落盘分块索引，供前端断点续传跳过已上传块。
+func (s *server) handleFmUploadStatus(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.URL.Query().Get("file_id"))
+	if !fmUploadIDRe.MatchString(id) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "file_id 非法"})
+		return
+	}
+	total := fmAtoi(r.URL.Query().Get("total_chunks"))
+	if total < 1 || total > fmChunkMaxTotal {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "total_chunks 非法"})
+		return
+	}
+	work := filepath.Join(fmUploadWorkRoot(), id)
+	received := make([]int, 0, total)
+	for i := 0; i < total; i++ {
+		if _, err := os.Stat(filepath.Join(work, fmt.Sprintf("%06d.part", i))); err == nil {
+			received = append(received, i)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"file_id": id, "total": total, "received": received})
 }
 
 // handleFmUploadChunk POST /api/fm/upload/chunk — 接收单块 / 最后一块拼装落盘。
@@ -184,7 +207,7 @@ func (s *server) handleFmUploadChunk(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(tmp)
 		// 保留临时目录以便重传续用; 前端会重试该文件
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"error": fmt.Sprintf("分块缺失或写入中断(已收 %d/%d 块), 请重试", idx+1, total),
+			"error":    fmt.Sprintf("分块缺失或写入中断(已收 %d/%d 块), 请重试", idx+1, total),
 			"received": idx + 1, "total": total,
 		})
 		return

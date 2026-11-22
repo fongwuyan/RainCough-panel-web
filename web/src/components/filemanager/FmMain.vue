@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { api } from '../../api'
 import FmPreview from './FmPreview.vue'
 import {
@@ -9,11 +9,12 @@ import {
 const fm = useFileManager()
 const {
   cwd, sorted, loading, error, selection, selectedItems, selectedBytes,
-  sortKey, sortDir, view, search, ops, uploads, toast, favorites,
+  sortKey, sortDir, view, search, ops, uploads, toast, favorites, recent,
 } = fm
 
 const previewItem = ref(null)
 const query = ref('')
+const uploadConflict = ref('rename')
 const dragOver = ref(false)
 const fileInput = ref(null)
 const picker = reactive({ open: false, path: '/', dirs: [], busy: false, for: 'copy' })
@@ -22,6 +23,9 @@ const picker = reactive({ open: false, path: '/', dirs: [], busy: false, for: 'c
 const dlg = reactive({ open: false, type: '', title: '', value: '', item: null, err: '', busy: false, extra: '' })
 
 const ctx = reactive({ open: false, x: 0, y: 0, item: null })
+const trashOpen = ref(false)
+const trashItems = ref([])
+const trashBusy = ref(false)
 
 const QUICK = ['/', '/home', '/tmp', '/var/log', '/opt', '/etc']
 const disks = ref([])
@@ -75,6 +79,12 @@ const crumbs = computed(() => {
 })
 
 const displayList = computed(() => (search.on ? search.results : sorted.value))
+// 大目录分页渲染：先渲染 400 项，滚动/按钮再追加，避免一次创建数万 DOM。
+const renderLimit = ref(400)
+const visibleList = computed(() => displayList.value.slice(0, renderLimit.value))
+const hasMore = computed(() => displayList.value.length > renderLimit.value)
+function loadMore() { renderLimit.value += 400 }
+watch([cwd, () => search.q], () => { renderLimit.value = 400 })
 
 onMounted(async () => {
   await fm.load('/')
@@ -156,6 +166,72 @@ function askRename(it) {
   Object.assign(dlg, { open: true, type: 'rename', title: '重命名', value: it.name, item: it, err: '' })
 }
 
+async function loadTrash() {
+  trashBusy.value = true
+  try {
+    const d = await api.fmTrashList()
+    trashItems.value = (d && d.items) || []
+  } catch (e) {
+    fm.flash(e.message || String(e))
+  } finally {
+    trashBusy.value = false
+  }
+}
+
+function openTrash() {
+  trashOpen.value = true
+  loadTrash()
+}
+
+async function restoreTrash(it) {
+  try {
+    await api.fmTrashRestore(it.id)
+    fm.flash('已恢复: ' + it.name)
+    await loadTrash()
+    await fm.load()
+  } catch (e) {
+    fm.flash(e.message || String(e))
+  }
+}
+
+async function purgeTrash(it) {
+  if (!confirm('永久删除「' + it.name + '」？')) return
+  try {
+    await api.fmTrashPurge(it.id)
+    await loadTrash()
+  } catch (e) {
+    fm.flash(e.message || String(e))
+  }
+}
+
+async function purgeAllTrash() {
+  if (!trashItems.value.length || !confirm('清空回收站？此操作不可撤销。')) return
+  try {
+    await api.fmTrashPurgeAll()
+    await loadTrash()
+    fm.flash('回收站已清空')
+  } catch (e) {
+    fm.flash(e.message || String(e))
+  }
+}
+
+async function askBatchRename() {
+  if (!selectedItems.value.length) return
+  const find = prompt('批量重命名：查找内容（留空不替换）', '')
+  if (find === null) return
+  const replace = prompt('替换为', '')
+  if (replace === null) return
+  const prefix = prompt('文件名前缀（可留空）', '')
+  if (prefix === null) return
+  const suffix = prompt('文件名后缀（可留空）', '')
+  if (suffix === null) return
+  try {
+    await fm.batchRename(selectedItems.value.map((i) => i.path), { find, replace, prefix, suffix })
+  } catch (e) {
+    fm.flash(e.message || String(e))
+  }
+}
+
 function askDelete() {
   if (!selectedItems.value.length) return
   Object.assign(dlg, { open: true, type: 'delete', title: '确认删除', value: '', item: null, err: '' })
@@ -231,7 +307,7 @@ async function confirmDlg() {
     } else if (dlg.type === 'rename') {
       await fm.rename(dlg.item, dlg.value.trim())
     } else if (dlg.type === 'delete') {
-      await fm.remove(selectedItems.value.map((i) => i.path))
+      await fm.trash(selectedItems.value.map((i) => i.path))
     } else if (dlg.type === 'archive') {
       await fm.archive(selectedItems.value.map((i) => i.path), cwd.value, dlg.value.trim(), dlg.extra || 'zip')
     } else if (dlg.type === 'unzip') {
@@ -253,14 +329,14 @@ function pickFiles() {
 }
 
 function onFiles(e) {
-  fm.upload(e.target.files)
+  fm.upload(e.target.files, uploadConflict.value)
   e.target.value = ''
 }
 
 function onDrop(e) {
   dragOver.value = false
   if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
-    fm.upload(e.dataTransfer.files)
+    fm.upload(e.dataTransfer.files, uploadConflict.value)
   }
 }
 
@@ -340,10 +416,16 @@ function sortCls(k) {
 
       <div class="fm-tools">
         <button class="btn btn-sm" title="收藏当前目录" @click="fm.addFav()">☆</button>
+        <select v-model="uploadConflict" class="input" title="同名文件处理" style="width:auto;height:26px;font-size:11px;">
+          <option value="rename">冲突重命名</option>
+          <option value="overwrite">冲突覆盖</option>
+          <option value="skip">冲突跳过</option>
+        </select>
         <button class="btn btn-sm" :class="{ 'btn-primary': view === 'grid' }" @click="view = view === 'list' ? 'grid' : 'list'">
           {{ view === 'list' ? '▤' : '▦' }}
         </button>
         <button class="btn btn-sm" @click="askMkdir">新建</button>
+        <button class="btn btn-sm" @click="openTrash">回收站</button>
         <button class="btn btn-sm btn-primary" @click="pickFiles">上传</button>
         <input ref="fileInput" type="file" multiple hidden @change="onFiles" />
       </div>
@@ -358,6 +440,15 @@ function sortCls(k) {
           <div v-for="f in favorites" :key="f" class="fm-side-item" :class="{ active: cwd === f }" @click="go(f)">
             <span class="fm-side-name" :title="f">{{ f }}</span>
             <button class="fm-side-x" @click.stop="fm.removeFav(f)">×</button>
+          </div>
+        </div>
+
+        <div class="fm-side-group">
+          <div class="fm-side-title">最近</div>
+          <div v-if="!recent.length" class="fm-side-empty">打开目录后自动记录</div>
+          <div v-for="f in recent" :key="f" class="fm-side-item" :class="{ active: cwd === f }" @click="go(f)">
+            <span class="fm-side-name" :title="f">{{ f }}</span>
+            <button class="fm-side-x" @click.stop="fm.removeRecent(f)">×</button>
           </div>
         </div>
 
@@ -414,7 +505,7 @@ function sortCls(k) {
           </thead>
           <tbody>
             <tr
-              v-for="it in sorted"
+              v-for="it in visibleList"
               :key="it.path"
               :class="{ sel: selection.has(it.path) }"
               @click="onRowClick(it, $event)"
@@ -438,7 +529,7 @@ function sortCls(k) {
 
         <div v-else class="fm-grid">
           <div
-            v-for="it in sorted"
+            v-for="it in visibleList"
             :key="it.path"
             class="fm-card"
             :class="{ sel: selection.has(it.path) }"
@@ -452,6 +543,9 @@ function sortCls(k) {
           </div>
         </div>
 
+        <div v-if="hasMore" class="fm-load-more">
+          <button class="btn btn-sm" @click="loadMore">加载更多（{{ visibleList.length }} / {{ displayList.length }}）</button>
+        </div>
         <div v-if="dragOver" class="fm-drop-hint">松手上传到 {{ cwd }}</div>
       </section>
     </div>
@@ -464,6 +558,7 @@ function sortCls(k) {
       <div v-if="selection.size" class="fm-batch">
         <button class="btn btn-sm" @click="askMoveCopy('copy')">复制</button>
         <button class="btn btn-sm" @click="askMoveCopy('move')">移动</button>
+        <button class="btn btn-sm" @click="askBatchRename">批量重命名</button>
         <button class="btn btn-sm" @click="askArchive">压缩</button>
         <button class="btn btn-sm" @click="selection.size === 1 && fm.download(selectedItems[0].path)">下载</button>
         <button class="btn btn-sm btn-danger" @click="askDelete">删除</button>
@@ -474,11 +569,11 @@ function sortCls(k) {
 
     <!-- 上传进度 -->
     <div v-if="uploads.length" class="fm-upcard">
-      <div class="fm-upcard-head">上传中 ({{ uploads.length }})</div>
+      <div class="fm-upcard-head">上传队列 ({{ uploads.length }})<button class="btn btn-sm btn-ghost" style="margin-left:auto;" @click="fm.clearUploads()">清空</button></div>
       <div v-for="(u, i) in uploads" :key="i" class="fm-upitem">
         <span class="fm-upname">{{ u.name }}</span>
         <div class="progress fm-upprogress"><div :style="{ width: u.pct + '%' }"></div></div>
-        <span class="mono fm-uppct">{{ u.state === 'error' ? '失败' : u.pct + '%' }}</span>
+        <span class="mono fm-uppct">{{ u.state === 'error' ? '失败' : u.state === 'done' ? '完成' : u.state === 'interrupted' ? '待续传' : u.pct + '%' }}</span>
       </div>
     </div>
 
@@ -491,6 +586,35 @@ function sortCls(k) {
         <span class="mono fm-uppct">{{ t.status }}</span>
         <button v-if="t.status === 'running'" class="btn btn-sm btn-ghost" @click="fm.cancelOp(t.id)">取消</button>
         <button v-else class="btn btn-sm btn-ghost" @click="fm.removeOp(t.id)">×</button>
+      </div>
+    </div>
+
+    <!-- 回收站 -->
+    <div v-if="trashOpen" class="overlay" @click.self="trashOpen = false">
+      <div class="modal fm-modal" style="width:min(760px,94vw);">
+        <div class="modal-header">
+          <span>回收站</span>
+          <button class="btn btn-sm btn-ghost" @click="trashOpen = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="trashBusy" class="hint">加载中…</div>
+          <div v-else-if="!trashItems.length" class="hint">回收站为空</div>
+          <div v-else class="fm-trash-list">
+            <div v-for="it in trashItems" :key="it.id" class="fm-trash-item">
+              <div style="min-width:0;flex:1;">
+                <div class="fm-trash-name">{{ it.name }}</div>
+                <div class="faint mono" style="font-size:11px;overflow:hidden;text-overflow:ellipsis;">{{ it.original }}</div>
+                <div class="faint" style="font-size:11px;">{{ fmtSize(it.size) }} · {{ fmtTime(it.deleted_at) }}</div>
+              </div>
+              <button class="btn btn-sm" @click="restoreTrash(it)">恢复</button>
+              <button class="btn btn-sm btn-danger" @click="purgeTrash(it)">永久删除</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" @click="trashOpen = false">关闭</button>
+          <button class="btn btn-danger" :disabled="!trashItems.length" @click="purgeAllTrash">清空回收站</button>
+        </div>
       </div>
     </div>
 
@@ -527,7 +651,7 @@ function sortCls(k) {
           <div v-if="dlg.err" class="error">{{ dlg.err }}</div>
 
           <template v-if="dlg.type === 'delete'">
-            <p>将删除 {{ selectedItems.length }} 项，此操作不可撤销。</p>
+            <p>将把 {{ selectedItems.length }} 项移入回收站，可在回收站恢复。</p>
             <div class="fm-del-list mono">
               <div v-for="i in selectedItems.slice(0, 8)" :key="i.path">{{ i.path }}</div>
               <div v-if="selectedItems.length > 8" class="faint">…还有 {{ selectedItems.length - 8 }} 项</div>
@@ -681,6 +805,8 @@ function sortCls(k) {
 .fm-link { color: var(--accent); margin-left: 4px; font-size: 10px; }
 
 .fm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; padding: 12px; }
+.fm-load-more { display: flex; justify-content: center; padding: 10px; }
+.fm-table tbody tr, .fm-card { content-visibility: auto; contain-intrinsic-size: 34px; }
 .fm-card {
   border: 1px solid var(--border); background: var(--bg-raised);
   padding: 10px 8px; text-align: center; cursor: default;
@@ -731,6 +857,9 @@ function sortCls(k) {
 
 .fm-modal { width: 420px; max-width: 92vw; }
 .fm-del-list { max-height: 160px; overflow: auto; font-size: 11px; color: var(--text-muted); }
+.fm-trash-list { display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow: auto; }
+.fm-trash-item { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.fm-trash-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fm-hash { font-size: 12px; word-break: break-all; color: var(--text); }
 .fm-picker { width: 520px; }
 .fm-picker-bar { display: flex; gap: 6px; margin-bottom: 8px; }

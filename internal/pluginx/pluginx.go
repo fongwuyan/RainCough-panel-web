@@ -110,6 +110,8 @@ type Iface struct {
 	Input       map[string]interface{}                        `json:"input,omitempty"`
 	Output      map[string]interface{}                        `json:"output,omitempty"`
 	Online      bool                                          `json:"online"`
+	Disabled    bool                                          `json:"disabled"`
+	TimeoutMs   int64                                         `json:"timeout_ms"`
 	Calls       int64                                         `json:"calls"`
 	AvgMs       int64                                         `json:"avg_ms"`
 	P95Ms       int64                                         `json:"p95_ms"`
@@ -128,6 +130,16 @@ type Options struct {
 	UseTCP     bool // Windows 开发降级: loopback TCP(默认按 GOOS 判定)
 }
 
+// AuditEvent 接口调用审计(内存最近 500 条)。
+type AuditEvent struct {
+	Time      int64  `json:"time"`
+	Caller    string `json:"caller"`
+	Interface string `json:"interface"`
+	Plugin    string `json:"plugin"`
+	Ms        int64  `json:"ms"`
+	Error     string `json:"error,omitempty"`
+}
+
 // PluginX 接口库运行时。
 type PluginX struct {
 	opts Options
@@ -143,6 +155,7 @@ type PluginX struct {
 	restRoutes map[string][]RESTRoute
 	// restPublic 该插件的 REST 路由是否允许免登录(plugin.json backend.rest_public)
 	restPublic map[string]bool
+	audit      []AuditEvent
 	stopCh     chan struct{}
 	seq        int64
 }

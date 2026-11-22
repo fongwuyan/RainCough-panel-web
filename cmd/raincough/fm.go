@@ -154,6 +154,9 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true, "path": targetAbs})
 
+	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/batch-rename":
+		s.handleFmBatchRename(w, r)
+
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/rename":
 		var b struct {
 			Old     string `json:"old"`
@@ -189,6 +192,12 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
 
+	case r.URL.Path == "/api/fm/trash":
+		s.handleFmTrash(w, r)
+
+	case strings.HasPrefix(r.URL.Path, "/api/fm/trash/"):
+		s.handleFmTrashAction(w, r)
+
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/delete":
 		var b struct {
 			Path  string   `json:"path"`
@@ -220,6 +229,9 @@ func (s *server) handleFm(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": true})
+
+	case r.Method == http.MethodGet && r.URL.Path == "/api/fm/upload/status":
+		s.handleFmUploadStatus(w, r)
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/fm/upload/chunk":
 		// 修复: 前端唯一上传路径(分块+进度条), 此前 404 → 文件管理完全无法上传

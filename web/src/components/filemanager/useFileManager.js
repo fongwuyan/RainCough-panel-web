@@ -19,11 +19,12 @@ export function useFileManager() {
   const search = reactive({ on: false, q: '', results: [], hasMore: false, offset: 0, busy: false })
 
   const ops = ref([]) // 后台任务(复制/移动/删除/压缩)
-  const uploads = ref([])
+  const uploads = ref(loadUploads())
   const toast = ref('')
   let toastTimer = null
 
   const favorites = ref(loadFavs())
+  const recent = ref(loadRecent())
 
   const sorted = computed(() => {
     const arr = [...items.value]
@@ -46,6 +47,25 @@ export function useFileManager() {
   const selectedBytes = computed(() => selectedItems.value.reduce((n, i) => n + (i.is_dir ? 0 : i.size || 0), 0))
   const activeOps = computed(() => ops.value.filter((t) => t.status === 'running' || t.status === 'queued'))
 
+  function loadUploads() {
+    try {
+      const rows = JSON.parse(localStorage.getItem('rc-fm-uploads') || '[]')
+      return (Array.isArray(rows) ? rows : []).map((u) => ({
+        ...u,
+        state: u.state === 'up' || u.state === 'wait' ? 'interrupted' : u.state,
+      })).slice(0, 30)
+    } catch (e) { return [] }
+  }
+
+  function saveUploads() {
+    try { localStorage.setItem('rc-fm-uploads', JSON.stringify(uploads.value.slice(0, 30))) } catch (e) {}
+  }
+
+  function clearUploads() {
+    uploads.value = []
+    saveUploads()
+  }
+
   function flash(msg) {
     toast.value = msg
     clearTimeout(toastTimer)
@@ -63,6 +83,7 @@ export function useFileManager() {
       items.value = d.items || []
       selection.value = new Set()
       if (!search.on) pushHistory(cwd.value)
+      pushRecent(cwd.value)
     } catch (e) {
       error.value = e.message || String(e)
       items.value = []
@@ -160,6 +181,21 @@ export function useFileManager() {
     await load()
   }
 
+  async function batchRename(paths, opts) {
+    const r = await api.fmBatchRename(paths, opts)
+    flash('已批量重命名 ' + ((r && r.count) || 0) + ' 项')
+    await load()
+    return r
+  }
+
+  async function trash(paths) {
+    const r = await api.fmTrash(paths)
+    flash('已移入回收站 ' + ((r && r.count) || 0) + ' 项')
+    selection.value = new Set()
+    await load()
+    return r
+  }
+
   async function remove(paths) {
     const id = await api.fmOpsStart('delete', paths)
     watchOps(id)
@@ -201,24 +237,28 @@ export function useFileManager() {
 
   // ---- 上传 ----
 
-  async function upload(fileList) {
+  async function upload(fileList, conflict = 'rename') {
     const files = Array.from(fileList || [])
     if (!files.length) return
-    uploads.value = files.map((f) => ({ name: f.name, size: f.size, pct: 0, state: 'wait' }))
+    uploads.value = files.map((f) => ({ name: f.name, size: f.size, pct: 0, state: 'wait', dir: cwd.value, conflict, at: Date.now() }))
+    saveUploads()
+    let lastSave = 0
     try {
-      const res = await api.fmUpload(cwd.value, files, 'rename', (ev) => {
+      const res = await api.fmUpload(cwd.value, files, conflict, (ev) => {
         const it = uploads.value[ev.file - 1]
         if (!it) return
         it.pct = Math.round((ev.loadedBytes / Math.max(1, ev.totalBytes)) * 100)
         it.state = ev.done ? (ev.error ? 'error' : 'done') : 'up'
+        if (Date.now() - lastSave > 600) { lastSave = Date.now(); saveUploads() }
       })
       if (res.errors && res.errors.length) flash('部分失败: ' + res.errors[0])
       else flash('上传完成 ' + res.saved.length + ' 个')
-      setTimeout(() => (uploads.value = []), 1200)
+      saveUploads()
       await load()
     } catch (e) {
       flash('上传失败: ' + (e.message || e))
-      uploads.value = []
+      uploads.value.forEach((u) => { if (u.state === 'up' || u.state === 'wait') u.state = 'error' })
+      saveUploads()
     }
   }
 
@@ -318,6 +358,26 @@ export function useFileManager() {
     }
   }
 
+  function loadRecent() {
+    try {
+      return JSON.parse(localStorage.getItem('rc-fm-recent') || '[]')
+    } catch (e) {
+      return []
+    }
+  }
+
+  function pushRecent(p) {
+    if (!p) return
+    const next = [p, ...recent.value.filter((x) => x !== p)].slice(0, 12)
+    recent.value = next
+    try { localStorage.setItem('rc-fm-recent', JSON.stringify(next)) } catch (e) {}
+  }
+
+  function removeRecent(p) {
+    recent.value = recent.value.filter((x) => x !== p)
+    try { localStorage.setItem('rc-fm-recent', JSON.stringify(recent.value)) } catch (e) {}
+  }
+
   function addFav() {
     if (favorites.value.includes(cwd.value)) return
     favorites.value.push(cwd.value)
@@ -332,9 +392,10 @@ export function useFileManager() {
 
   return {
     cwd, items, sorted, loading, error, selection, selectedItems, selectedBytes,
-    sortKey, sortDir, view, search, ops, activeOps, uploads, toast, favorites,
+    sortKey, sortDir, view, search, ops, activeOps, uploads, toast, favorites, recent,
+    removeRecent,
     load, go, up, back, forward, open, toggleSel, selectAll, clearSel, setSort,
-    mkdir, rename, remove, moveCopy, archive, hash, unzip, download, dirSizes, upload,
+    mkdir, rename, batchRename, trash, remove, moveCopy, archive, hash, unzip, download, dirSizes, upload, clearUploads,
     pollOps, watchOps, cancelOp, removeOp, doSearch, searchMore, exitSearch,
     addFav, removeFav, flash,
   }

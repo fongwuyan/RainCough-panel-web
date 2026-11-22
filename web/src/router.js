@@ -7,6 +7,17 @@ import PluginHub from './components/plugins/PluginHub.vue'
 import FmMain from './components/filemanager/FmMain.vue'
 import Tasks from './components/tasks/Tasks.vue'
 import Nodes from './components/nodes/Nodes.vue'
+import Interfaces from './components/interfaces/Interfaces.vue'
+import Health from './components/health/Health.vue'
+import Audit from './components/audit/Audit.vue'
+import PluginConfig from './components/settings/PluginConfig.vue'
+import Secrets from './components/settings/Secrets.vue'
+import Backup from './components/settings/Backup.vue'
+import Schedules from './components/settings/Schedules.vue'
+import PluginRollback from './components/settings/PluginRollback.vue'
+import Deps from './components/settings/Deps.vue'
+import Tokens from './components/settings/Tokens.vue'
+import Assets from './components/assets/Assets.vue'
 import Login from './views/Login.vue'
 
 // 内置功能共 6 项: 工作台 / 文件管理 / 终端 / 任务列表 / 插件 / 设置
@@ -22,6 +33,17 @@ const router = createRouter({
     { path: '/terminal', name: 'terminal', component: Terminal },
     { path: '/tasks', name: 'tasks', component: Tasks },
     { path: '/nodes', name: 'nodes', component: Nodes },
+    { path: '/interfaces', name: 'interfaces', component: Interfaces },
+    { path: '/health', name: 'health', component: Health },
+    { path: '/audit', name: 'audit', component: Audit },
+    { path: '/plugin-config', name: 'plugin-config', component: PluginConfig },
+    { path: '/secrets', name: 'secrets', component: Secrets },
+    { path: '/backup', name: 'backup', component: Backup },
+    { path: '/schedules', name: 'schedules', component: Schedules },
+    { path: '/plugin-rollback', name: 'plugin-rollback', component: PluginRollback },
+    { path: '/plugin-deps', name: 'plugin-deps', component: Deps },
+    { path: '/tokens', name: 'tokens', component: Tokens },
+    { path: '/assets', name: 'assets', component: Assets },
     { path: '/plugins', name: 'plugins', component: PluginHub },
     { path: '/settings', name: 'settings', component: Settings },
     // 插件运行位(前端产物由 /api/plugins/<name>/assets/plugin.js 提供)

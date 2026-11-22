@@ -139,6 +139,12 @@ onErrorCaptured((e) => { console.warn('[plugin:' + name.value + '] 渲染异常:
 
 <template>
   <div>
+    <div v-if="mode === 'plugin'" class="plugin-view-bar">
+      <span class="plugin-view-tab active">插件页面</span>
+      <router-link class="plugin-view-tab" :to="'/interfaces?plugin=' + encodeURIComponent(name)">接口</router-link>
+      <span class="grow"></span>
+      <span class="faint">{{ name }}</span>
+    </div>
     <div v-if="mode === 'plugin'" ref="mountEl" class="plugin-mount"></div>
     <div v-else-if="mode === 'loading'" class="hint" style="padding:20px;">加载插件前端...</div>
     <component v-else :is="comp" :key="name" />
@@ -146,5 +152,15 @@ onErrorCaptured((e) => { console.warn('[plugin:' + name.value + '] 渲染异常:
 </template>
 
 <style scoped>
+.plugin-view-bar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-bottom: 1px solid var(--border);
+  background: var(--bg-card); font-size: 12px;
+}
+.plugin-view-tab {
+  padding: 3px 10px; border-radius: 5px; color: var(--text-muted);
+  text-decoration: none;
+}
+.plugin-view-tab.active { background: var(--accent-soft); color: var(--accent); }
 .plugin-mount { min-height: 200px; }
 </style>

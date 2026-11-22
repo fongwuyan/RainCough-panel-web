@@ -63,6 +63,16 @@ async function reqAuthNoThrow(url, opts = {}) {
 }
 
 // 与后端路由一一对应。删掉的接口不再保留空壳(历史上"点了没反应"多源于此)。
+function uploadFileId(path, file, idx) {
+  const s = String(path || '/') + '|' + file.name + '|' + file.size + '|' + (file.lastModified || 0) + '|' + idx
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return ('u' + (h >>> 0).toString(36)).slice(0, 64)
+}
+
 export const api = {
 
   // ---- 鉴权 ----
@@ -92,8 +102,23 @@ export const api = {
 
   // ---- 接口库 / 服务健康 ----
   servicesHealth: () => req('GET', '/api/services/health'),
+  audit: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const k of ['plugin', 'iface', 'caller', 'errors', 'limit']) if (params[k] !== undefined && params[k] !== '') qs.append(k, params[k])
+    return req('GET', '/api/audit?' + qs.toString())
+  },
   // 接口调用统计(工作台「接口库」卡片用, 5s 轮询)
   ifacesSummary: () => req('GET', '/api/interfaces/stats/summary'),
+  interfaces: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const k of ['source', 'plugin', 'visibility', 'status', 'q', 'page', 'page_size']) {
+      if (params[k] !== undefined && params[k] !== null && params[k] !== '') qs.append(k, params[k])
+    }
+    return req('GET', '/api/interfaces?' + qs.toString())
+  },
+  interfaceDetail: (id) => req('GET', '/api/interfaces/' + encodeURIComponent(id)),
+  interfaceInvoke: (id, params, timeoutMs) => req('POST', '/api/interfaces/' + encodeURIComponent(id) + '/invoke', { params, timeout_ms: timeoutMs || 15000 }),
+  interfacePolicy: (id, policy) => req('POST', '/api/interfaces/' + encodeURIComponent(id) + '/policy', policy),
   serviceList: () => req('GET', '/api/services/list'),
   // ★ 旧签名是 (unit, action) 并下发 {unit, action} —— 那是 v3 的 systemd 单元模型
   //   (unit=plugin-XXX.service)。v4 由 supervisor 管进程, 后端只认 {name, action},
@@ -112,7 +137,6 @@ export const api = {
   fmList: (path) => req('GET', `/api/fm/list?path=${encodeURIComponent(path || '/')}`),
   fmUpload: (path, files, conflict = 'rename', onProgress) => {
     const CHUNK = 8 * 1024 * 1024
-    const fileBase = Math.random().toString(36).slice(2) + Date.now().toString(36)
     return (async () => {
       const saved = []
       const errors = []
@@ -120,14 +144,28 @@ export const api = {
       for (let fi = 0; fi < list.length; fi++) {
         const file = list[fi]
         const total = Math.max(1, Math.ceil(file.size / CHUNK))
+        const fileId = uploadFileId(path, file, fi)
+        let received = new Set()
+        try {
+          const r = await fetch('/api/fm/upload/status?file_id=' + encodeURIComponent(fileId) + '&total_chunks=' + total)
+          if (r.ok) {
+            const st = await r.json()
+            received = new Set((st && st.received) || [])
+          }
+        } catch (e) { /* 状态不可用时从头上传 */ }
         try {
           for (let i = 0; i < total; i++) {
+            // 最后一块即使已收到也重发一次：后端靠最后一块触发拼装
+            if (received.has(i) && i < total - 1) {
+              if (onProgress) onProgress({ file: fi + 1, of: list.length, name: file.name, done: false, totalBytes: file.size, loadedBytes: (i + 1) * CHUNK })
+              continue
+            }
             const chunk = file.slice(i * CHUNK, Math.min((i + 1) * CHUNK, file.size))
             await new Promise((resolve, reject) => {
               const fd = new FormData()
               fd.append('path', path || '/')
               fd.append('filename', file.name)
-              fd.append('file_id', fileBase + '_' + fi)
+              fd.append('file_id', fileId)
               fd.append('chunk_index', String(i))
               fd.append('total_chunks', String(total))
               fd.append('conflict', conflict)
@@ -162,12 +200,19 @@ export const api = {
       return { saved, errors }
     })()
   },
+  fmUploadStatus: (fileId, total) => req('GET', '/api/fm/upload/status?file_id=' + encodeURIComponent(fileId) + '&total_chunks=' + (total || 1)),
   fmDownload: (path, mode) => {
     const m = mode || 'direct'
     return `/api/fm/download?path=${encodeURIComponent(path)}&mode=${m}`
   },
   fmMkdir: (path) => req('POST', '/api/fm/mkdir', { path }),
   fmRename: (path, newName) => req('POST', '/api/fm/rename', { path, new_name: newName }),
+  fmBatchRename: (paths, opts = {}) => req('POST', '/api/fm/batch-rename', { paths, ...opts }),
+  fmTrash: (paths) => req('POST', '/api/fm/trash', { paths }),
+  fmTrashList: () => req('GET', '/api/fm/trash'),
+  fmTrashRestore: (id) => req('POST', '/api/fm/trash/restore/' + encodeURIComponent(id), {}),
+  fmTrashPurge: (id) => req('POST', '/api/fm/trash/purge/' + encodeURIComponent(id), {}),
+  fmTrashPurgeAll: () => req('POST', '/api/fm/trash/purge', { all: true }),
   fmHash: (path, algo) => req('GET', `/api/fm/hash?path=${encodeURIComponent(path)}&algo=${algo}`),
   fmUnzip: (archive, dest, password) => req('POST', '/api/fm/unzip', { archive, dest, password }),
   fmSave: (path, content, encoding) => req('POST', '/api/fm/save', { path, content, encoding: encoding || 'utf-8' }),
@@ -247,11 +292,40 @@ export const api = {
   pluginsRuntime: () => req('GET', '/api/plugins/runtime'),
   // 插件环境检查(只读): 读 plugin.json 的 environment 块并逐项探测。
   // 可反复调用, 有耗时(会执行检查命令), 别放进列表接口或定时轮询里。
-  pluginEnv: (name) => req('GET', `/api/plugins/${encodeURIComponent(name)}/environment`),
-  // steps 只传步骤 id, 不传命令 —— 命令由后端从插件清单里取,
+  pluginEnv: (name) => req('GET', `/api/plugins/${encodeURIComponent(name)}/environment`),  // steps 只传步骤 id, 不传命令 —— 命令由后端从插件清单里取,
   // 前端永远碰不到"让面板执行任意 shell"这条路。
   pluginEnvApply: (name, steps) => req('POST', `/api/plugins/${encodeURIComponent(name)}/environment/apply`,
                                        { steps: steps || [], confirm: true }),
+  pluginConfigList: () => req('GET', '/api/plugin-config/list'),
+  pluginConfigGet: (plugin) => req('GET', '/api/plugin-config?plugin=' + encodeURIComponent(plugin)),
+  pluginConfigSave: (plugin, config) => req('POST', '/api/plugin-config', { plugin, config }),
+  pluginBackups: (name) => req('GET', `/api/plugins/${encodeURIComponent(name)}/backups`),
+  pluginDeps: () => req('GET', '/api/plugin-deps'),
+  assets: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const k of ['plugin', 'kind', 'q', 'offset', 'limit']) if (params[k] !== undefined && params[k] !== '') qs.append(k, params[k])
+    return req('GET', '/api/assets?' + qs.toString())
+  },
+  assetDelete: (plugin, path) => req('POST', '/api/assets/delete', { plugin, path }),
+  assetRename: (plugin, path, newName) => req('POST', '/api/assets/rename', { plugin, path, new_name: newName }),
+  assetArchive: (plugin, path) => req('GET', '/api/assets/archive?plugin=' + encodeURIComponent(plugin) + '&path=' + encodeURIComponent(path)),
+  assetArchiveEntryUrl: (plugin, path, entry) => '/api/assets/archive/entry?plugin=' + encodeURIComponent(plugin) + '&path=' + encodeURIComponent(path) + '&entry=' + encodeURIComponent(entry),
+  assetDocUrl: (plugin, path) => '/api/assets/doc?plugin=' + encodeURIComponent(plugin) + '&path=' + encodeURIComponent(path),
+  tokens: () => req('GET', '/api/tokens'),
+  tokenCreate: (name, scope) => req('POST', '/api/tokens', { name, scope }),
+  tokenDelete: (id) => req('DELETE', '/api/tokens', { id }),
+  pluginRollback: (name, backup) => req('POST', `/api/plugins/${encodeURIComponent(name)}/rollback`, { backup }),
+  secrets: () => req('GET', '/api/secrets'),
+  secretSave: (plugin, name, value, id) => req('POST', '/api/secrets', { plugin, name, value, id }),
+  secretDelete: (id) => req('DELETE', '/api/secrets', { id }),
+  backups: () => req('GET', '/api/backup'),
+  backupCreate: () => req('POST', '/api/backup', {}),
+  backupDownloadUrl: (name) => '/api/backup/download?name=' + encodeURIComponent(name),
+  backupRestore: (name, dryRun) => req('POST', '/api/backup/restore', { name, dry_run: !!dryRun }),
+  schedules: () => req('GET', '/api/schedules'),
+  scheduleSave: (job) => req('POST', '/api/schedules', job),
+  scheduleDelete: (id) => req('DELETE', '/api/schedules', { id }),
+  scheduleRun: (id) => req('POST', '/api/schedules/run', { id }),
   // 面板内直接安装: 上传本地插件包(zip/tar.gz), 与"从仓库安装"是两套逻辑
   storePluginUpload: (fd, onProgress) => reqUpload('/api/store/plugin/upload', fd, onProgress),
   storePluginInstall: (name) => req('POST', '/api/store/plugin/install', { name }),

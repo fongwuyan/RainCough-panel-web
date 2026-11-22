@@ -334,6 +334,7 @@ func main() {
 	globalWSH.Start(sysMon)
 
 	s := &server{cfg: cfg, sd: sd, sup: globalSUP}
+	s.startScheduler()
 	// 上次更新已应用且当前就跑在那个版本上 → 重启已生效, 清掉"待重启"标记。
 	// 不做这件事的话, 外部 systemctl restart / 掉电重启后前端会永远提示"待重启"。
 	s.reconcileUpdateState()
@@ -341,9 +342,13 @@ func main() {
 
 	// 鉴权: 除登录接口外的所有 /api/ 路由要求 session
 	// session 长期有效(默认 30 天), 用户感知"永久保留"
+	initPanelTokens(cfg.DataDir)
 	authMgr, err := auth.New(auth.Options{
 		DataDir:       cfg.DataDir,
 		AdminPassword: os.Getenv("RC_ADMIN_PASSWORD"),
+		TokenCheck: func(r *http.Request) bool {
+			return panelTokens != nil && panelTokens.check(r)
+		},
 	})
 	if err != nil {
 		log.Fatalf("鉴权模块初始化失败: %v", err)
@@ -485,6 +490,23 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/interfaces", globalPX.HandleIfacesCatalog)
 	mux.HandleFunc("/api/interfaces/", globalPX.HandleIfacesRoutes)
 	mux.HandleFunc("/api/services/health", globalPX.HandleServicesHealth)
+	mux.HandleFunc("/api/audit", globalPX.HandleAudit)
+	mux.HandleFunc("/api/plugin-config", s.handlePluginConfig)
+	mux.HandleFunc("/api/plugin-config/list", s.handlePluginConfigList)
+	mux.HandleFunc("/api/plugin-deps", s.handlePluginDeps)
+	mux.HandleFunc("/api/tokens", s.handleTokens)
+	mux.HandleFunc("/api/assets", s.handleAssets)
+	mux.HandleFunc("/api/assets/delete", s.handleAssetDelete)
+	mux.HandleFunc("/api/assets/rename", s.handleAssetRename)
+	mux.HandleFunc("/api/assets/archive", s.handleAssetArchive)
+	mux.HandleFunc("/api/assets/archive/entry", s.handleAssetArchiveEntry)
+	mux.HandleFunc("/api/assets/doc", s.handleAssetDoc)
+	mux.HandleFunc("/api/secrets", s.handleSecrets)
+	mux.HandleFunc("/api/backup", s.handleBackup)
+	mux.HandleFunc("/api/backup/download", s.handleBackupDownload)
+	mux.HandleFunc("/api/backup/restore", s.handleBackupRestore)
+	mux.HandleFunc("/api/schedules", s.handleSchedules)
+	mux.HandleFunc("/api/schedules/run", s.handleScheduleRun)
 	mux.HandleFunc("/api/services/health/log", globalPX.HandleServiceLog)
 	mux.HandleFunc("/api/services/list", s.handleServicesList)
 	mux.HandleFunc("/api/services/action", s.handleServicesAction)
@@ -649,6 +671,12 @@ func (s *server) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && sub == "backups":
+		s.handlePluginBackups(w, r, name)
+
+	case r.Method == http.MethodPost && sub == "rollback":
+		s.handlePluginRollback(w, r, name)
+
 	case r.Method == http.MethodGet && sub == "":
 		// 单插件信息(GenericPlugin 回退卡片用)
 		for _, p := range globalPX.ListPlugins() {

@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -262,17 +263,23 @@ func replaceDir(src, dst string) (bool, error) {
 	return true, nil
 }
 
-// cleanupBackups 删除某个插件名的历史备份(只保留刚成功替换后的最新目录已被 rename 走, 这里全删)
+// cleanupBackups 保留最近 3 个历史版本，供面板回滚；更旧的自动清理。
 func cleanupBackups(bakRoot, name string) {
 	entries, err := os.ReadDir(bakRoot)
 	if err != nil {
 		return
 	}
 	prefix := name + "-"
+	var dirs []string
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
-			_ = os.RemoveAll(filepath.Join(bakRoot, e.Name()))
+			dirs = append(dirs, e.Name())
 		}
+	}
+	sort.Strings(dirs)
+	for len(dirs) > 3 {
+		_ = os.RemoveAll(filepath.Join(bakRoot, dirs[0]))
+		dirs = dirs[1:]
 	}
 }
 

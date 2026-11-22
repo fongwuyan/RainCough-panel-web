@@ -265,6 +265,12 @@ func (x *PluginX) invokeFrom(caller, ifaceID string, params interface{}, timeout
 	if it == nil {
 		return nil, &RPCError{Code: 4001, Message: "接口未注册: " + ifaceID}
 	}
+	if it.Disabled {
+		return nil, &RPCError{Code: 4303, Message: "接口已被面板禁用: " + ifaceID}
+	}
+	if it.TimeoutMs > 0 {
+		timeout = time.Duration(it.TimeoutMs) * time.Millisecond
+	}
 	// 可见性/权限
 	switch it.Visibility {
 	case "private":
@@ -282,6 +288,7 @@ func (x *PluginX) invokeFrom(caller, ifaceID string, params interface{}, timeout
 		result, err := it.handler(params)
 		ms := time.Since(start).Milliseconds()
 		x.recordCall(it, ms, err)
+		x.recordAudit(caller, ifaceID, it.Plugin, ms, err)
 		if err != nil {
 			return nil, &RPCError{Code: 3000, Message: err.Error()}
 		}
@@ -300,7 +307,22 @@ func (x *PluginX) invokeFrom(caller, ifaceID string, params interface{}, timeout
 		_ = json.Unmarshal(resp, &resVal)
 	}
 	x.recordCall(it, ms, err)
+	x.recordAudit(caller, ifaceID, it.Plugin, ms, err)
 	return resVal, err
+}
+
+// recordAudit 记录最近接口调用; 参数不落盘, 避免泄露敏感数据。
+func (x *PluginX) recordAudit(caller, ifaceID, plugin string, ms int64, err error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	e := AuditEvent{Time: time.Now().Unix(), Caller: caller, Interface: ifaceID, Plugin: plugin, Ms: ms}
+	if err != nil {
+		e.Error = err.Error()
+	}
+	x.audit = append(x.audit, e)
+	if len(x.audit) > 500 {
+		x.audit = x.audit[len(x.audit)-500:]
+	}
 }
 
 // recordCall 更新接口调用统计(滚动窗口 p95)。

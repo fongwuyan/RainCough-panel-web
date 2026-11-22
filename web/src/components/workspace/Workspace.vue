@@ -1,11 +1,12 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import RealtimeChart from '../sys/RealtimeChart.vue'
 import {
   useWorkspace, num, fmtBytes, fmtRate, fmtDuration, fmtTime,
 } from './useWorkspace'
 
 const ws = useWorkspace()
+const tab = ref('overview')
 const {
   sys, err, updatedAt, now, gpus, gpuErr, gpuLoading,
   cpu, cores, load, memTotal, memUsed, memPct, swapTotal, swapUsed, swapPct,
@@ -54,10 +55,15 @@ function coreColor(v) {
 <template>
   <div class="page ws-page">
     <div class="ws-scroll">
+      <div class="ws-tabs">
+        <button v-for="t in [['overview','概览'],['running','运行中'],['interfaces','接口健康']]" :key="t[0]"
+          class="ws-tab" :class="{ active: tab === t[0] }" @click="tab = t[0]">{{ t[1] }}</button>
+        <span class="grow"></span>
+        <router-link class="ws-tab-link" to="/interfaces">接口中心 →</router-link>
+      </div>
       <div v-if="err" class="error ws-err">系统数据获取失败: {{ err }}</div>
 
-      <!-- 概览 -->
-      <section class="ws-hero">
+      <section v-show="tab === 'overview'" class="ws-hero">
         <div class="ws-hero-left">
           <div class="ws-host">{{ (sys && sys.hostname) || '—' }}</div>
           <div class="ws-sub">
@@ -86,7 +92,7 @@ function coreColor(v) {
         </div>
       </section>
 
-      <div class="ws-grid">
+      <div v-show="tab === 'overview'" class="ws-grid">
         <!-- CPU -->
         <section class="ws-card">
           <div class="ws-card-head">
@@ -305,7 +311,56 @@ function coreColor(v) {
         </section>
       </div>
 
-      <div class="ws-foot">
+      <div v-if="tab === 'running'" class="ws-tab-panel">
+        <div class="ws-grid">
+          <section class="ws-card">
+            <div class="ws-card-head"><span class="ws-card-title">运行中的任务</span><router-link class="ws-card-side" to="/tasks">全部 →</router-link></div>
+            <div v-if="!tasks.length" class="hint">当前没有进行中的任务</div>
+            <div v-else class="ws-run-list">
+              <div v-for="t in tasks.slice(0, 12)" :key="t.id" class="ws-run-item">
+                <div class="ws-run-row"><b>{{ t.name || t.title || t.id }}</b><span>{{ t.progress || 0 }}%</span></div>
+                <div class="ws-run-bar"><i :style="{ width: (t.progress || 0) + '%' }"></i></div>
+                <div class="faint">{{ t.status }} · {{ t.kind || t.type || '任务' }}</div>
+              </div>
+            </div>
+          </section>
+          <section class="ws-card">
+            <div class="ws-card-head"><span class="ws-card-title">插件状态</span><router-link class="ws-card-side" to="/plugins">管理 →</router-link></div>
+            <div v-if="!plugins.length" class="hint">未安装插件</div>
+            <div v-else class="ws-run-list">
+              <div v-for="p in plugins" :key="p.name" class="ws-run-item">
+                <div class="ws-run-row"><b>{{ p.label || p.name }}</b><span :class="p.alive ? 'ok' : 'bad'">{{ p.alive ? '在线' : '离线' }}</span></div>
+                <div class="faint">{{ p.name }} · {{ p.version || '—' }}</div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div v-if="tab === 'interfaces'" class="ws-tab-panel">
+        <div class="ws-grid">
+          <section class="ws-card">
+            <div class="ws-card-head"><span class="ws-card-title">接口概况</span><router-link class="ws-card-side" to="/interfaces">接口中心 →</router-link></div>
+            <div class="ws-if-stats">
+              <div><b>{{ (ifacesStats && ifacesStats.interfaces) || 0 }}</b><span>总数</span></div>
+              <div class="ok"><b>{{ (ifacesStats && ifacesStats.online) || 0 }}</b><span>在线</span></div>
+              <div :class="{ bad: ifacesStats && ifacesStats.offline }"><b>{{ (ifacesStats && ifacesStats.offline) || 0 }}</b><span>离线</span></div>
+              <div><b>{{ (ifacesStats && ifacesStats.providers) || 0 }}</b><span>提供方</span></div>
+            </div>
+          </section>
+          <section class="ws-card">
+            <div class="ws-card-head"><span class="ws-card-title">服务健康</span><span class="ws-card-side">{{ (health && health.online) || 0 }}/{{ (health && health.total) || 0 }}</span></div>
+            <div v-if="!health" class="hint">暂无健康数据</div>
+            <div v-else class="ws-run-list">
+              <div v-for="s in (health.providers || []).slice(0, 12)" :key="s.name || s.id" class="ws-run-row">
+                <span>{{ s.label || s.name || s.id }}</span><span :class="s.online ? 'ok' : 'bad'">{{ s.online ? '在线' : '离线' }}</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div v-show="tab === 'overview'" class="ws-foot">
         <span>启动于 {{ fmtTime(sys && sys.boot_time) }}</span>
         <span>· 数据更新 {{ updatedAgo }}</span>
         <span class="grow"></span>
@@ -319,6 +374,24 @@ function coreColor(v) {
 .ws-page { height: calc(100vh - 66px); padding: 0; }
 .ws-scroll { height: 100%; overflow: auto; }
 .ws-err { margin-bottom: 10px; }
+.ws-tabs { display: flex; align-items: center; gap: 4px; padding: 6px 0 10px; }
+.ws-tab { border: 1px solid transparent; background: transparent; color: var(--text-muted); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.ws-tab:hover { color: var(--text); }
+.ws-tab.active { color: var(--accent); background: var(--accent-soft); border-color: var(--border); }
+.ws-tab-link { font-size: 12px; color: var(--text-muted); text-decoration: none; }
+.ws-tab-link:hover { color: var(--accent); }
+.ws-tab-panel { padding-bottom: 12px; }
+.ws-run-list { display: flex; flex-direction: column; gap: 7px; max-height: 360px; overflow: auto; }
+.ws-run-item { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.ws-run-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.ws-run-row .ok, .ws-if-stats .ok b { color: #2f9e44; }
+.ws-run-row .bad, .ws-if-stats .bad b { color: var(--danger); }
+.ws-run-bar { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 5px 0 3px; }
+.ws-run-bar i { display: block; height: 100%; background: var(--accent); }
+.ws-if-stats { display: flex; gap: 18px; flex-wrap: wrap; padding: 8px 0; }
+.ws-if-stats div { min-width: 70px; }
+.ws-if-stats b { display: block; font-size: 24px; }
+.ws-if-stats span { color: var(--text-muted); font-size: 11px; }
 
 .ws-hero {
   display: flex; align-items: center; gap: 24px;
