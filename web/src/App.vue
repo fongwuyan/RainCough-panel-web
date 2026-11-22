@@ -60,7 +60,7 @@ onUnmounted(() => {
 <template>
   <div v-if="blankHint" style="position:fixed;top:60px;left:0;right:0;z-index:99998;background:#e65100;color:#fff;padding:8px 14px;font-size:12px;font-family:monospace">探测: {{ blankHint }}</div>
 <div v-if="errGlobal" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#c62828;color:#fff;padding:10px 14px;font-size:12px;font-family:monospace;max-height:120px;overflow:auto">全局错误: {{ errGlobal }}</div>
-<div class="layout" :class="{ 'layout-login': isLogin }">
+<div class="layout" :class="{ 'layout-login': isLogin, 'has-sidebar': !isLogin && !sidebarHidden }">
     <Sidebar v-if="!isLogin && !sidebarHidden" />
     <main class="content" :class="{ 'content-login': isLogin }">
       <div class="content-inner" :class="{ 'content-inner-login': isLogin }">
