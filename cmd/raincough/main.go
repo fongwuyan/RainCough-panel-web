@@ -150,6 +150,8 @@ func main() {
 		UDSDir:     os.Getenv("RC_UDS_DIR"),
 		Token:      os.Getenv("RC_REG_TOKEN"),
 		ProbeEvery: probeEvery,
+		PolicyFile: filepath.Join(cfg.DataDir, "interface-policy.json"),
+		AuditFile:  filepath.Join(cfg.DataDir, "audit.jsonl"),
 	}, regNS)
 	if err := globalPX.Start(); err != nil {
 		log.Fatalf("接口库启动失败: %v", err)
@@ -501,12 +503,14 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/assets/archive", s.handleAssetArchive)
 	mux.HandleFunc("/api/assets/archive/entry", s.handleAssetArchiveEntry)
 	mux.HandleFunc("/api/assets/doc", s.handleAssetDoc)
+	mux.HandleFunc("/api/assets/zip", s.handleAssetsZip)
 	mux.HandleFunc("/api/secrets", s.handleSecrets)
 	mux.HandleFunc("/api/backup", s.handleBackup)
 	mux.HandleFunc("/api/backup/download", s.handleBackupDownload)
 	mux.HandleFunc("/api/backup/restore", s.handleBackupRestore)
 	mux.HandleFunc("/api/schedules", s.handleSchedules)
 	mux.HandleFunc("/api/schedules/run", s.handleScheduleRun)
+	mux.HandleFunc("/api/notifications/state", s.handleNotificationState)
 	mux.HandleFunc("/api/services/health/log", globalPX.HandleServiceLog)
 	mux.HandleFunc("/api/services/list", s.handleServicesList)
 	mux.HandleFunc("/api/services/action", s.handleServicesAction)

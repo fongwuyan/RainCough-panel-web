@@ -223,22 +223,32 @@ async function saveStorage() {
 
 onMounted(loadStorage)
 
-const NAV = [
-  { key: 'appearance', label: '外观', desc: '主题与显示' },
-  { key: 'repo', label: '仓库配置', desc: '插件市场 / 面板仓库' },
-  { key: 'storage', label: '存储', desc: '多盘与自动切换' },
-  { key: 'login', label: '登录', desc: '密码与登录方式' },
-  { key: 'panel', label: '面板信息', desc: '版本与运行状态' },
-  { key: 'maint', label: '维护', desc: '数据清理' },
-  { key: 'health', label: '健康', desc: '服务与接口状态' },
-  { key: 'audit', label: '审计', desc: '接口调用记录' },
-  { key: 'plugin-config', label: '插件配置', desc: 'config.json' },
-  { key: 'secrets', label: '密钥', desc: '密钥索引' },
-  { key: 'backup', label: '备份', desc: '备份与恢复' },
-  { key: 'schedules', label: '定时', desc: '定时备份/清理' },
-  { key: 'rollback', label: '回滚', desc: '插件历史版本' },
-  { key: 'deps', label: '依赖', desc: '插件依赖检查' },
-  { key: 'tokens', label: 'Token', desc: 'API 访问令牌' },
+const NAV_GROUPS = [
+  {
+    label: '基础',
+    items: [
+      { key: 'appearance', label: '外观', desc: '主题与显示' },
+      { key: 'repo', label: '仓库配置', desc: '插件市场 / 面板仓库' },
+      { key: 'storage', label: '存储', desc: '多盘与自动切换' },
+      { key: 'login', label: '登录', desc: '密码与登录方式' },
+      { key: 'panel', label: '面板信息', desc: '版本与运行状态' },
+      { key: 'maint', label: '维护', desc: '数据清理' },
+    ],
+  },
+  {
+    label: '管理',
+    items: [
+      { key: 'health', label: '健康', desc: '服务与接口状态' },
+      { key: 'audit', label: '审计', desc: '接口调用记录' },
+      { key: 'plugin-config', label: '插件配置', desc: 'config.json' },
+      { key: 'secrets', label: '密钥', desc: '密钥索引' },
+      { key: 'backup', label: '备份', desc: '备份与恢复' },
+      { key: 'schedules', label: '定时', desc: '定时备份/清理' },
+      { key: 'rollback', label: '回滚', desc: '插件历史版本' },
+      { key: 'deps', label: '依赖', desc: '插件依赖检查' },
+      { key: 'tokens', label: 'Token', desc: 'API 访问令牌' },
+    ],
+  },
 ]
 </script>
 
@@ -246,16 +256,19 @@ const NAV = [
   <div class="page st-page">
     <div class="st-layout">
       <nav class="st-nav">
-        <button
-          v-for="n in NAV"
-          :key="n.key"
-          class="st-nav-item"
-          :class="{ active: active === n.key }"
-          @click="active = n.key"
-        >
-          <span class="st-nav-label">{{ n.label }}</span>
-          <span class="st-nav-desc">{{ n.desc }}</span>
-        </button>
+        <template v-for="g in NAV_GROUPS" :key="g.label">
+          <div class="st-nav-group">{{ g.label }}</div>
+          <button
+            v-for="n in g.items"
+            :key="n.key"
+            class="st-nav-item"
+            :class="{ active: active === n.key }"
+            @click="active = n.key"
+          >
+            <span class="st-nav-label">{{ n.label }}</span>
+            <span class="st-nav-desc">{{ n.desc }}</span>
+          </button>
+        </template>
       </nav>
 
       <section class="st-pane">
@@ -611,8 +624,11 @@ const NAV = [
 .st-layout { display: grid; grid-template-columns: 200px 1fr; gap: 0 24px; height: 100%; min-height: 0; }
 .st-embed { min-width: 0; overflow: auto; }
 .st-embed :deep(.page) { padding: 0 !important; height: auto !important; }
+.st-embed :deep(h1) { display: none; }
 
 .st-nav { border-right: 1px solid var(--border); padding-right: 14px; overflow: auto; }
+.st-nav-group { margin: 12px 10px 5px; font-size: 10px; letter-spacing: 1px; color: var(--text-faint); text-transform: uppercase; }
+.st-nav-group:first-child { margin-top: 0; }
 .st-nav-item {
   display: flex; flex-direction: column; gap: 2px; width: 100%;
   border: 0; border-left: 2px solid transparent; background: transparent;

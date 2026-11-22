@@ -53,7 +53,7 @@ onMounted(load)
         </tbody>
       </table>
     </div>
-    <div class="faint audit-note">审计记录保存在内存中，最多 500 条，面板重启后清空。</div>
+    <div class="faint audit-note">审计记录持久化到 data/audit.jsonl，页面最多显示最近 300 条，内存保留最近 500 条。</div>
   </div>
 </template>
 

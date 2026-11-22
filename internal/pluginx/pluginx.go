@@ -128,6 +128,8 @@ type Options struct {
 	Token      string // 注册口令(空=不校验)
 	ProbeEvery time.Duration
 	UseTCP     bool // Windows 开发降级: loopback TCP(默认按 GOOS 判定)
+	PolicyFile string
+	AuditFile  string
 }
 
 // AuditEvent 接口调用审计(内存最近 500 条)。
@@ -156,8 +158,17 @@ type PluginX struct {
 	// restPublic 该插件的 REST 路由是否允许免登录(plugin.json backend.rest_public)
 	restPublic map[string]bool
 	audit      []AuditEvent
+	auditFile  string
+	policyFile string
+	policies   map[string]IfacePolicy
 	stopCh     chan struct{}
 	seq        int64
+}
+
+// IfacePolicy 面板层接口策略(持久化)。
+type IfacePolicy struct {
+	Disabled  bool  `json:"disabled"`
+	TimeoutMs int64 `json:"timeout_ms"`
 }
 
 // New 创建接口库运行时。
@@ -171,6 +182,29 @@ func New(opts Options, ns *shared.Namespace) *PluginX {
 	if !opts.UseTCP {
 		opts.UseTCP = runtime.GOOS == "windows"
 	}
+	policies := map[string]IfacePolicy{}
+	if opts.PolicyFile != "" {
+		if b, err := os.ReadFile(opts.PolicyFile); err == nil {
+			_ = json.Unmarshal(b, &policies)
+		}
+	}
+	var audit []AuditEvent
+	if opts.AuditFile != "" {
+		if b, err := os.ReadFile(opts.AuditFile); err == nil {
+			for _, line := range strings.Split(string(b), "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				var e AuditEvent
+				if json.Unmarshal([]byte(line), &e) == nil {
+					audit = append(audit, e)
+				}
+			}
+			if len(audit) > 500 {
+				audit = audit[len(audit)-500:]
+			}
+		}
+	}
 	return &PluginX{
 		opts:       opts,
 		ns:         ns,
@@ -180,6 +214,10 @@ func New(opts Options, ns *shared.Namespace) *PluginX {
 		endpoints:  map[string]string{},
 		restRoutes: map[string][]RESTRoute{},
 		restPublic: map[string]bool{},
+		policyFile: opts.PolicyFile,
+		policies:   policies,
+		auditFile:  opts.AuditFile,
+		audit:      audit,
 		stopCh:     make(chan struct{}),
 	}
 }

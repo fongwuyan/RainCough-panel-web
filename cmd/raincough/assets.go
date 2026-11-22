@@ -36,7 +36,7 @@ func assetKind(name string) string {
 		return "text"
 	case ".pdf":
 		return "pdf"
-	case ".docx", ".pptx":
+	case ".docx", ".pptx", ".xlsx":
 		return "doc"
 	case ".safetensors", ".ckpt", ".pt", ".bin", ".gguf":
 		return "model"

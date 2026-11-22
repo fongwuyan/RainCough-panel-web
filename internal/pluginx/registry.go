@@ -88,6 +88,10 @@ func (x *PluginX) handleRegister(c *conn, raw json.RawMessage) (interface{}, *rp
 		if prev != nil {
 			it.Calls, it.AvgMs, it.P95Ms, it.LastError, it.durations = prev.Calls, prev.AvgMs, prev.P95Ms, prev.LastError, prev.durations
 		}
+		if pol, ok := x.policies[it.ID]; ok {
+			it.Disabled = pol.Disabled
+			it.TimeoutMs = pol.TimeoutMs
+		}
 		it.Online = true
 		x.ifaces[it.ID] = &it
 	}
@@ -322,6 +326,15 @@ func (x *PluginX) recordAudit(caller, ifaceID, plugin string, ms int64, err erro
 	x.audit = append(x.audit, e)
 	if len(x.audit) > 500 {
 		x.audit = x.audit[len(x.audit)-500:]
+	}
+	if x.auditFile != "" {
+		if b, err := json.Marshal(e); err == nil {
+			_ = os.MkdirAll(filepath.Dir(x.auditFile), 0o755)
+			if f, err := os.OpenFile(x.auditFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+				_, _ = f.Write(append(b, '\n'))
+				_ = f.Close()
+			}
+		}
 	}
 }
 

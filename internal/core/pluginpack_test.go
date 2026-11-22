@@ -204,9 +204,9 @@ func TestInstallFromPackage_overwrite(t *testing.T) {
 
 	// 先装 v1
 	p1 := makeZip(t, map[string]string{
-		"plugin.json":  strings.Replace(validManifest, "1.2.3", "1.0.0", 1),
-		"plugin.js":    "v1",
-		"demo":         "bin-v1",
+		"plugin.json":    strings.Replace(validManifest, "1.2.3", "1.0.0", 1),
+		"plugin.js":      "v1",
+		"demo":           "bin-v1",
 		"only-in-v1.txt": "old",
 	}, nil)
 	if _, err := InstallFromPackage(copyTo(t, p1, "d.zip"), "d.zip", pluginsDir); err != nil {
@@ -243,14 +243,26 @@ func TestInstallFromPackage_overwrite(t *testing.T) {
 	if string(b) != "v2" {
 		t.Fatalf("plugin.js 内容应更新为 v2, 实得 %q", string(b))
 	}
-	// 备份目录应被清理(不无限膨胀)
+	// 历史版本应保留（供面板回滚），但只保留有限数量
 	bakDir := filepath.Join(pluginsDir, pluginPackBackupDir)
+	backups := 0
+	var backupPath string
 	if ents, err := os.ReadDir(bakDir); err == nil {
 		for _, e := range ents {
 			if strings.HasPrefix(e.Name(), "demo-") {
-				t.Fatalf("成功替换后应清理备份, 仍存在: %s", e.Name())
+				backups++
+				backupPath = filepath.Join(bakDir, e.Name())
 			}
 		}
+	}
+	if backups == 0 {
+		t.Fatalf("成功替换后应保留历史版本供回滚")
+	}
+	if backups > 3 {
+		t.Fatalf("历史版本应最多保留 3 个, 实得 %d", backups)
+	}
+	if old, err := os.ReadFile(filepath.Join(backupPath, "plugin.js")); err != nil || string(old) != "v1" {
+		t.Fatalf("历史备份应保留旧版本 v1, 内容=%q err=%v", string(old), err)
 	}
 }
 
@@ -290,11 +302,11 @@ func TestInstallFromPackage_multipleManifests(t *testing.T) {
 // TestInstallFromPackage_invalidManifest 非 v4 清单应拒绝
 func TestInstallFromPackage_invalidManifest(t *testing.T) {
 	cases := map[string]string{
-		"缺 name":       `{"frontend":{"entry":"a.js"},"backend":{"exec":["x"]}}`,
-		"缺 entry":      `{"name":"demo","frontend":{},"backend":{"exec":["x"]}}`,
-		"缺 exec":       `{"name":"demo","frontend":{"entry":"a.js"},"backend":{}}`,
-		"不是 JSON":      `not json at all`,
-		"空文件":         ``,
+		"缺 name":  `{"frontend":{"entry":"a.js"},"backend":{"exec":["x"]}}`,
+		"缺 entry": `{"name":"demo","frontend":{},"backend":{"exec":["x"]}}`,
+		"缺 exec":  `{"name":"demo","frontend":{"entry":"a.js"},"backend":{}}`,
+		"不是 JSON": `not json at all`,
+		"空文件":     ``,
 	}
 	for label, manifest := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -353,12 +365,12 @@ func TestCleanupStaleInstalling(t *testing.T) {
 // TestPackExt 扩展名归一化
 func TestPackExt(t *testing.T) {
 	cases := map[string]string{
-		"a.zip":     ".zip",
-		"a.tar.gz":  ".tar.gz",
-		"a.tgz":     ".tgz",
-		"a.tar":     ".tar",
-		"A.ZIP":     ".rar", // 大小写: 调用方应已 ToLower; 这里验证非匹配走 filepath.Ext
-		"a.rar":     ".rar",
+		"a.zip":    ".zip",
+		"a.tar.gz": ".tar.gz",
+		"a.tgz":    ".tgz",
+		"a.tar":    ".tar",
+		"A.ZIP":    ".rar", // 大小写: 调用方应已 ToLower; 这里验证非匹配走 filepath.Ext
+		"a.rar":    ".rar",
 	}
 	for in, want := range cases {
 		got := packExt(strings.ToLower(in))

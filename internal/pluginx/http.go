@@ -256,9 +256,20 @@ func (x *PluginX) HandleIfacePolicy(w http.ResponseWriter, r *http.Request) {
 	if b.TimeoutMs != nil {
 		it.TimeoutMs = *b.TimeoutMs
 	}
+	x.policies[id] = IfacePolicy{Disabled: it.Disabled, TimeoutMs: it.TimeoutMs}
+	disabled, timeoutMs := it.Disabled, it.TimeoutMs
+	if x.policyFile != "" {
+		if data, err := json.MarshalIndent(x.policies, "", "  "); err == nil {
+			_ = os.MkdirAll(filepath.Dir(x.policyFile), 0o755)
+			tmp := x.policyFile + ".tmp"
+			if os.WriteFile(tmp, append(data, '\n'), 0o600) == nil {
+				_ = os.Rename(tmp, x.policyFile)
+			}
+		}
+	}
 	x.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": true, "id": id, "disabled": it.Disabled, "timeout_ms": it.TimeoutMs,
+		"status": true, "id": id, "disabled": disabled, "timeout_ms": timeoutMs,
 	})
 }
 

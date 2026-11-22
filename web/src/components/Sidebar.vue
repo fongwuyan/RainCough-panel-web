@@ -39,7 +39,12 @@ async function loadSearchIndex() {
 
 async function loadNotices() {
   let seen = new Set()
-  try { seen = new Set(JSON.parse(localStorage.getItem('rc-notice-read') || '[]')) } catch (e) {}
+  try {
+    const st = await api.notificationState()
+    seen = new Set((st && st.keys) || [])
+  } catch (e) {
+    try { seen = new Set(JSON.parse(localStorage.getItem('rc-notice-read') || '[]')) } catch (e2) {}
+  }
   const out = []
   try {
     const h = await api.servicesHealth()
@@ -64,20 +69,26 @@ async function loadNotices() {
   notices.value = out.map((n) => ({ ...n, read: seen.has(n.key) }))
 }
 
+function saveRead(keys) {
+  try { localStorage.setItem('rc-notice-read', JSON.stringify(keys)) } catch (e) {}
+  api.saveNotificationState(keys).catch(() => {})
+}
+
 function markRead(n) {
   n.read = true
   const seen = new Set(notices.value.filter((x) => x.read).map((x) => x.key))
-  try { localStorage.setItem('rc-notice-read', JSON.stringify([...seen])) } catch (e) {}
+  saveRead([...seen])
 }
 
 function markAllRead() {
   notices.value.forEach((n) => { n.read = true })
-  try { localStorage.setItem('rc-notice-read', JSON.stringify(notices.value.map((n) => n.key))) } catch (e) {}
+  saveRead(notices.value.map((n) => n.key))
 }
 
 function clearNotices() {
   notices.value = []
   noticeOpen.value = false
+  saveRead([])
 }
 
 function openNotice(n) {

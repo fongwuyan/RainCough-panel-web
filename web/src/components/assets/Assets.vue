@@ -22,15 +22,121 @@ const pan = ref({ x: 0, y: 0 })
 const dragging = ref(false)
 const dragStart = ref({ x: 0, y: 0, px: 0, py: 0 })
 const archiveQuery = ref('')
+const archiveLimit = ref(500)
+const archiveZoom = ref(1)
+const archiveRotate = ref(0)
+const collapsedDirs = ref(new Set())
+const selected = ref(new Set())
 
 const archive = ref({ open: false, entries: [], selected: null, url: '', text: '', busy: false, err: '' })
 const imageItems = computed(() => items.value.filter((x) => x.kind === 'image'))
 const imageIndex = computed(() => preview.value ? imageItems.value.findIndex((x) => x.plugin === preview.value.plugin && x.path === preview.value.path) : -1)
-const archiveFiltered = computed(() => {
+function makeTree(entries) {
+  const root = { dirs: new Map(), files: [] }
+  const dirOf = (path) => {
+    const parts = path.split('/').filter(Boolean)
+    let node = root
+    let acc = ''
+    for (let i = 0; i < parts.length - 1; i++) {
+      acc = acc ? acc + '/' + parts[i] : parts[i]
+      if (!node.dirs.has(acc)) node.dirs.set(acc, { dirs: new Map(), files: [] })
+      node = node.dirs.get(acc)
+    }
+    return { node, base: parts[parts.length - 1] || path }
+  }
+  for (const e of entries) {
+    if (e.is_dir) {
+      const p = e.name.replace(/\/+$/, '')
+      if (!p) continue
+      dirOf(p + '/x')
+      continue
+    }
+    const { node, base } = dirOf(e.name)
+    node.files.push({ ...e, label: base })
+  }
+  return root
+}
+
+function flattenTree(node, depth, out, collapsed) {
+  const dirs = [...node.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [path, child] of dirs) {
+    out.push({ key: 'dir:' + path, path, label: path.split('/').pop(), depth, isDir: true })
+    if (!collapsed.has(path)) flattenTree(child, depth + 1, out, collapsed)
+  }
+  node.files.sort((a, b) => a.name.localeCompare(b.name))
+  for (const f of node.files) out.push({ key: 'file:' + f.name, entry: f, label: f.label, depth, isDir: false })
+}
+
+const archiveRowsAll = computed(() => {
   const q = archiveQuery.value.trim().toLowerCase()
-  if (!q) return archive.value.entries
-  return archive.value.entries.filter((e) => e.name.toLowerCase().includes(q))
+  if (q) {
+    return archive.value.entries
+      .filter((e) => e.name.toLowerCase().includes(q))
+      .map((e) => ({ key: 'file:' + e.name, entry: e, path: e.name, label: e.name, depth: 0, isDir: e.is_dir }))
+  }
+  const out = []
+  flattenTree(makeTree(archive.value.entries), 0, out, collapsedDirs.value)
+  return out
 })
+const archiveRows = computed(() => archiveRowsAll.value.slice(0, archiveLimit.value))
+const archiveHasMore = computed(() => archiveRowsAll.value.length > archiveRows.value.length)
+
+function toggleDir(path) {
+  const s = new Set(collapsedDirs.value)
+  if (s.has(path)) s.delete(path); else s.add(path)
+  collapsedDirs.value = s
+}
+const selectedCount = computed(() => selected.value.size)
+
+function keyOf(it) { return it.plugin + '|' + it.path }
+function toggleSelect(it) {
+  const s = new Set(selected.value)
+  const k = keyOf(it)
+  if (s.has(k)) s.delete(k); else s.add(k)
+  selected.value = s
+}
+function selectAll() {
+  selected.value = new Set(items.value.map(keyOf))
+}
+function clearSelected() { selected.value = new Set() }
+async function deleteSelected() {
+  const chosen = items.value.filter((it) => selected.value.has(keyOf(it)))
+  if (!chosen.length) return
+  if (!confirm('批量删除 ' + chosen.length + ' 个资产？此操作不可恢复。')) return
+  loading.value = true; err.value = ''
+  let failed = 0
+  for (const it of chosen) {
+    try { await api.assetDelete(it.plugin, it.path) }
+    catch (e) { failed++; err.value = e.message || String(e) }
+  }
+  selected.value = new Set()
+  await load()
+  if (failed) err.value = failed + ' 个资产删除失败'
+}
+
+async function downloadSelected() {
+  const chosen = items.value.filter((it) => selected.value.has(keyOf(it)))
+  if (!chosen.length) return
+  loading.value = true; err.value = ''
+  try {
+    const r = await fetch('/api/assets/zip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: chosen.map((it) => ({ plugin: it.plugin, path: it.path })) }),
+    })
+    if (!r.ok) {
+      const d = await r.json().catch(() => null)
+      throw new Error((d && d.error) || ('HTTP ' + r.status))
+    }
+    const blob = await r.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'raincough-assets.zip'
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000)
+  } catch (e) { err.value = e.message || String(e) }
+  finally { loading.value = false }
+}
 
 const shown = computed(() => items.value)
 
@@ -41,6 +147,7 @@ async function load() {
     items.value = (d && d.items) || []
     total.value = (d && d.total) || 0
     hasMore.value = !!(d && d.has_more)
+    selected.value = new Set()
   } catch (e) { err.value = e.message || String(e) }
   finally { loading.value = false }
 }
@@ -77,12 +184,22 @@ function moveDrag(e) {
   pan.value = { x: dragStart.value.px + e.clientX - dragStart.value.x, y: dragStart.value.py + e.clientY - dragStart.value.y }
 }
 function endDrag() { dragging.value = false }
+function archiveWheel(e) {
+  const z = archiveZoom.value * (e.deltaY < 0 ? 1.12 : 0.89)
+  archiveZoom.value = Math.max(0.3, Math.min(6, z))
+}
+function resetArchiveImage() {
+  archiveZoom.value = 1
+  archiveRotate.value = 0
+}
 
 async function open(it) {
   preview.value = it
   previewText.value = ''
   previewErr.value = ''
   archiveQuery.value = ''
+  archiveLimit.value = 500
+  collapsedDirs.value = new Set()
   archive.value = { open: false, entries: [], selected: null, url: '', text: '', busy: false, err: '' }
   resetImage()
   if (it.kind === 'text') await loadText(it)
@@ -145,6 +262,8 @@ async function selectEntry(entry) {
   archive.value.selected = entry
   archive.value.url = ''
   archive.value.text = ''
+  archiveZoom.value = 1
+  archiveRotate.value = 0
   const url = api.assetArchiveEntryUrl(preview.value.plugin, preview.value.path, entry.name)
   if (entry.kind === 'image' || entry.kind === 'video' || entry.kind === 'audio' || entry.kind === 'pdf') {
     archive.value.url = url
@@ -208,9 +327,20 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       <span class="faint" style="font-size:11px;">共 {{ total || items.length }} 项</span>
     </div>
 
+    <div v-if="items.length" class="assets-batchbar">
+      <label class="assets-check"><input type="checkbox" :checked="selectedCount === items.length && items.length > 0" @change="selectedCount === items.length ? clearSelected() : selectAll()" /> 全选当前</label>
+      <span class="faint" style="font-size:11px;">已选 {{ selectedCount }}</span>
+      <button class="btn btn-sm btn-danger" :disabled="!selectedCount" @click="deleteSelected">批量删除</button>
+      <button class="btn btn-sm" :disabled="!selectedCount" @click="downloadSelected">打包下载</button>
+      <button class="btn btn-sm" :disabled="!selectedCount" @click="clearSelected">取消选择</button>
+    </div>
+
     <div v-if="!items.length && !loading" class="hint">没有资产</div>
     <div class="assets-grid">
       <div v-for="(it, i) in shown" :key="i" class="asset-card">
+        <label class="asset-check" @click.stop>
+          <input type="checkbox" :checked="selected.has(keyOf(it))" @change="toggleSelect(it)" />
+        </label>
         <div class="asset-preview" @click="open(it)">
           <img v-if="it.kind === 'image'" :src="it.url" loading="lazy" />
           <span v-else class="asset-kind">{{ it.kind }}</span>
@@ -261,15 +391,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             <div v-else class="archive-layout">
               <aside class="archive-list">
                 <div class="archive-search"><input v-model="archiveQuery" class="input" placeholder="搜索压缩包内文件…" /></div>
-                <div v-for="e in archiveFiltered" :key="e.name" class="archive-item" :class="{ active: archive.selected && archive.selected.name === e.name, dir: e.is_dir }" @click="selectEntry(e)">
-                  <span class="archive-name" :title="e.name">{{ e.name }}</span>
-                  <span class="archive-size">{{ e.is_dir ? '' : fmtSize(e.size) }}</span>
+                <div v-for="e in archiveRows" :key="e.key" class="archive-item" :class="{ active: !e.isDir && archive.selected && archive.selected.name === e.entry.name, dir: e.isDir }" :style="{ paddingLeft: (7 + e.depth * 12) + 'px' }" @click="e.isDir ? toggleDir(e.path) : selectEntry(e.entry)">
+                  <span class="archive-name" :title="e.entry ? e.entry.name : e.path">{{ e.isDir ? (collapsedDirs.has(e.path) ? '▸ ' : '▾ ') : '' }}{{ e.label }}</span>
+                  <span class="archive-size">{{ e.isDir ? '' : fmtSize(e.entry.size) }}</span>
                 </div>
-                <div v-if="!archiveFiltered.length" class="hint" style="padding:12px;">{{ archive.entries.length ? '没有匹配文件' : '空压缩包' }}</div>
+                <div v-if="!archiveRows.length" class="hint" style="padding:12px;">{{ archive.entries.length ? '没有匹配文件' : '空压缩包' }}</div>
+                <div v-if="archiveHasMore" class="archive-more"><button class="btn btn-sm" @click="archiveLimit += 500">加载更多</button></div>
               </aside>
               <section class="archive-preview">
                 <div v-if="!archive.selected" class="hint">选择左侧文件预览</div>
-                <img v-else-if="archive.selected.kind === 'image' && archive.url" :src="archive.url" class="archive-img" />
+                <div v-else-if="archive.selected.kind === 'image' && archive.url" class="archive-img-wrap" @wheel.prevent="archiveWheel">
+                  <img :src="archive.url" class="archive-img" :style="{ transform: 'scale(' + archiveZoom + ') rotate(' + archiveRotate + 'deg)' }" />
+                  <div class="archive-img-tools">
+                    <button class="btn btn-sm" @click="archiveZoom = Math.max(0.3, archiveZoom / 1.2)">−</button>
+                    <span class="mono">{{ Math.round(archiveZoom * 100) }}%</span>
+                    <button class="btn btn-sm" @click="archiveZoom = Math.min(6, archiveZoom * 1.2)">＋</button>
+                    <button class="btn btn-sm" @click="archiveRotate = (archiveRotate + 90) % 360">旋转</button>
+                    <button class="btn btn-sm" @click="resetArchiveImage">重置</button>
+                  </div>
+                </div>
                 <video v-else-if="archive.selected.kind === 'video' && archive.url" :src="archive.url" controls class="asset-media"></video>
                 <audio v-else-if="archive.selected.kind === 'audio' && archive.url" :src="archive.url" controls class="asset-audio"></audio>
                 <iframe v-else-if="archive.selected.kind === 'pdf' && archive.url" :src="archive.url" class="asset-pdf"></iframe>
@@ -311,7 +451,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .assets-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
 .assets-filters .input { width: 170px; }
 .assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
-.asset-card { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); overflow: hidden; min-width: 0; }
+.assets-batchbar { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); font-size: 11px; }
+.assets-check { display: flex; align-items: center; gap: 4px; color: var(--text-muted); }
+.asset-card { position: relative; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); overflow: hidden; min-width: 0; }
+.asset-check { position: absolute; top: 5px; left: 5px; z-index: 2; padding: 2px 5px; border-radius: 4px; background: rgba(0,0,0,.45); color: #fff; }
 .asset-preview { display: flex; width: 100%; height: 125px; align-items: center; justify-content: center; background: var(--bg2); overflow: hidden; cursor: zoom-in; }
 .asset-preview img { max-width: 100%; max-height: 125px; object-fit: contain; }
 .asset-kind { color: var(--text-muted); font-size: 12px; text-transform: uppercase; }
@@ -345,6 +488,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .archive-list { border-right: 1px solid var(--border); overflow: auto; background: var(--surface-2); }
 .archive-search { position: sticky; top: 0; z-index: 1; padding: 6px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
 .archive-search .input { width: 100%; height: 26px; font-size: 11px; }
+.archive-more { display: flex; justify-content: center; padding: 6px; }
+.archive-img-wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.archive-img-tools { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 6px; background: rgba(15,18,24,.82); color: #e6e6e6; font-size: 11px; }
 .archive-item { display: flex; justify-content: space-between; gap: 8px; padding: 5px 9px; font-size: 11px; color: var(--text-muted); cursor: pointer; border-bottom: 1px solid var(--border); }
 .archive-item:hover { background: var(--surface-3); }
 .archive-item.active { background: var(--accent-soft); color: var(--text); }
@@ -352,7 +498,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .archive-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .archive-size { color: var(--text-faint); flex: 0 0 auto; }
 .archive-preview { overflow: auto; display: flex; align-items: center; justify-content: center; min-width: 0; }
-.archive-img { max-width: 100%; max-height: 70vh; object-fit: contain; }
+.archive-img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .08s ease-out; }
 .archive-text { height: 70vh; }
 .asset-modal-foot { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--border); font-size: 11px; }
 .zoom-label { width: 44px; text-align: center; color: var(--text-muted); }
