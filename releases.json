@@ -1,6 +1,15 @@
 {
   "panel": [
     {
+      "version": "1.0.2",
+      "tag": "v1.0.2",
+      "asset": "raincough-linux-x86_64-1.0.2.tar.gz",
+      "install_command": "curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/fongwuyan/RainCough-panel-web/v1.0.2/install.sh | bash",
+      "size_bytes": 4286430,
+      "md5": "7406de7833a31e288cec33df79624451",
+      "sha256": "b52b45487e4f859984b44e8e395f81729b48154cf4f10bb469a2230c3eebd43a"
+    },
+    {
       "version": "1.0.1",
       "tag": "v1.0.1",
       "asset": "raincough-linux-x86_64-1.0.1.tar.gz",
