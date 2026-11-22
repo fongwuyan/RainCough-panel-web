@@ -220,7 +220,21 @@
       "version": "1",
       "description": "搜索",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyword"
+        ]
       },
       "output": {
         "type": "object"
@@ -244,7 +258,15 @@
       "version": "1",
       "description": "漫画详情+章节",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
@@ -256,7 +278,19 @@
       "version": "1",
       "description": "章节图片列表",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          },
+          "cid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid",
+          "cid"
+        ]
       },
       "output": {
         "type": "object"
@@ -292,7 +326,15 @@
       "version": "1",
       "description": "本地库",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          }
+        }
       },
       "output": {
         "type": "object"
@@ -304,7 +346,15 @@
       "version": "1",
       "description": "删除本子",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
@@ -352,7 +402,23 @@
       "version": "1",
       "description": "按需取单张漫画图(base64)",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          },
+          "cid": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid",
+          "cid",
+          "filename"
+        ]
       },
       "output": {
         "type": "object"
@@ -364,7 +430,15 @@
       "version": "1",
       "description": "本子封面(缓存 cache/ 直出)",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
@@ -388,7 +462,15 @@
       "version": "1",
       "description": "批量封面(一次取N个)",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aids": {
+            "type": "array"
+          },
+          "cached_only": {
+            "type": "boolean"
+          }
+        }
       },
       "output": {
         "type": "object"
@@ -400,7 +482,25 @@
       "version": "1",
       "description": "章节图片批量预取(URL化)",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          },
+          "cid": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "aid",
+          "cid"
+        ]
       },
       "output": {
         "type": "object"
@@ -460,7 +560,24 @@
       "version": "1",
       "description": "内置下载器：开始下载（按页并发/断点续传）",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "workers": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
@@ -472,7 +589,15 @@
       "version": "1",
       "description": "内置下载器：单个任务进度",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
@@ -532,7 +657,15 @@
       "version": "1",
       "description": "内置下载器：暂停",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
@@ -544,7 +677,15 @@
       "version": "1",
       "description": "内置下载器：继续",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
@@ -556,7 +697,15 @@
       "version": "1",
       "description": "内置下载器：取消",
       "input": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "aid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "aid"
+        ]
       },
       "output": {
         "type": "object"
