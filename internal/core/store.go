@@ -1,6 +1,8 @@
 package core
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -441,6 +443,105 @@ func orDefault(v, def string) string {
 	return def
 }
 
+// downloadPluginZip 优先通过 GitHub Tree/Blob API 只下载目标插件目录。
+// 这样市场仓库变大后，安装单个插件不再需要下载整仓 zipball。
+func (s *Store) downloadPluginZip(name string, repo Repo, task *TaskStore, tid string) ([]byte, error) {
+	if data, err := s.downloadPluginViaAPI(name, repo, task, tid); err == nil {
+		return data, nil
+	} else if task != nil {
+		task.Update(tid, PhaseDownload, 20, "单插件接口不可用，回退整仓下载...")
+	}
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/zipball/%s", repo.Owner, repo.Repo, repo.Branch)
+	return s.ghDownload(url)
+}
+
+func (s *Store) downloadPluginViaAPI(name string, repo Repo, task *TaskStore, tid string) ([]byte, error) {
+	treePath := fmt.Sprintf("/repos/%s/%s/git/trees/%s?recursive=1", repo.Owner, repo.Repo, repo.Branch)
+	resp, err := s.ghGet(treePath)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("读取仓库目录失败: HTTP %d", resp.StatusCode)
+	}
+	var tree struct {
+		Tree []struct {
+			Path string `json:"path"`
+			Type string `json:"type"`
+			SHA  string `json:"sha"`
+			Size int64  `json:"size"`
+		} `json:"tree"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		return nil, err
+	}
+	if tree.Truncated {
+		return nil, fmt.Errorf("仓库目录过大，GitHub 返回截断结果")
+	}
+	prefix := name + "/"
+	files := make([]struct {
+		Path string
+		SHA  string
+	}, 0, 16)
+	for _, e := range tree.Tree {
+		if e.Type == "blob" && strings.HasPrefix(e.Path, prefix) {
+			files = append(files, struct {
+				Path string
+				SHA  string
+			}{e.Path, e.SHA})
+		}
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("仓库中找不到插件目录: %s", name)
+	}
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for i, f := range files {
+		blobPath := fmt.Sprintf("/repos/%s/%s/git/blobs/%s", repo.Owner, repo.Repo, f.SHA)
+		br, err := s.ghGet(blobPath)
+		if err != nil {
+			return nil, err
+		}
+		var blob struct {
+			Content  string `json:"content"`
+			Encoding string `json:"encoding"`
+		}
+		err = json.NewDecoder(io.LimitReader(br.Body, 64<<20)).Decode(&blob)
+		br.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("读取 %s 失败: %w", f.Path, err)
+		}
+		if blob.Encoding != "" && blob.Encoding != "base64" {
+			return nil, fmt.Errorf("不支持的 blob 编码: %s", blob.Encoding)
+		}
+		raw, err := base64.StdEncoding.DecodeString(blob.Content)
+		if err != nil {
+			return nil, fmt.Errorf("解码 %s 失败: %w", f.Path, err)
+		}
+		w, err := zw.Create("pkg/" + f.Path)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := w.Write(raw); err != nil {
+			return nil, err
+		}
+		if task != nil {
+			pct := 10
+			if len(files) > 0 {
+				pct += (i + 1) * 15 / len(files)
+			}
+			task.Update(tid, PhaseDownload, pct, fmt.Sprintf("下载插件文件 %d/%d", i+1, len(files)))
+		}
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // InstallPlugin 安装插件(异步任务)。
 func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 	if !validPluginName(name) {
@@ -467,12 +568,11 @@ func (s *Store) InstallPlugin(name string, task *TaskStore) (string, error) {
 				task.Finish(tid, false, "", "安装失败", 0)
 			}
 		}()
-		task.Update(tid, PhaseDownload, 10, "拉取插件仓库...")
-		// 下载 zipball
+		task.Update(tid, PhaseDownload, 10, "拉取插件文件...")
+		// 优先按插件目录拉取单个插件的文件。整仓 zipball 在插件仓库变大后会达到
+		// 几十 MB，慢链路下很容易超过 Client.Timeout；单插件 API 下载通常只有几百 KB。
 		repo := s.config.PluginRepo
-		url := fmt.Sprintf("https://api.github.com/repos/%s/%s/zipball/%s",
-			repo.Owner, repo.Repo, repo.Branch)
-		data, err := s.ghDownload(url)
+		data, err := s.downloadPluginZip(name, repo, task, tid)
 		if err != nil {
 			task.Update(tid, PhaseDownload, 0, "下载失败: "+err.Error())
 			return
