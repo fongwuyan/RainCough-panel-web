@@ -55,7 +55,12 @@ async function buildPlugin(name) {
       legalComments: 'none',
     })
     const kb = (fs.statSync(outFile).size / 1024).toFixed(1)
-    console.log(`[ok]   ${name}: ${path.relative(ROOT, outFile)} (${kb} KB${VUE_ESM.includes('.prod.') ? ', vue=prod' : ', vue=dev'})`)
+    // APK 专用入口：Rain Console 直接加载 assets/apk.js，不再回退到通用 panel bundle。
+    // 产物保持自包含 Vue，APK 侧只负责提供 ctx.invoke 宿主。
+    const apkFile = path.join(outDir, 'apk.js')
+    fs.writeFileSync(apkFile, '/* Rain Console APK entry */\n' + fs.readFileSync(outFile, 'utf8'))
+    const apkKb = (fs.statSync(apkFile).size / 1024).toFixed(1)
+    console.log(`[ok]   ${name}: ${path.relative(ROOT, outFile)} (${kb} KB), apk.js (${apkKb} KB${VUE_ESM.includes('.prod.') ? ', vue=prod' : ', vue=dev'})`)
     return true
   } catch (e) {
     console.error(`[fail] ${name}:`, e.message)
