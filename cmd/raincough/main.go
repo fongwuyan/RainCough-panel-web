@@ -461,6 +461,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/store/gate/", s.handleStoreGate) // /unlock  /lock
 	mux.HandleFunc("/api/store/settings", s.handleStoreSettings)
 	mux.HandleFunc("/api/store/ping", s.handleStorePing)
+	mux.HandleFunc("/api/store/github-check", s.handleStoreGitHubCheck)
 	mux.HandleFunc("/api/store/registry", s.handleStoreRegistry)
 	mux.HandleFunc("/api/store/changelog", s.handleStoreChangelog)
 	mux.HandleFunc("/api/store/plugin/install", s.handleStorePluginInstall)

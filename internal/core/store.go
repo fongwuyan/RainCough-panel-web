@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"raincough/internal/pluginx"
@@ -213,6 +215,103 @@ func (s *Store) Ping() (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+// GitHubCheckItem 单项连通性检查结果。
+type GitHubCheckItem struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	OK     bool   `json:"ok"`
+	Status int    `json:"status,omitempty"`
+	MS     int64  `json:"ms"`
+	Error  string `json:"error,omitempty"`
+	Hint   string `json:"hint,omitempty"`
+}
+
+// GitHubCheckResult GitHub 连通性总览。
+type GitHubCheckResult struct {
+	OK        bool              `json:"ok"`
+	Token     bool              `json:"token"`
+	CheckedAt int64             `json:"checked_at"`
+	Items     []GitHubCheckItem `json:"items"`
+}
+
+// CheckGitHub 并行检查 API、raw 清单和面板 Release 三条链路。
+func (s *Store) CheckGitHub() GitHubCheckResult {
+	pluginRepo := s.config.PluginRepo
+	panelRepo := s.config.PanelRepo
+	token := s.Token()
+	items := make([]GitHubCheckItem, 4)
+	var wg sync.WaitGroup
+
+	run := func(i int, name, url string, accept string, withToken bool, okStatus ...int) {
+		defer wg.Done()
+		it := GitHubCheckItem{Name: name, URL: url}
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			it.Error = err.Error()
+			items[i] = it
+			return
+		}
+		if withToken && token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		start := time.Now()
+		resp, err := s.client.Do(req)
+		it.MS = time.Since(start).Milliseconds()
+		if err != nil {
+			it.Error = err.Error()
+			it.Hint = "检查 DNS、代理或出站 HTTPS"
+			items[i] = it
+			return
+		}
+		defer resp.Body.Close()
+		it.Status = resp.StatusCode
+		it.OK = false
+		for _, code := range okStatus {
+			if resp.StatusCode == code {
+				it.OK = true
+				break
+			}
+		}
+		if !it.OK {
+			switch resp.StatusCode {
+			case http.StatusUnauthorized:
+				it.Hint = "Token 无效或已过期"
+			case http.StatusForbidden:
+				if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+					it.Hint = "GitHub API 限流，配置 Token 或稍后再试"
+				} else if token == "" {
+					it.Hint = "匿名访问被拒绝，可能触发限流"
+				} else {
+					it.Hint = "Token 无权限访问该仓库"
+				}
+			case http.StatusNotFound:
+				it.Hint = "仓库、分支或文件不存在"
+			case http.StatusTooManyRequests:
+				it.Hint = "触发 GitHub 限流"
+			default:
+				it.Hint = "HTTP " + fmt.Sprint(resp.StatusCode)
+			}
+		}
+		items[i] = it
+	}
+
+	wg.Add(4)
+	apiOK := []int{200}
+	go run(0, "GitHub API", "https://api.github.com/rate_limit", "application/vnd.github+json", true, apiOK...)
+	go run(1, "插件清单 raw", fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/registry.json", pluginRepo.Owner, pluginRepo.Repo, pluginRepo.Branch), "", false, 200)
+	go run(2, "面板 Release API", fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", panelRepo.Owner, panelRepo.Repo), "application/vnd.github+json", true, 200, 404)
+	go run(3, "codeload 下载源", fmt.Sprintf("https://codeload.github.com/%s/%s/tar.gz/refs/heads/%s", pluginRepo.Owner, pluginRepo.Repo, pluginRepo.Branch), "", false, 200)
+	wg.Wait()
+
+	ok := items[0].OK && items[1].OK
+	return GitHubCheckResult{OK: ok, Token: token != "", CheckedAt: time.Now().Unix(), Items: items}
 }
 
 // Registry 拉取插件注册表(GitHub, 失败时回退本地扫描)。

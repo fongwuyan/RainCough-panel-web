@@ -18,9 +18,10 @@ const ui = useUi()
 const { sidebarHidden, ball, themes } = useUi()
 const {
   theme, setTheme, cfg, loading, saving, pinging, pingState, pingMsg,
+  gchecking, gcheck, gcheckErr,
   gatePW, gateLocked, gateEnabled, gateBusy,
   panel, sys, status, statusOk, repoSummary,
-  unlockGate, lockGate, saveRepo, ping, clearDoneTasks,
+  unlockGate, lockGate, saveRepo, ping, checkGitHub, clearDoneTasks,
 } = st
 
 const active = ref('appearance')
@@ -446,11 +447,22 @@ const NAV_GROUPS = [
           <div class="st-actions">
             <button class="btn btn-primary" :disabled="saving" @click="saveRepo">{{ saving ? '保存中…' : '保存配置' }}</button>
             <button class="btn" :disabled="pinging" @click="ping">{{ pinging ? '测试中…' : '测试连接' }}</button>
+            <button class="btn" :disabled="gchecking" @click="checkGitHub">{{ gchecking ? '检查中…' : 'GitHub 连通性检查' }}</button>
             <span v-if="pingMsg" class="st-ping" :class="pingState">{{ pingMsg }}</span>
           </div>
+          <p v-if="gcheckErr" class="st-ping fail">{{ gcheckErr }}</p>
+          <div v-if="gcheck" class="gh-check">
+            <div class="gh-check-hd" :class="gcheck.ok ? 'ok' : 'fail'">
+              {{ gcheck.ok ? 'GitHub 连通性正常' : 'GitHub 连通性异常' }}
+              <span class="faint">Token：{{ gcheck.token ? '已配置' : '未配置' }}</span>
+            </div>
+            <div v-for="it in gcheck.items" :key="it.name" class="gh-check-row" :class="it.ok ? 'ok' : 'fail'">
+              <span class="gh-check-name">{{ it.name }}</span>
+              <span class="gh-check-meta">{{ it.status || '—' }} · {{ it.ms }}ms</span>
+              <span class="gh-check-err">{{ it.error || it.hint || 'OK' }}</span>
+            </div>
+          </div>
         </div>
-
-        <!-- 存储 -->
         <div v-else-if="active === 'storage'" class="st-group">
           <div class="st-group-title">多盘存储策略</div>
           <p class="st-hint">
@@ -721,6 +733,16 @@ const NAV_GROUPS = [
 .st-ping { font-size: 11px; }
 .st-ping.ok { color: var(--success); }
 .st-ping.fail { color: var(--danger); }
+.gh-check { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.gh-check-hd { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; font-size: 12px; background: var(--surface-2); }
+.gh-check-hd.ok { color: var(--success); }
+.gh-check-hd.fail { color: var(--danger); }
+.gh-check-row { display: grid; grid-template-columns: 140px 90px 1fr; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--border); font-size: 11px; align-items: baseline; }
+.gh-check-name { color: var(--text); }
+.gh-check-meta { color: var(--text-faint); font-family: var(--font-mono); }
+.gh-check-err { color: var(--text-muted); word-break: break-word; }
+.gh-check-row.ok .gh-check-err { color: var(--success); }
+.gh-check-row.fail .gh-check-err { color: var(--danger); }
 
 .st-rows { border: 1px solid var(--border); }
 .st-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }

@@ -279,6 +279,7 @@ export const api = {
   storeSettings: () => req('GET', '/api/store/settings'),
   storeSaveSettings: (cfg) => req('POST', '/api/store/settings', cfg),
   storePing: () => req('POST', '/api/store/ping', {}),
+  githubCheck: () => req('GET', '/api/store/github-check'),
   // ---- 插件市场 ----
   // 插件库上锁: 拉清单/装插件/更新都会 403 + need_password
   storeGateStatus: async () => {

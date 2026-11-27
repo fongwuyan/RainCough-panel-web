@@ -131,6 +131,19 @@ func (s *server) handleStorePing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
+// handleStoreGitHubCheck GET /api/store/github-check
+func (s *server) handleStoreGitHubCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+	if globalStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "插件市场未初始化"})
+		return
+	}
+	writeJSON(w, http.StatusOK, globalStore.CheckGitHub())
+}
+
 // handleStoreRegistry GET /api/store/registry
 // 附带 source(github|local) 与 has_token: local 说明仓库清单拉取失败已回退到
 // 本机扫描, 前端据此明确提示"当前仅显示已装插件、无法安装新插件"。

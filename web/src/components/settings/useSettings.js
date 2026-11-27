@@ -12,6 +12,9 @@ export function useSettings() {
   const pinging = ref(false)
   const pingState = ref('') // '' | ok | fail
   const pingMsg = ref('')
+  const gchecking = ref(false)
+  const gcheck = ref(null)
+  const gcheckErr = ref('')
 
   // 插件库密钥(替换原「访问令牌」): 口令哈希写死在二进制里, 不需要保存, 只做解锁验证
   const gatePW = ref('')
@@ -153,6 +156,19 @@ export function useSettings() {
     }
   }
 
+  async function checkGitHub() {
+    gchecking.value = true
+    gcheckErr.value = ''
+    gcheck.value = null
+    try {
+      gcheck.value = await api.githubCheck()
+    } catch (e) {
+      gcheckErr.value = e.message || String(e)
+    } finally {
+      gchecking.value = false
+    }
+  }
+
   async function clearDoneTasks() {
     if (!confirm('清理所有已完成/失败的任务记录？')) return
     try {
@@ -168,9 +184,10 @@ export function useSettings() {
   return {
     theme, setTheme,
     cfg, loading, saving, pinging, pingState, pingMsg,
+    gchecking, gcheck, gcheckErr,
     gatePW, gateLocked, gateEnabled, gateBusy,
     panel, sys, status, statusOk, repoSummary,
-    flash, load, loadGate, unlockGate, lockGate, saveRepo, ping, clearDoneTasks,
+    flash, load, loadGate, unlockGate, lockGate, saveRepo, ping, checkGitHub, clearDoneTasks,
   }
 }
 
