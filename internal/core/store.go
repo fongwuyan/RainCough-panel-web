@@ -241,15 +241,15 @@ func (s *Store) CheckGitHub() GitHubCheckResult {
 	pluginRepo := s.config.PluginRepo
 	panelRepo := s.config.PanelRepo
 	token := s.Token()
-	items := make([]GitHubCheckItem, 4)
+	items := make([]GitHubCheckItem, 5)
 	var wg sync.WaitGroup
 
-	run := func(i int, name, url string, accept string, withToken bool, okStatus ...int) {
+	run := func(i int, name, method, url string, accept string, withToken bool, okStatus ...int) {
 		defer wg.Done()
 		it := GitHubCheckItem{Name: name, URL: url}
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, method, url, nil)
 		if err != nil {
 			it.Error = err.Error()
 			items[i] = it
@@ -302,15 +302,19 @@ func (s *Store) CheckGitHub() GitHubCheckResult {
 		items[i] = it
 	}
 
-	wg.Add(4)
+	wg.Add(5)
 	apiOK := []int{200}
-	go run(0, "GitHub API", "https://api.github.com/rate_limit", "application/vnd.github+json", true, apiOK...)
-	go run(1, "插件清单 raw", fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/registry.json", pluginRepo.Owner, pluginRepo.Repo, pluginRepo.Branch), "", false, 200)
-	go run(2, "面板 Release API", fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", panelRepo.Owner, panelRepo.Repo), "application/vnd.github+json", true, 200, 404)
-	go run(3, "codeload 下载源", fmt.Sprintf("https://codeload.github.com/%s/%s/tar.gz/refs/heads/%s", pluginRepo.Owner, pluginRepo.Repo, pluginRepo.Branch), "", false, 200)
+	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/registry.json", pluginRepo.Owner, pluginRepo.Repo, pluginRepo.Branch)
+	mirrorURL := "https://gh-proxy.com/" + rawURL
+	codeloadURL := fmt.Sprintf("https://codeload.github.com/%s/%s/tar.gz/refs/heads/%s", pluginRepo.Owner, pluginRepo.Repo, pluginRepo.Branch)
+	go run(0, "GitHub API", http.MethodGet, "https://api.github.com/rate_limit", "application/vnd.github+json", true, apiOK...)
+	go run(1, "插件清单 raw", http.MethodGet, rawURL, "", false, 200)
+	go run(2, "插件清单镜像", http.MethodGet, mirrorURL, "", false, 200)
+	go run(3, "面板 Release API", http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", panelRepo.Owner, panelRepo.Repo), "application/vnd.github+json", true, 200, 404)
+	go run(4, "codeload 下载源", http.MethodHead, codeloadURL, "", false, 200, 302)
 	wg.Wait()
 
-	ok := items[0].OK && items[1].OK
+	ok := items[0].OK && (items[1].OK || items[2].OK) && items[4].OK
 	return GitHubCheckResult{OK: ok, Token: token != "", CheckedAt: time.Now().Unix(), Items: items}
 }
 
